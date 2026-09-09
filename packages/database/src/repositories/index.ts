@@ -7,3 +7,5 @@
 export * from './job.repository';
 export * from './worker.repository';
 export * from './delivery.repository';
+export * from './dispatch.repository';
+

@@ -12,3 +12,4 @@ export * from './job-attempts';
 export * from './job-events';
 export * from './idempotency-keys';
 export * from './dead-letter-jobs';
+export * from './job-deliveries';

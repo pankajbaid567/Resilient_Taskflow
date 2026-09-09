@@ -10,6 +10,8 @@ import {
   validateTransition,
 } from '../state-machine';
 
+import { insertPendingDelivery } from './dispatch.repository';
+
 /**
  * Job Repository
  *
@@ -21,7 +23,14 @@ import {
  */
 export async function createJob(data: NewJob): Promise<Job> {
   return db.transaction(async (tx) => {
-    const [job] = await tx.insert(jobs).values(data).returning();
+    // For immediate jobs, start in QUEUED so the dispatcher can publish
+    // without a separate status update step.
+    const isDue = data.scheduledAt ? data.scheduledAt <= new Date() : true;
+    const effectiveData: NewJob = isDue
+      ? { ...data, status: 'QUEUED' as JobStatus }
+      : data;
+
+    const [job] = await tx.insert(jobs).values(effectiveData).returning();
 
     if (!job) {
       throw new Error('Failed to create job');
@@ -35,6 +44,25 @@ export async function createJob(data: NewJob): Promise<Job> {
       userId: job.userId,
       metadata: { version: job.version },
     });
+
+    // Atomically create a delivery intent if the job is immediately due.
+    // The queue name is encoded from data.metadata.queue (set by API/caller).
+    if (isDue) {
+      const queueName =
+        typeof (data.metadata as Record<string, unknown> | null)?.queue === 'string'
+          ? (data.metadata as Record<string, unknown>).queue as string
+          : 'default';
+      await insertPendingDelivery(tx, job.id, queueName, 1);
+
+      await tx.insert(schema.jobEvents).values({
+        jobId: job.id,
+        eventType: 'queued',
+        fromStatus: 'CREATED' as JobStatus,
+        toStatus: 'QUEUED' as JobStatus,
+        userId: job.userId,
+        metadata: { version: job.version + 1, source: 'atomic_create' },
+      });
+    }
 
     return job;
   });
@@ -86,6 +114,67 @@ export async function getJobsReadyToQueue(limit: number = 100): Promise<Job[]> {
     .from(jobs)
     .where(and(eq(jobs.status, 'CREATED'), lt(jobs.scheduledAt, new Date())))
     .limit(limit);
+}
+
+/**
+ * Atomically promote a CREATED job to QUEUED and insert a PENDING delivery
+ * row so the Dispatcher will publish it to Redis.
+ *
+ * This replaces the non-atomic pattern of calling enqueueJob (XADD) and
+ * then updateJobStatus separately. The Scheduler calls this when a delayed
+ * job's scheduledAt becomes due.
+ */
+export async function promoteJobToQueued(
+  jobId: string,
+  queueName: string
+): Promise<Job> {
+  return db.transaction(async (tx) => {
+    const [lockedJob] = await tx
+      .select()
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(jobs.status, 'CREATED'),
+          sql`${jobs.scheduledAt} <= clock_timestamp()`
+        )
+      )
+      .limit(1)
+      .for('update');
+
+    if (!lockedJob) {
+      throw new Error(
+        `Job ${jobId} cannot be promoted: not found, not CREATED, or not yet due`
+      );
+    }
+
+    const [promoted] = await tx
+      .update(jobs)
+      .set({
+        status: JobStatus.QUEUED,
+        version: sql`${jobs.version} + 1`,
+      })
+      .where(and(eq(jobs.id, jobId), eq(jobs.version, lockedJob.version)))
+      .returning();
+
+    if (!promoted) {
+      throw new Error(`Concurrent modification prevented promotion of job ${jobId}`);
+    }
+
+    await tx.insert(schema.jobEvents).values({
+      jobId,
+      eventType: 'queued',
+      fromStatus: JobStatus.CREATED,
+      toStatus: JobStatus.QUEUED,
+      userId: promoted.userId,
+      metadata: { version: promoted.version, source: 'scheduler' },
+    });
+
+    // Create delivery row in the same transaction so QUEUED ↔ PENDING are atomic
+    await insertPendingDelivery(tx, jobId, queueName, 1);
+
+    return promoted;
+  });
 }
 
 /**
@@ -728,8 +817,15 @@ export async function createJobWithIdempotency(
       return existingJob;
     }
 
+    // For immediate jobs, start in QUEUED so the dispatcher publishes
+    // without a separate status update step.
+    const isDue = jobData.scheduledAt ? jobData.scheduledAt <= new Date() : true;
+    const effectiveData: NewJob = isDue
+      ? { ...jobData, status: 'QUEUED' as JobStatus }
+      : jobData;
+
     // Create new job
-    const [job] = await tx.insert(jobs).values(jobData).returning();
+    const [job] = await tx.insert(jobs).values(effectiveData).returning();
 
     if (!job) {
       throw new Error('Failed to create job');
@@ -743,6 +839,24 @@ export async function createJobWithIdempotency(
       userId: job.userId,
       metadata: { version: job.version },
     });
+
+    // Atomically create a delivery intent row if the job is immediately due.
+    if (isDue) {
+      const queueName =
+        typeof (jobData.metadata as Record<string, unknown> | null)?.queue === 'string'
+          ? (jobData.metadata as Record<string, unknown>).queue as string
+          : 'default';
+      await insertPendingDelivery(tx, job.id, queueName, 1);
+
+      await tx.insert(schema.jobEvents).values({
+        jobId: job.id,
+        eventType: 'queued',
+        fromStatus: 'CREATED' as JobStatus,
+        toStatus: 'QUEUED' as JobStatus,
+        userId: job.userId,
+        metadata: { version: job.version + 1, source: 'atomic_create' },
+      });
+    }
 
     // Create idempotency key
     const expiresAt = new Date(Date.now() + idempotencyExpirationMs);

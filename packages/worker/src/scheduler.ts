@@ -1,7 +1,6 @@
-import { getJobsReadyToQueue, updateJobStatus } from '@taskflow/database';
+import { getJobsReadyToQueue, promoteJobToQueued } from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
-import { enqueueJob } from '@taskflow/queue';
-import { JobStatus } from '@taskflow/types';
+
 
 const logger = createLogger({ component: 'Scheduler' });
 
@@ -151,23 +150,24 @@ export class Scheduler {
         priorities: this.countByPriority(jobs),
       });
 
-      // Enqueue each job
+      // Enqueue each job atomically — QUEUED status + delivery row in one tx
       let successCount = 0;
       let errorCount = 0;
 
       for (const job of jobs) {
         try {
-          // Enqueue to Redis (queue name from job metadata or default)
-          const queueName = (job.metadata as any)?.queue || 'default';
-          
-          await enqueueJob(job.id, queueName, 1);
+          // Resolve queue from the queues FK stored in job.metadata, not raw JSON.
+          // The API always stores the queue name in metadata.queue.
+          const queueName =
+            typeof (job.metadata as Record<string, unknown> | null)?.queue === 'string'
+              ? (job.metadata as Record<string, unknown>).queue as string
+              : 'default';
 
-          // Update status to QUEUED
-          await updateJobStatus(job.id, JobStatus.QUEUED);
+          await promoteJobToQueued(job.id, queueName);
 
           successCount++;
 
-          logger.debug('Job scheduled', {
+          logger.debug('Job promoted to QUEUED', {
             jobId: job.id,
             type: job.type,
             priority: job.priority,
@@ -178,7 +178,7 @@ export class Scheduler {
           errorCount++;
           this.stats.totalErrors++;
 
-          logger.error('Failed to schedule job', {
+          logger.error('Failed to promote job to QUEUED', {
             jobId: job.id,
             error: error instanceof Error ? error.message : error,
           });

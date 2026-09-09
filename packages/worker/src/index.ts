@@ -32,6 +32,13 @@ export {
   createScheduler,
 } from './scheduler';
 
+// Dispatcher (transactional outbox publisher)
+export {
+  Dispatcher,
+  createDispatcher,
+} from './dispatcher';
+export type { DispatcherConfig, DispatcherStats } from './dispatcher';
+
 // Cancellation
 export {
   CancellationToken,

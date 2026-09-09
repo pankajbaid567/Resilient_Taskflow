@@ -6,10 +6,8 @@ import {
   getJobById,
   getJobsByUserId,
   getQueueByName,
-  updateJobStatus,
 } from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
-import { enqueueJob } from '@taskflow/queue';
 import {
   JobResponse,
   JobPriority,
@@ -18,6 +16,7 @@ import {
   SubmitJobRequest,
 } from '@taskflow/types';
 import { FastifyInstance } from 'fastify';
+
 
 const logger = createLogger({ component: 'JobRoutes' });
 
@@ -137,21 +136,13 @@ export function jobRoutes(app: FastifyInstance): Promise<void> {
           version: 1,
         });
 
-        logger.info('Job created', { jobId: job.id, type, queue });
+      logger.info('Job created', { jobId: job.id, type, queue });
       }
 
-      // Enqueue to Redis if scheduled for now
-      if (new Date(job.scheduledAt) <= new Date()) {
-        try {
-          await enqueueJob(job.id, queue, 1);
-          job = await updateJobStatus(job.id, JobStatus.QUEUED);
-
-          logger.info('Job enqueued', { jobId: job.id, queue });
-        } catch (error) {
-          logger.error('Failed to enqueue job', { jobId: job.id, error });
-          // Job remains in CREATED state, sweeper will recover
-        }
-      }
+      // The Dispatcher (started in the worker app) publishes to Redis from
+      // the job_deliveries outbox row created atomically above. The API does
+      // NOT call enqueueJob or updateJobStatus after createJob — both
+      // operations are now part of the same transaction.
 
       // Build response
       const response: JobResponse = {

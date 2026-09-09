@@ -6,8 +6,10 @@ import { closeRedisConnection, initRedis } from '@taskflow/queue';
 import {
   createHandlerRegistry,
   createWorker,
+  createDispatcher,
   type Worker,
   type WorkerConfig,
+  type Dispatcher,
 } from '@taskflow/worker';
 
 import { registerHandlers } from './handlers';
@@ -118,13 +120,25 @@ async function main(): Promise<void> {
 
   const runtimeConfig = createRuntimeConfig();
   const worker: Worker = createWorker(runtimeConfig, handlers);
+
+  // The Dispatcher claims rows from job_deliveries and publishes to Redis.
+  // It runs independently of the Worker so Redis failures during dispatch
+  // do not affect in-flight job processing.
+  const dispatcher: Dispatcher = createDispatcher({
+    // enableStaleRepublish: true  — uncomment if Redis AOF/RDB is not configured
+  });
+
   let shutdownPromise: Promise<void> | undefined;
 
   const shutdown = (signal: string): Promise<void> => {
     if (!shutdownPromise) {
       shutdownPromise = (async () => {
         logger.info('Stopping worker entry point', { signal });
+        // Stop the worker first (drains in-flight jobs)
         await worker.stop();
+        // Stop the dispatcher after the worker so any jobs that just
+        // completed and created delivery rows still get published.
+        await dispatcher.stop();
         await closeInfrastructure();
         logger.info('Worker entry point stopped');
       })();
@@ -145,6 +159,7 @@ async function main(): Promise<void> {
   });
 
   await worker.start();
+  dispatcher.start();
   logger.info('WORKER_READY', {
     workerId: runtimeConfig.workerId,
     handlers: handlers.getRegisteredTypes(),

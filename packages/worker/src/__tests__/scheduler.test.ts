@@ -1,15 +1,12 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Scheduler, SchedulerConfig } from '../scheduler';
 
-// Mock dependencies
+// Mock dependencies — scheduler now calls promoteJobToQueued atomically
+// instead of enqueueJob + updateJobStatus separately.
 vi.mock('@taskflow/database', () => ({
   getJobsReadyToQueue: vi.fn(),
-  updateJobStatus: vi.fn(),
-}));
-
-vi.mock('@taskflow/queue', () => ({
-  enqueueJob: vi.fn(),
+  promoteJobToQueued: vi.fn(),
 }));
 
 vi.mock('@taskflow/logger', () => ({
@@ -21,8 +18,7 @@ vi.mock('@taskflow/logger', () => ({
   }),
 }));
 
-import { getJobsReadyToQueue, updateJobStatus } from '@taskflow/database';
-import { enqueueJob } from '@taskflow/queue';
+import { getJobsReadyToQueue, promoteJobToQueued } from '@taskflow/database';
 
 describe('Scheduler', () => {
   beforeEach(() => {
@@ -61,7 +57,6 @@ describe('Scheduler', () => {
       const scheduler = new Scheduler({ enabled: false });
       scheduler.start();
 
-      // Scheduler should not run
       expect(getJobsReadyToQueue).not.toHaveBeenCalled();
     });
 
@@ -104,7 +99,7 @@ describe('Scheduler', () => {
   });
 
   describe('runSchedulingCycle', () => {
-    it('should process jobs ready to queue', async () => {
+    it('should process jobs ready to queue via promoteJobToQueued', async () => {
       const jobs = [
         {
           id: 'job-1',
@@ -123,8 +118,7 @@ describe('Scheduler', () => {
       ];
 
       vi.mocked(getJobsReadyToQueue).mockResolvedValue(jobs as any);
-      vi.mocked(enqueueJob).mockResolvedValue('message-id-1' as any);
-      vi.mocked(updateJobStatus).mockResolvedValue(undefined as any);
+      vi.mocked(promoteJobToQueued).mockResolvedValue({ id: 'job-1' } as any);
 
       const scheduler = new Scheduler({
         intervalMs: 5000,
@@ -137,10 +131,10 @@ describe('Scheduler', () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       expect(getJobsReadyToQueue).toHaveBeenCalledWith(100);
-      expect(enqueueJob).toHaveBeenCalledTimes(2);
-      expect(enqueueJob).toHaveBeenCalledWith('job-1', 'default', 1);
-      expect(enqueueJob).toHaveBeenCalledWith('job-2', 'email', 1);
-      expect(updateJobStatus).toHaveBeenCalledTimes(2);
+      // promoteJobToQueued called once per job, with correct queue names
+      expect(promoteJobToQueued).toHaveBeenCalledTimes(2);
+      expect(promoteJobToQueued).toHaveBeenCalledWith('job-1', 'default');
+      expect(promoteJobToQueued).toHaveBeenCalledWith('job-2', 'email');
 
       const stats = scheduler.getStats();
       expect(stats.totalRuns).toBeGreaterThan(0);
@@ -161,15 +155,14 @@ describe('Scheduler', () => {
       ];
 
       vi.mocked(getJobsReadyToQueue).mockResolvedValue(jobs as any);
-      vi.mocked(enqueueJob).mockResolvedValue('message-id' as any);
-      vi.mocked(updateJobStatus).mockResolvedValue(undefined as any);
+      vi.mocked(promoteJobToQueued).mockResolvedValue({ id: 'job-1' } as any);
 
       const scheduler = new Scheduler({ intervalMs: 5000 });
       scheduler.start();
 
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      expect(enqueueJob).toHaveBeenCalledWith('job-1', 'default', 1);
+      expect(promoteJobToQueued).toHaveBeenCalledWith('job-1', 'default');
 
       scheduler.stop();
     });
@@ -183,7 +176,7 @@ describe('Scheduler', () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       expect(getJobsReadyToQueue).toHaveBeenCalled();
-      expect(enqueueJob).not.toHaveBeenCalled();
+      expect(promoteJobToQueued).not.toHaveBeenCalled();
 
       const stats = scheduler.getStats();
       expect(stats.totalJobsScheduled).toBe(0);
@@ -191,7 +184,7 @@ describe('Scheduler', () => {
       scheduler.stop();
     });
 
-    it('should handle enqueue errors', async () => {
+    it('should handle promote errors, continue with remaining jobs', async () => {
       const jobs = [
         {
           id: 'job-1',
@@ -210,10 +203,9 @@ describe('Scheduler', () => {
       ];
 
       vi.mocked(getJobsReadyToQueue).mockResolvedValue(jobs as any);
-      vi.mocked(enqueueJob)
-        .mockRejectedValueOnce(new Error('Redis error'))
-        .mockResolvedValueOnce('message-id' as any);
-      vi.mocked(updateJobStatus).mockResolvedValue(undefined as any);
+      vi.mocked(promoteJobToQueued)
+        .mockRejectedValueOnce(new Error('DB error'))
+        .mockResolvedValueOnce({ id: 'job-2' } as any);
 
       const scheduler = new Scheduler({ intervalMs: 5000 });
       scheduler.start();
@@ -262,8 +254,7 @@ describe('Scheduler', () => {
           })
       );
 
-      vi.mocked(enqueueJob).mockResolvedValue('message-id' as any);
-      vi.mocked(updateJobStatus).mockResolvedValue(undefined as any);
+      vi.mocked(promoteJobToQueued).mockResolvedValue({ id: 'job-1' } as any);
 
       vi.useFakeTimers();
 
@@ -306,8 +297,7 @@ describe('Scheduler', () => {
       ];
 
       vi.mocked(getJobsReadyToQueue).mockResolvedValue(jobs as any);
-      vi.mocked(enqueueJob).mockResolvedValue('message-id' as any);
-      vi.mocked(updateJobStatus).mockResolvedValue(undefined as any);
+      vi.mocked(promoteJobToQueued).mockResolvedValue({ id: 'job-1' } as any);
 
       const scheduler = new Scheduler({ intervalMs: 5000 });
       scheduler.start();
