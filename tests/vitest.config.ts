@@ -5,7 +5,20 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    setupFiles: ['./setup.ts'],
+    exclude: ['**/node_modules/**', '**/dist/**', 'load/**'],
+    env: {
+      NODE_ENV: process.env.NODE_ENV ?? 'test',
+      DATABASE_URL:
+        process.env.DATABASE_URL ??
+        'postgresql://taskflow_test:taskflow_test@127.0.0.1:5432/taskflow_test',
+      REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
+      JWT_SECRET:
+        process.env.JWT_SECRET ??
+        'taskflow-vitest-secret-at-least-32-characters',
+      API_KEY_HASH_SALT:
+        process.env.API_KEY_HASH_SALT ?? 'taskflow-vitest-api-key-salt',
+      LOG_LEVEL: process.env.LOG_LEVEL ?? 'error',
+    },
     testTimeout: 30000,
     hookTimeout: 30000,
     teardownTimeout: 10000,

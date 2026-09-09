@@ -21,12 +21,16 @@ TaskFlow is a **distributed task queue system** that allows applications to subm
 - 🔍 **Portfolio Differentiator**: Shows ability to build systems similar to Celery, BullMQ, Sidekiq, AWS SQS
 
 **This is NOT production-ready.** See [Known Issues](#known-issues) for P0 blockers.
+The supported and deferred monorepo workspaces are listed in
+[Workspace support scope](docs/workspace-scope.md). Kafka, cache, and dashboard
+workspaces are not part of the supported job-delivery path.
 
 ---
 
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Workspace support scope](docs/workspace-scope.md)
 - [Architecture](#architecture)
 - [Core Guarantees](#core-guarantees)
 - [Job Lifecycle](#job-lifecycle)

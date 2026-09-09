@@ -13,17 +13,17 @@ import {
   it,
 } from 'vitest';
 
-import { closeConnection } from '../../packages/database/src';
+import { closeConnection } from '@taskflow/database';
 import {
   closeRedisConnection,
   getStreamKey,
   WORKER_CONSUMER_GROUP,
-} from '../../packages/queue/src';
+} from '@taskflow/queue';
 import {
   JobStatus,
   REDIS_JOB_MESSAGE_FIELD,
   REDIS_JOB_MESSAGE_VERSION,
-} from '../../packages/types/src';
+} from '@taskflow/types';
 
 const root = path.resolve(__dirname, '../..');
 const composeFile = path.join(__dirname, 'worker-runtime.compose.yml');
@@ -397,8 +397,11 @@ beforeAll(async () => {
      VALUES ($1, 'default', 'Default')`,
     [queueId]
   );
-  const { createApp } = await import('../../apps/api/src/app');
-  app = (await createApp()) as ApiTestApp;
+  const apiAppPath = path.join(root, 'apps/api/src/app.ts');
+  const apiModule = (await import(apiAppPath)) as {
+    createApp(): Promise<ApiTestApp>;
+  };
+  app = await apiModule.createApp();
 }, 60_000);
 
 beforeEach(async () => {
@@ -433,11 +436,12 @@ afterAll(async () => {
 }, 30_000);
 
 describe.sequential('authoritative worker delivery', () => {
-  it('takes an API-created job through the shared envelope to durable SUCCEEDED before XACK', async () => {
-    const worker = startWorker({
-      TASKFLOW_TEST_AFTER_COMMIT_DELAY_MS: '1500',
-    });
-    await waitForWorkerReady(worker);
+  describe('durable lifecycle', () => {
+    it('takes an API-created job through the shared envelope to durable SUCCEEDED before XACK', async () => {
+      const worker = startWorker({
+        TASKFLOW_TEST_AFTER_COMMIT_DELAY_MS: '1500',
+      });
+      await waitForWorkerReady(worker);
 
     const jobId = await submitJob({
       type: 'process-data',
@@ -488,10 +492,12 @@ describe.sequential('authoritative worker delivery', () => {
       Object.values(JobStatus)
     );
 
-    await waitForPendingCount(0);
-  }, 30_000);
+      await waitForPendingCount(0);
+    }, 30_000);
+  });
 
-  it('recovers a pending execution after SIGKILL with duplicate execution but one idempotent effect', async () => {
+  describe('failure injection', () => {
+    it('recovers a pending execution after SIGKILL with duplicate execution but one idempotent effect', async () => {
     const firstWorker = startWorker({ WORKER_LEASE_DURATION_MS: '2000' });
     await waitForWorkerReady(firstWorker);
     const jobId = await submitJob({
@@ -549,7 +555,7 @@ describe.sequential('authoritative worker delivery', () => {
       JobStatus.FAILED,
       JobStatus.SUCCEEDED,
     ]);
-  }, 30_000);
+    }, 30_000);
 
   it('leaves a delivery pending during transient lease-database failure and later completes it', async () => {
     const worker = startWorker({
@@ -590,7 +596,7 @@ describe.sequential('authoritative worker delivery', () => {
       attempts: 1,
       deadLetters: 0,
     });
-  }, 40_000);
+    }, 40_000);
 
   it('recognizes a result committed before crash and replacement-ACKs without rerunning the handler', async () => {
     const crashingWorker = startWorker({
@@ -621,7 +627,7 @@ describe.sequential('authoritative worker delivery', () => {
       attempts: 1,
       deadLetters: 0,
     });
-  }, 30_000);
+    }, 30_000);
 
   it('derives exponential retries from execution and dead-letters only after exhaustion', async () => {
     const worker = startWorker();
@@ -697,5 +703,6 @@ describe.sequential('authoritative worker delivery', () => {
       600,
       null,
     ]);
-  }, 30_000);
+    }, 30_000);
+  });
 });

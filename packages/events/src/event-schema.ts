@@ -1,4 +1,4 @@
-import { JobPriority, JobStatus } from '@taskflow/types';
+import { JobPriority } from '@taskflow/types';
 
 /**
  * Job Event Types

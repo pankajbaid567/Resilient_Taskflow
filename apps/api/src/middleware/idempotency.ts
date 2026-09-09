@@ -1,9 +1,10 @@
 import crypto from 'crypto';
-import { FastifyReply, FastifyRequest } from 'fastify';
+
 
 import { getJobByIdempotencyKey } from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
 import { JobPriority, JobResponse, JobStatus } from '@taskflow/types';
+import { FastifyReply, FastifyRequest } from 'fastify';
 
 const logger = createLogger({ component: 'IdempotencyMiddleware' });
 
@@ -106,8 +107,8 @@ export async function checkIdempotency(
       };
 
       // Set Idempotency-Key header in response
-      reply.header('Idempotency-Key', request.idempotencyKey);
-      reply.header('X-Idempotent-Replay', 'true');
+      void reply.header('Idempotency-Key', request.idempotencyKey);
+      void reply.header('X-Idempotent-Replay', 'true');
 
       return reply.status(200).send(response);
     }
@@ -176,9 +177,9 @@ export function setIdempotencyHeaders(
   idempotencyKey: string,
   isReplay: boolean = false
 ): void {
-  reply.header('Idempotency-Key', idempotencyKey);
+  void reply.header('Idempotency-Key', idempotencyKey);
 
   if (isReplay) {
-    reply.header('X-Idempotent-Replay', 'true');
+    void reply.header('X-Idempotent-Replay', 'true');
   }
 }

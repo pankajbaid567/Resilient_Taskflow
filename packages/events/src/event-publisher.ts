@@ -1,16 +1,15 @@
-import { Producer } from 'kafkajs';
 import { randomUUID } from 'crypto';
 
 import { createLogger } from '@taskflow/logger';
+import { Producer } from 'kafkajs';
 
-import { getKafkaClient } from './kafka-client';
 import {
   JobEvent,
   EventEnvelope,
   KAFKA_TOPICS,
-  KafkaMessageHeaders,
   JobEventType,
 } from './event-schema';
+import { getKafkaClient } from './kafka-client';
 
 const logger = createLogger({ component: 'EventPublisher' });
 
@@ -167,8 +166,10 @@ export class EventPublisher {
     } else if (!this.batchTimer) {
       // Start batch timer
       this.batchTimer = setTimeout(() => {
-        this.flushBatch().catch((error) => {
-          logger.error('Failed to flush batch', { error });
+        void this.flushBatch().catch((error: unknown) => {
+          logger.error('Failed to flush batch', {
+            error: error instanceof Error ? error.message : String(error),
+          });
         });
       }, this.config.batchTimeoutMs);
     }
@@ -319,8 +320,10 @@ export function getEventPublisher(
  */
 export function resetEventPublisher(): void {
   if (globalPublisher) {
-    globalPublisher.shutdown().catch((error) => {
-      logger.error('Error shutting down event publisher', { error });
+    void globalPublisher.shutdown().catch((error: unknown) => {
+      logger.error('Error shutting down event publisher', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
     globalPublisher = null;
   }

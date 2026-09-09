@@ -1,9 +1,8 @@
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import Fastify, { FastifyInstance } from 'fastify';
-
 import { env } from '@taskflow/config';
 import { logger } from '@taskflow/logger';
+import Fastify, { FastifyInstance } from 'fastify';
 
 import { authenticate } from './middleware/auth';
 import { errorHandler } from './middleware/error-handler';
@@ -106,7 +105,7 @@ export async function createApp(): Promise<FastifyInstance> {
 
   // 404 handler
   app.setNotFoundHandler((request, reply) => {
-    reply.status(404).send({
+    return reply.status(404).send({
       error: 'Not Found',
       message: `Route ${request.method}:${request.url} not found`,
       statusCode: 404,

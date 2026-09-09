@@ -128,13 +128,13 @@ function validateEmailPayload(payload: Record<string, unknown>): EmailPayload {
  *
  * In production: Check database or cache
  */
-async function checkIfEmailSent(_jobId: string): Promise<boolean> {
+function checkIfEmailSent(_jobId: string): Promise<boolean> {
   // TODO: Implement idempotency check
   // Example:
   // const record = await redis.get(`email:sent:${jobId}`);
   // return !!record;
 
-  return false;
+  return Promise.resolve(false);
 }
 
 /**
@@ -171,10 +171,11 @@ async function sendEmail(
 /**
  * Mark email as sent (idempotency)
  */
-async function markEmailAsSent(jobId: string): Promise<void> {
+function markEmailAsSent(jobId: string): Promise<void> {
   // TODO: Implement idempotency tracking
   // Example:
   // await redis.setex(`email:sent:${jobId}`, 86400, '1'); // 24h TTL
 
   logger.debug('Email marked as sent', { jobId });
+  return Promise.resolve();
 }

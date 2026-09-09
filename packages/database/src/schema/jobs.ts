@@ -1,3 +1,4 @@
+import { JOB_STATUS_VALUES, JobStatus } from '@taskflow/types';
 import {
   index,
   integer,
@@ -9,7 +10,6 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 
-import { JOB_STATUS_VALUES, JobStatus } from '@taskflow/types';
 
 import { queues } from './queues';
 import { users } from './users';

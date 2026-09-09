@@ -2,6 +2,10 @@
  * Performance profiling and optimization utilities
  */
 
+import { profiler } from './profiler.js';
+import { queryAnalyzer } from './query-analyzer.js';
+import { redisAnalyzer } from './redis-analyzer.js';
+
 export { Profiler, profiler, type ProfileResult, type ProfileStats } from './profiler.js';
 export {
   QueryAnalyzer,

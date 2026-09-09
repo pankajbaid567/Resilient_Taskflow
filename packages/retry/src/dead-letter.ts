@@ -42,7 +42,7 @@ export interface DeadLetterDecision {
  * Determine if job should be moved to DLQ
  */
 export function shouldDeadLetterJob(
-  job: Job,
+  _job: Job,
   currentAttempt: number,
   maxAttempts: number,
   error: string | null

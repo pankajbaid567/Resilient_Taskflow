@@ -1,9 +1,8 @@
-import { Admin, ITopicConfig } from 'kafkajs';
-
 import { createLogger } from '@taskflow/logger';
+import { Admin, ITopicConfig, ITopicMetadata } from 'kafkajs';
 
-import { getKafkaClient } from './kafka-client';
 import { KAFKA_TOPICS } from './event-schema';
+import { getKafkaClient } from './kafka-client';
 
 const logger = createLogger({ component: 'TopicManager' });
 
@@ -165,7 +164,9 @@ export class TopicManager {
   /**
    * Get topic metadata
    */
-  async getTopicMetadata(topics: string[]): Promise<any> {
+  async getTopicMetadata(
+    topics: string[]
+  ): Promise<{ topics: ITopicMetadata[] }> {
     const admin = await this.getAdmin();
 
     return admin.fetchTopicMetadata({

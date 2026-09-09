@@ -25,7 +25,7 @@ async function main(): Promise<void> {
     const app = await startServer();
 
     // Graceful shutdown
-    const shutdown = async (signal: string) => {
+    const shutdown = async (signal: string): Promise<void> => {
       logger.info(`Received ${signal}, shutting down gracefully...`);
 
       try {
@@ -50,8 +50,12 @@ async function main(): Promise<void> {
     };
 
     // Handle shutdown signals
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => {
+      void shutdown('SIGTERM');
+    });
+    process.on('SIGINT', () => {
+      void shutdown('SIGINT');
+    });
 
     // Handle uncaught errors
     process.on('uncaughtException', (error) => {
@@ -70,4 +74,4 @@ async function main(): Promise<void> {
 }
 
 // Start the server
-main();
+void main();

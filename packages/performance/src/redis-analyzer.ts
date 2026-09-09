@@ -11,7 +11,7 @@ export interface RedisMetrics {
   duration: number;
   timestamp: number;
   key?: string;
-  args?: any[];
+  args?: unknown[];
 }
 
 export interface RedisStats {
@@ -92,8 +92,8 @@ export class RedisAnalyzer {
       count,
       totalDuration,
       avgDuration: totalDuration / count,
-      minDuration: durations[0],
-      maxDuration: durations[count - 1],
+      minDuration: durations[0]!,
+      maxDuration: durations[count - 1]!,
       p95Duration: this.percentile(durations, 0.95),
       p99Duration: this.percentile(durations, 0.99),
     };
@@ -367,7 +367,7 @@ export class RedisAnalyzer {
    */
   private percentile(sorted: number[], p: number): number {
     const index = Math.ceil(sorted.length * p) - 1;
-    return sorted[Math.max(0, index)];
+    return sorted[Math.max(0, index)]!;
   }
 
   /**

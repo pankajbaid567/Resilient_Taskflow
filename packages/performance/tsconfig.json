@@ -4,6 +4,7 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": false,
+    "strictNullChecks": true,
     "skipLibCheck": true
   },
   "include": ["src/**/*"],

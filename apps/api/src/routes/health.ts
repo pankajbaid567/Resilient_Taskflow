@@ -1,13 +1,13 @@
-import { FastifyInstance } from 'fastify';
 
 import { testConnection } from '@taskflow/database';
 import { testRedisConnection } from '@taskflow/queue';
 import { HealthCheck } from '@taskflow/types';
+import { FastifyInstance } from 'fastify';
 
 /**
  * Health Check Routes
  */
-export async function healthRoutes(app: FastifyInstance): Promise<void> {
+export function healthRoutes(app: FastifyInstance): Promise<void> {
   /**
    * Basic health check
    * Returns 200 if service is running
@@ -76,4 +76,6 @@ export async function healthRoutes(app: FastifyInstance): Promise<void> {
       memory: process.memoryUsage(),
     });
   });
+
+  return Promise.resolve();
 }

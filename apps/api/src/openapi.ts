@@ -4,15 +4,15 @@
  * Comprehensive API documentation with Swagger UI
  */
 
+import fastifySwagger from '@fastify/swagger';
+import fastifySwaggerUI from '@fastify/swagger-ui';
+import { submitJobSchema } from '@taskflow/types';
 import {
   FastifyInstance,
   type FastifyPluginCallback,
   type FastifySchema,
 } from 'fastify';
-import fastifySwagger from '@fastify/swagger';
-import fastifySwaggerUI from '@fastify/swagger-ui';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { submitJobSchema } from '@taskflow/types';
 
 // The plugins' published declarations resolve a distinct Fastify type copy in
 // this workspace. This cast is limited to the registration boundary; runtime
@@ -525,6 +525,6 @@ Official SDKs available:
 /**
  * Export OpenAPI spec as JSON
  */
-export async function exportOpenAPISpec(app: FastifyInstance): Promise<object> {
+export function exportOpenAPISpec(app: FastifyInstance): object {
   return app.swagger();
 }

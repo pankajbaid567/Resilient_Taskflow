@@ -1,4 +1,3 @@
-import { FastifyInstance } from 'fastify';
 
 import {
   cancelJob,
@@ -18,6 +17,7 @@ import {
   submitJobSchema,
   SubmitJobRequest,
 } from '@taskflow/types';
+import { FastifyInstance } from 'fastify';
 
 const logger = createLogger({ component: 'JobRoutes' });
 
@@ -26,7 +26,7 @@ const logger = createLogger({ component: 'JobRoutes' });
  *
  * Handles job submission, retrieval, and cancellation.
  */
-export async function jobRoutes(app: FastifyInstance): Promise<void> {
+export function jobRoutes(app: FastifyInstance): Promise<void> {
   /**
    * Submit a new job
    * POST /api/v1/jobs
@@ -172,7 +172,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
 
       // Set idempotency header if key was provided
       if (request.idempotencyKey) {
-        reply.header('Idempotency-Key', request.idempotencyKey);
+        void reply.header('Idempotency-Key', request.idempotencyKey);
       }
 
       return reply.status(201).send(response);
@@ -358,4 +358,6 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
       });
     }
   );
+
+  return Promise.resolve();
 }

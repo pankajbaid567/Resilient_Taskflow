@@ -11,8 +11,16 @@
     },
     "test": {
       "dependsOn": ["build"],
-      "outputs": ["coverage/**"],
-      "inputs": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx"]
+      "inputs": [
+        "src/**",
+        "tests/**",
+        "test/**",
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "vitest.config.*",
+        "tsconfig*.json"
+      ],
+      "outputs": ["coverage/**"]
     },
     "test:watch": {
       "cache": false,

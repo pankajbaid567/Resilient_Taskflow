@@ -1,6 +1,6 @@
+import { JobStatus } from '@taskflow/types';
 import { and, eq, getTableColumns, sql } from 'drizzle-orm';
 
-import { JobStatus } from '@taskflow/types';
 
 import { db } from '../client';
 import {

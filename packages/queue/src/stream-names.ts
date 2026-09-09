@@ -4,10 +4,10 @@
  * Consistent naming for Redis Streams and consumer groups.
  */
 
-export const JOB_STREAM_PREFIX = 'taskflow:queue' as const;
-export const JOB_STREAM_SUFFIX = 'jobs' as const;
-export const WORKER_CONSUMER_GROUP = 'taskflow:workers' as const;
-export const WORKER_CONSUMER_PREFIX = 'worker' as const;
+export const JOB_STREAM_PREFIX = 'taskflow:queue';
+export const JOB_STREAM_SUFFIX = 'jobs';
+export const WORKER_CONSUMER_GROUP = 'taskflow:workers';
+export const WORKER_CONSUMER_PREFIX = 'worker';
 
 /**
  * Generate stream key for a queue
@@ -43,5 +43,5 @@ export function parseQueueFromStreamKey(streamKey: string): string | null {
   const match = streamKey.match(
     new RegExp(`^${JOB_STREAM_PREFIX}:([^:]+):${JOB_STREAM_SUFFIX}$`)
   );
-  return match ? match[1] : null;
+  return match?.[1] ?? null;
 }

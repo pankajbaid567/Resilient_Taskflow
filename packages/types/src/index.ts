@@ -220,8 +220,8 @@ export interface DeadLetterJob {
  * Redis only transports this envelope. PostgreSQL remains authoritative for
  * the job payload and lifecycle state.
  */
-export const REDIS_JOB_MESSAGE_VERSION = 1 as const;
-export const REDIS_JOB_MESSAGE_FIELD = 'data' as const;
+export const REDIS_JOB_MESSAGE_VERSION = 1;
+export const REDIS_JOB_MESSAGE_FIELD = 'data';
 
 export const redisJobMessageV1Schema = z
   .object({

@@ -1,6 +1,6 @@
+import { WorkerStatus } from '@taskflow/types';
 import { and, eq, lt, sql } from 'drizzle-orm';
 
-import { WorkerStatus } from '@taskflow/types';
 
 import { db } from '../client';
 import { NewWorker, Worker, workers } from '../schema';
@@ -84,7 +84,7 @@ export async function updateWorkerStatus(
 ): Promise<Worker | null> {
   const updates: Partial<Worker> = { status };
   
-  if (status === 'STOPPED') {
+  if (status === WorkerStatus.STOPPED) {
     updates.stoppedAt = new Date();
   }
   
@@ -143,7 +143,20 @@ export async function markStaleWorkersAsFailed(
 /**
  * Get worker statistics
  */
-export async function getWorkerStats() {
+export async function getWorkerStats(): Promise<
+  | {
+      total: number;
+      active: number;
+      starting: number;
+      stopping: number;
+      stopped: number;
+      failed: number;
+      totalJobsProcessed: number;
+      totalJobsSucceeded: number;
+      totalJobsFailed: number;
+    }
+  | undefined
+> {
   const [stats] = await db
     .select({
       total: sql<number>`COUNT(*)`,

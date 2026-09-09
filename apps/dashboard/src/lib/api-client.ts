@@ -47,17 +47,17 @@ class APIClient {
   ): Promise<T> {
     const { timeout = 30000, ...fetchOptions } = options;
 
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      ...fetchOptions.headers,
-    };
+    const headers = new Headers(fetchOptions.headers);
+    if (!headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
 
     if (this.apiKey) {
-      headers['X-API-Key'] = this.apiKey;
+      headers.set('X-API-Key', this.apiKey);
     }
 
     if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
+      headers.set('Authorization', `Bearer ${this.token}`);
     }
 
     const controller = new AbortController();
@@ -103,7 +103,7 @@ class APIClient {
   // Job endpoints
   async submitJob(data: {
     type: string;
-    payload: Record<string, any>;
+    payload: Record<string, unknown>;
     priority?: number;
     queue?: string;
     scheduledAt?: string;
@@ -214,13 +214,12 @@ class APIClient {
   async getDashboardMetrics(): Promise<DashboardMetrics> {
     // This endpoint doesn't exist yet in the backend, but we'll create it
     // For now, we'll aggregate data from multiple endpoints
-    const [jobs, workers, queues] = await Promise.all([
+    const [, workers, queues] = await Promise.all([
       this.listJobs({ limit: 1 }),
       this.listWorkers(),
       this.listQueues(),
     ]);
 
-    const totalJobs = jobs.total || 0;
     const activeWorkers = workers.filter((w) => w.status === 'active').length;
 
     const queuedJobs = queues.reduce((sum, q) => sum + (q.queued || 0), 0);

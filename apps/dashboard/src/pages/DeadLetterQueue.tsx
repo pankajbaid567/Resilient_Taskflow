@@ -3,7 +3,6 @@ import { useDLQ } from '@/hooks/useAPI';
 import { apiClient } from '@/lib/api-client';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import ErrorMessage from '@/components/ErrorMessage';
-import StatusBadge from '@/components/StatusBadge';
 import JobDetailModal from '@/components/JobDetailModal';
 import { formatRelativeTime } from '@/lib/utils';
 import styles from './DeadLetterQueue.module.css';

@@ -5,13 +5,14 @@
  */
 
 import { performance } from 'perf_hooks';
+
 import { logger } from '@taskflow/logger';
 
 export interface ProfileResult {
   operation: string;
   duration: number;
   timestamp: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ProfileStats {
@@ -40,7 +41,7 @@ export class Profiler {
   /**
    * Start timing an operation
    */
-  start(operation: string): () => void {
+  start(operation: string): (metadata?: Record<string, unknown>) => void {
     if (!this.enabled) {
       return () => {}; // No-op
     }
@@ -48,7 +49,7 @@ export class Profiler {
     const startTime = performance.now();
     const startTimestamp = Date.now();
 
-    return (metadata?: Record<string, any>) => {
+    return (metadata?: Record<string, unknown>) => {
       const duration = performance.now() - startTime;
       this.record(operation, duration, startTimestamp, metadata);
     };
@@ -60,7 +61,7 @@ export class Profiler {
   async profile<T>(
     operation: string,
     fn: () => Promise<T>,
-    metadata?: Record<string, any>
+    metadata?: Record<string, unknown>
   ): Promise<T> {
     if (!this.enabled) {
       return fn();
@@ -83,7 +84,7 @@ export class Profiler {
   profileSync<T>(
     operation: string,
     fn: () => T,
-    metadata?: Record<string, any>
+    metadata?: Record<string, unknown>
   ): T {
     if (!this.enabled) {
       return fn();
@@ -107,7 +108,7 @@ export class Profiler {
     operation: string,
     duration: number,
     timestamp: number,
-    metadata?: Record<string, any>
+    metadata?: Record<string, unknown>
   ): void {
     const result: ProfileResult = {
       operation,
@@ -148,8 +149,8 @@ export class Profiler {
       count,
       totalDuration,
       avgDuration: totalDuration / count,
-      minDuration: durations[0],
-      maxDuration: durations[count - 1],
+      minDuration: durations[0]!,
+      maxDuration: durations[count - 1]!,
       p50Duration: this.percentile(durations, 0.5),
       p95Duration: this.percentile(durations, 0.95),
       p99Duration: this.percentile(durations, 0.99),
@@ -263,7 +264,7 @@ export class Profiler {
    */
   private percentile(sorted: number[], p: number): number {
     const index = Math.ceil(sorted.length * p) - 1;
-    return sorted[Math.max(0, index)];
+    return sorted[Math.max(0, index)]!;
   }
 
   /**

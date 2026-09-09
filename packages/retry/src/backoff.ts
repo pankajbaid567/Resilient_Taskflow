@@ -89,7 +89,7 @@ export function calculateBackoff(
       break;
 
     default:
-      throw new Error(`Unknown backoff strategy: ${strategy}`);
+      throw new Error('Unknown backoff strategy');
   }
 
   // Cap at max delay
@@ -174,7 +174,11 @@ export function previewBackoffSchedule(
   maxAttempts: number,
   config: BackoffConfig = {}
 ): Array<{ attempt: number; delayMs: number; delayFormatted: string }> {
-  const schedule = [];
+  const schedule: Array<{
+    attempt: number;
+    delayMs: number;
+    delayFormatted: string;
+  }> = [];
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const delayMs = calculateBackoff(attempt, config);

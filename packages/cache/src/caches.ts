@@ -177,7 +177,7 @@ export class IdempotencyCache extends MultiLayerCache<{
  */
 export class JobResultCache extends MultiLayerCache<{
   jobId: string;
-  result: any;
+  result: unknown;
   completedAt: Date;
 }> {
   constructor(
@@ -201,7 +201,7 @@ export class JobResultCache extends MultiLayerCache<{
  * - High read frequency
  * - Very long TTL with manual invalidation
  */
-export class ConfigCache extends MultiLayerCache<Record<string, any>> {
+export class ConfigCache extends MultiLayerCache<Record<string, unknown>> {
   constructor(
     l2Get?: (key: string) => Promise<string | null>,
     l2Set?: (key: string, value: string, ttl: number) => Promise<void>

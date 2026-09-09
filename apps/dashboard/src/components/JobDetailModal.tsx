@@ -5,7 +5,6 @@ import LoadingSpinner from './LoadingSpinner';
 import { useJob } from '@/hooks/useAPI';
 import { apiClient } from '@/lib/api-client';
 import { formatDate, formatRelativeTime } from '@/lib/utils';
-import type { Job } from '@/types';
 import styles from './JobDetailModal.module.css';
 
 interface JobDetailModalProps {

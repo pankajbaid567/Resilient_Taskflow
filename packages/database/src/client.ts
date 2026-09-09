@@ -1,8 +1,8 @@
+import { databaseConfig } from '@taskflow/config';
+import { logger } from '@taskflow/logger';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
-import { databaseConfig } from '@taskflow/config';
-import { logger } from '@taskflow/logger';
 
 import * as schema from './schema';
 

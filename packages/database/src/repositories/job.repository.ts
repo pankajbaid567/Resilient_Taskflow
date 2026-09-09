@@ -1,6 +1,6 @@
+import { JobStatus } from '@taskflow/types';
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 
-import { JobStatus } from '@taskflow/types';
 
 import { db } from '../client';
 import * as schema from '../schema';
@@ -412,7 +412,8 @@ export async function cancelJob(jobId: string): Promise<Job> {
     .update(jobs)
     .set({
       status: nextStatus,
-      completedAt: nextStatus === 'CANCELLED' ? new Date() : undefined,
+      completedAt:
+        nextStatus === JobStatus.CANCELLED ? new Date() : undefined,
       version: sql`${jobs.version} + 1`,
     })
     .where(and(eq(jobs.id, jobId), eq(jobs.version, currentJob.version)))
@@ -428,7 +429,17 @@ export async function cancelJob(jobId: string): Promise<Job> {
 /**
  * Get queue statistics
  */
-export async function getQueueStats(queueId: string) {
+export async function getQueueStats(queueId: string): Promise<
+  | {
+      queueId: string;
+      queued: number;
+      processing: number;
+      succeeded: number;
+      failed: number;
+      avgDurationMs: number;
+    }
+  | undefined
+> {
   const [stats] = await db
     .select({
       queueId: jobs.queueId,
@@ -459,11 +470,9 @@ export async function countJobsByStatus(
     .from(jobs)
     .groupBy(jobs.status);
 
-  if (userId) {
-    query.where(eq(jobs.userId, userId));
-  }
-
-  const results = await query;
+  const results = userId
+    ? await query.where(eq(jobs.userId, userId))
+    : await query;
 
   // Convert to record with all statuses
   const counts: Record<string, number> = {};
@@ -472,9 +481,7 @@ export async function countJobsByStatus(
   });
 
   results.forEach((r) => {
-    if (r.status) {
-      counts[r.status] = r.count;
-    }
+    counts[r.status] = r.count;
   });
 
   return counts as Record<JobStatus, number>;

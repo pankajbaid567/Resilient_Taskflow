@@ -1,10 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   parseRedisJobMessage,
   REDIS_JOB_MESSAGE_FIELD,
   REDIS_JOB_MESSAGE_VERSION,
 } from '@taskflow/types';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { claimStaleMessages, consumeJobs } from '../consumer';
 import { enqueueJob } from '../producer';
@@ -14,18 +13,22 @@ import {
   WORKER_CONSUMER_GROUP,
 } from '../stream-names';
 
+type RedisMockArguments = Array<string | number>;
+
 const redis = vi.hoisted(() => ({
-  xadd: vi.fn(),
-  xreadgroup: vi.fn(),
-  xpending: vi.fn(),
-  xclaim: vi.fn(),
+  xadd: vi.fn<RedisMockArguments, Promise<unknown>>(),
+  xreadgroup: vi.fn<RedisMockArguments, Promise<unknown>>(),
+  xpending: vi.fn<RedisMockArguments, Promise<unknown>>(),
+  xclaim: vi.fn<RedisMockArguments, Promise<unknown>>(),
 }));
 
 vi.mock('../redis-client', () => ({
   getRedisClient: () => redis,
 }));
 
-function envelope(overrides: Record<string, unknown> = {}) {
+function envelope(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
   return {
     schemaVersion: REDIS_JOB_MESSAGE_VERSION,
     jobId: 'job-123',
@@ -66,14 +69,18 @@ describe('Redis job message contract', () => {
       '*',
       REDIS_JOB_MESSAGE_FIELD,
     ]);
-    expect(parseRedisJobMessage(JSON.parse(call?.[3] as string))).toMatchObject(
-      {
-        schemaVersion: REDIS_JOB_MESSAGE_VERSION,
-        jobId: 'job-123',
-        attempt: 2,
-        queue: 'default',
-      }
-    );
+    const serializedMessage = call?.[3];
+    expect(typeof serializedMessage).toBe('string');
+    if (typeof serializedMessage !== 'string') {
+      throw new Error('Expected XADD to receive a serialized message');
+    }
+    const parsedMessage: unknown = JSON.parse(serializedMessage);
+    expect(parseRedisJobMessage(parsedMessage)).toMatchObject({
+      schemaVersion: REDIS_JOB_MESSAGE_VERSION,
+      jobId: 'job-123',
+      attempt: 2,
+      queue: 'default',
+    });
   });
 
   it('rejects invalid producer input before writing to Redis', async () => {

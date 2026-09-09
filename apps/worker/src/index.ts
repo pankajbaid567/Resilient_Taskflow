@@ -101,8 +101,9 @@ async function closeInfrastructure(): Promise<void> {
 
   for (const result of results) {
     if (result.status === 'rejected') {
+      const error: unknown = result.reason;
       logger.error('Failed to close worker infrastructure', {
-        error: result.reason,
+        error,
       });
     }
   }

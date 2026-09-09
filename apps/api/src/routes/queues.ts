@@ -1,8 +1,8 @@
-import { FastifyInstance } from 'fastify';
 
 import { getQueueByName, getQueueStats } from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
 import { getQueueDepth } from '@taskflow/queue';
+import { FastifyInstance } from 'fastify';
 
 const logger = createLogger({ component: 'QueueRoutes' });
 
@@ -11,7 +11,7 @@ const logger = createLogger({ component: 'QueueRoutes' });
  *
  * Provides queue statistics and management.
  */
-export async function queueRoutes(app: FastifyInstance): Promise<void> {
+export function queueRoutes(app: FastifyInstance): Promise<void> {
   /**
    * List all queues
    * GET /api/v1/queues
@@ -168,4 +168,6 @@ export async function queueRoutes(app: FastifyInstance): Promise<void> {
       });
     }
   );
+
+  return Promise.resolve();
 }

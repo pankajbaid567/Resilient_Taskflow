@@ -1,13 +1,13 @@
+import { createRequestLogger } from '@taskflow/logger';
 import { FastifyReply, FastifyRequest } from 'fastify';
 
-import { createRequestLogger } from '@taskflow/logger';
 
 /**
  * Request Logger Middleware
  *
  * Logs all incoming requests and responses with timing information.
  */
-export async function requestLogger(
+export function requestLogger(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
@@ -40,4 +40,6 @@ export async function requestLogger(
       durationMs: duration,
     });
   });
+
+  return Promise.resolve();
 }

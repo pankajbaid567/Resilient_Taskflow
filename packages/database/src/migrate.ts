@@ -57,7 +57,7 @@ async function runMigrations(): Promise<void> {
 }
 
 if (require.main === module) {
-  void runMigrations().catch((error) => {
+  void runMigrations().catch((error: unknown) => {
     logger.error('✗ Database migration failed', { error });
     process.exitCode = 1;
   });

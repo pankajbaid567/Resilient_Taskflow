@@ -52,7 +52,8 @@ function parseConsumedMessage(
   }
 
   const serializedMessage = getMessageDataField(fields);
-  const data = parseRedisJobMessage(JSON.parse(serializedMessage));
+  const parsedMessage: unknown = JSON.parse(serializedMessage);
+  const data = parseRedisJobMessage(parsedMessage);
 
   if (data.queue !== queue) {
     throw new Error(
@@ -68,15 +69,20 @@ function parseConsumedMessage(
   };
 }
 
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
 function parseClaimedEntry(stream: string, entry: unknown): ConsumedMessage {
-  if (!Array.isArray(entry) || entry.length !== 2) {
+  if (!isUnknownArray(entry) || entry.length !== 2) {
     throw new Error('Redis XCLAIM returned an invalid stream entry');
   }
 
-  const [messageId, fields] = entry;
+  const messageId = entry[0];
+  const fields = entry[1];
   if (
     typeof messageId !== 'string' ||
-    !Array.isArray(fields) ||
+    !isUnknownArray(fields) ||
     !fields.every((field) => typeof field === 'string')
   ) {
     throw new Error('Redis XCLAIM returned an invalid stream entry');

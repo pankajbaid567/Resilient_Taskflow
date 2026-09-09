@@ -1,6 +1,6 @@
+import { JobStatus } from '@taskflow/types';
 import { describe, expect, it } from 'vitest';
 
-import { JobStatus } from '@taskflow/types';
 
 import {
   getValidTransitions,

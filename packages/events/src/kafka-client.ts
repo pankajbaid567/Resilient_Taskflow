@@ -1,6 +1,13 @@
-import { Kafka, KafkaConfig, Producer, Consumer, Admin, logLevel } from 'kafkajs';
-
 import { createLogger } from '@taskflow/logger';
+import {
+  Kafka,
+  KafkaConfig,
+  Producer,
+  Consumer,
+  Admin,
+  logLevel,
+  SASLOptions,
+} from 'kafkajs';
 
 const logger = createLogger({ component: 'KafkaClient' });
 
@@ -41,11 +48,10 @@ export interface TaskFlowKafkaConfig {
   /**
    * SASL authentication
    */
-  sasl?: {
-    mechanism: 'plain' | 'scram-sha-256' | 'scram-sha-512';
-    username: string;
-    password: string;
-  };
+  sasl?: Extract<
+    SASLOptions,
+    { mechanism: 'plain' | 'scram-sha-256' | 'scram-sha-512' }
+  >;
 
   /**
    * Log level
@@ -252,8 +258,10 @@ export function getKafkaClient(config?: TaskFlowKafkaConfig): KafkaClient {
  */
 export function resetKafkaClient(): void {
   if (globalKafkaClient) {
-    globalKafkaClient.disconnect().catch((error) => {
-      logger.error('Error disconnecting Kafka client', { error });
+    void globalKafkaClient.disconnect().catch((error: unknown) => {
+      logger.error('Error disconnecting Kafka client', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
     globalKafkaClient = null;
   }

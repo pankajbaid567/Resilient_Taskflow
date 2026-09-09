@@ -11,7 +11,7 @@ export interface QueryMetrics {
   duration: number;
   timestamp: number;
   rows?: number;
-  params?: any[];
+  params?: unknown[];
   stackTrace?: string;
 }
 
@@ -110,8 +110,8 @@ export class QueryAnalyzer {
       count,
       totalDuration,
       avgDuration: totalDuration / count,
-      minDuration: durations[0],
-      maxDuration: durations[count - 1],
+      minDuration: durations[0]!,
+      maxDuration: durations[count - 1]!,
       p95Duration: this.percentile(durations, 0.95),
       p99Duration: this.percentile(durations, 0.99),
       totalRows,
@@ -305,7 +305,7 @@ export class QueryAnalyzer {
    */
   private percentile(sorted: number[], p: number): number {
     const index = Math.ceil(sorted.length * p) - 1;
-    return sorted[Math.max(0, index)];
+    return sorted[Math.max(0, index)]!;
   }
 
   /**

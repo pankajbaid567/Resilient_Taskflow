@@ -59,6 +59,10 @@ export async function enqueueJob(
       JSON.stringify(message)
     );
 
+    if (messageId === null) {
+      throw new Error('Redis XADD did not return a message ID');
+    }
+
     logger.debug('Job enqueued', {
       jobId,
       queue: queueName,
@@ -119,7 +123,10 @@ export async function enqueueJobBatch(
       if (error) {
         throw error;
       }
-      return messageId as string;
+      if (typeof messageId !== 'string') {
+        throw new Error('Redis XADD returned an invalid message ID');
+      }
+      return messageId;
     });
 
     logger.info('Job batch enqueued', { count: jobs.length });

@@ -1,6 +1,7 @@
+import path from 'path';
+
 import { config as dotenvConfig } from 'dotenv';
 import { z } from 'zod';
-import path from 'path';
 
 // Load environment variables from workspace root
 dotenvConfig({ path: path.resolve(__dirname, '../../../.env') });

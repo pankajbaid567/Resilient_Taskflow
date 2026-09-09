@@ -13,7 +13,7 @@ export interface Job {
   id: string;
   queue: string;
   type: string;
-  payload: Record<string, any>;
+  payload: Record<string, unknown>;
   status: JobStatus;
   priority: number;
   attempts: number;
@@ -26,7 +26,7 @@ export interface Job {
   timeout: number;
   workerId?: string;
   error?: string;
-  result?: Record<string, any>;
+  result?: Record<string, unknown>;
 }
 
 export interface Worker {

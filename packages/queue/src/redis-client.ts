@@ -1,7 +1,6 @@
-import Redis, { ChainableCommander } from 'ioredis';
-
 import { redisConfig } from '@taskflow/config';
 import { logger } from '@taskflow/logger';
+import Redis, { ChainableCommander } from 'ioredis';
 
 /**
  * Redis Client for Queue Operations
@@ -70,14 +69,10 @@ export function getRedisClient(): Redis {
 export async function testRedisConnection(): Promise<boolean> {
   try {
     const client = getRedisClient();
-    const result = await client.ping();
-    
-    if (result === 'PONG') {
-      logger.info('✓ Redis connection test successful');
-      return true;
-    }
-    
-    return false;
+    await client.ping();
+
+    logger.info('✓ Redis connection test successful');
+    return true;
   } catch (error) {
     logger.error('✗ Redis connection test failed', { error });
     return false;

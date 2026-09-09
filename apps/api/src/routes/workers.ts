@@ -1,7 +1,7 @@
-import { FastifyInstance } from 'fastify';
 
 import { getActiveWorkers, getWorkerById } from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
+import { FastifyInstance } from 'fastify';
 
 const logger = createLogger({ component: 'WorkerRoutes' });
 
@@ -10,7 +10,7 @@ const logger = createLogger({ component: 'WorkerRoutes' });
  *
  * Provides worker status and management.
  */
-export async function workerRoutes(app: FastifyInstance): Promise<void> {
+export function workerRoutes(app: FastifyInstance): Promise<void> {
   /**
    * List all workers
    * GET /api/v1/workers
@@ -135,4 +135,6 @@ export async function workerRoutes(app: FastifyInstance): Promise<void> {
       timestamp: new Date().toISOString(),
     });
   });
+
+  return Promise.resolve();
 }

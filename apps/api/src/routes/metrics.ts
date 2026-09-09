@@ -1,8 +1,8 @@
-import { FastifyInstance } from 'fastify';
 
-import { getMetrics, jobsCurrentByStatus } from '@taskflow/observability';
 import { getJobCounts } from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
+import { getMetrics, jobsCurrentByStatus } from '@taskflow/observability';
+import { FastifyInstance } from 'fastify';
 
 const logger = createLogger({ component: 'MetricsRoutes' });
 
@@ -11,7 +11,7 @@ const logger = createLogger({ component: 'MetricsRoutes' });
  *
  * Provides Prometheus-compatible metrics endpoint.
  */
-export async function metricsRoutes(app: FastifyInstance): Promise<void> {
+export function metricsRoutes(app: FastifyInstance): Promise<void> {
   /**
    * Prometheus metrics
    * GET /metrics
@@ -55,4 +55,6 @@ export async function metricsRoutes(app: FastifyInstance): Promise<void> {
       throw error;
     }
   });
+
+  return Promise.resolve();
 }

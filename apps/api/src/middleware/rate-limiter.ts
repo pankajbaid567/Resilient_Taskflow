@@ -1,7 +1,7 @@
-import { FastifyReply, FastifyRequest } from 'fastify';
 
 import { createLogger } from '@taskflow/logger';
 import { createRedisClient } from '@taskflow/queue';
+import { FastifyReply, FastifyRequest } from 'fastify';
 
 const logger = createLogger({ component: 'RateLimiter' });
 
@@ -101,13 +101,13 @@ export function createRateLimiter(config: Partial<RateLimitConfig> = {}) {
           retryAfter,
         });
 
-        reply.header('X-RateLimit-Limit', finalConfig.maxRequests);
-        reply.header('X-RateLimit-Remaining', 0);
-        reply.header(
+        void reply.header('X-RateLimit-Limit', finalConfig.maxRequests);
+        void reply.header('X-RateLimit-Remaining', 0);
+        void reply.header(
           'X-RateLimit-Reset',
           oldestTimestamp + finalConfig.windowSeconds * 1000
         );
-        reply.header('Retry-After', retryAfter);
+        void reply.header('Retry-After', retryAfter);
 
         return reply.status(429).send({
           error: 'Too Many Requests',
@@ -126,9 +126,12 @@ export function createRateLimiter(config: Partial<RateLimitConfig> = {}) {
 
       // Add rate limit headers
       const remaining = Math.max(0, finalConfig.maxRequests - count - 1);
-      reply.header('X-RateLimit-Limit', finalConfig.maxRequests);
-      reply.header('X-RateLimit-Remaining', remaining);
-      reply.header('X-RateLimit-Reset', now + finalConfig.windowSeconds * 1000);
+      void reply.header('X-RateLimit-Limit', finalConfig.maxRequests);
+      void reply.header('X-RateLimit-Remaining', remaining);
+      void reply.header(
+        'X-RateLimit-Reset',
+        now + finalConfig.windowSeconds * 1000
+      );
 
       logger.debug('Rate limit check passed', {
         key,

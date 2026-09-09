@@ -110,13 +110,6 @@ function QueueCard({ queue }: { queue: QueueStats }) {
       ? (queue.completed / (queue.completed + queue.failed)) * 100
       : 100;
 
-  const getStatusColor = (count: number, total: number) => {
-    const percentage = total > 0 ? (count / total) * 100 : 0;
-    if (percentage > 50) return styles.high;
-    if (percentage > 20) return styles.medium;
-    return styles.low;
-  };
-
   return (
     <div className={styles.queueCard}>
       <div className={styles.queueHeader}>

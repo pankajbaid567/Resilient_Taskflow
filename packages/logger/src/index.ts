@@ -1,6 +1,5 @@
-import pino from 'pino';
-
 import { env, isDevelopment } from '@taskflow/config';
+import pino from 'pino';
 
 /**
  * Create Pino Logger Instance

@@ -86,7 +86,7 @@ async function seedDatabase(): Promise<void> {
 
 // Run seed if executed directly
 if (require.main === module) {
-  seedDatabase();
+  void seedDatabase();
 }
 
 export { seedDatabase };

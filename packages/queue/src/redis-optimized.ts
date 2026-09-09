@@ -8,8 +8,13 @@
  * - Lua script caching
  */
 
-import Redis, { ChainableCommander } from 'ioredis';
 import { redisAnalyzer } from '@taskflow/performance';
+import Redis, { type ChainableCommander, type RedisValue } from 'ioredis';
+
+type RedisStreamEntry = [id: string, fields: string[]];
+type RedisStreamReadResult =
+  | Array<[key: string, items: RedisStreamEntry[]]>
+  | null;
 
 /**
  * Optimized Redis client wrapper
@@ -157,7 +162,10 @@ export class OptimizedRedisClient {
     increment: number = 1,
     expirySeconds: number = 60
   ): Promise<number> {
-    const script = this.luaScripts.get('incrementWithExpiry')!;
+    const script = this.luaScripts.get('incrementWithExpiry');
+    if (script === undefined) {
+      throw new Error('incrementWithExpiry Lua script is not initialized');
+    }
     return this.executeWithProfiling(
       'EVAL:incrementWithExpiry',
       () =>
@@ -176,7 +184,10 @@ export class OptimizedRedisClient {
    * Get and delete atomically
    */
   async getAndDelete(key: string): Promise<string | null> {
-    const script = this.luaScripts.get('getdel')!;
+    const script = this.luaScripts.get('getdel');
+    if (script === undefined) {
+      throw new Error('getdel Lua script is not initialized');
+    }
     return this.executeWithProfiling(
       'EVAL:getdel',
       () => this.client.eval(script, 1, key) as Promise<string | null>,
@@ -224,7 +235,7 @@ export class OptimizedRedisClient {
     script: string,
     keys: string[],
     args: string[]
-  ): Promise<any> {
+  ): Promise<unknown> {
     return this.executeWithProfiling('EVAL', () =>
       this.client.eval(script, keys.length, ...keys, ...args)
     );
@@ -362,29 +373,31 @@ export class OptimizedRedisClient {
    * Stream operations
    */
   async xadd(key: string, id: string, ...args: string[]): Promise<string> {
-    return this.executeWithProfiling(
+    const messageId = await this.executeWithProfiling(
       'XADD',
       () => this.client.xadd(key, id, ...args),
       key
     );
+
+    if (messageId === null) {
+      throw new Error('Redis XADD did not return a message ID');
+    }
+
+    return messageId;
   }
 
-  async xread(...args: any[]): Promise<any> {
-    const command = this.client.xread as unknown as (
-      ...commandArgs: any[]
-    ) => Promise<any>;
-    return this.executeWithProfiling('XREAD', () =>
-      command.apply(this.client, args)
-    );
+  async xread(...args: RedisValue[]): Promise<RedisStreamReadResult> {
+    const command = this.client.xread.bind(this.client) as (
+      ...commandArgs: RedisValue[]
+    ) => Promise<RedisStreamReadResult>;
+    return this.executeWithProfiling('XREAD', () => command(...args));
   }
 
-  async xreadgroup(...args: any[]): Promise<any> {
-    const command = this.client.xreadgroup as unknown as (
-      ...commandArgs: any[]
-    ) => Promise<any>;
-    return this.executeWithProfiling('XREADGROUP', () =>
-      command.apply(this.client, args)
-    );
+  async xreadgroup(...args: RedisValue[]): Promise<unknown[]> {
+    const command = this.client.xreadgroup.bind(this.client) as (
+      ...commandArgs: RedisValue[]
+    ) => Promise<unknown[]>;
+    return this.executeWithProfiling('XREADGROUP', () => command(...args));
   }
 
   async xack(key: string, group: string, ...ids: string[]): Promise<number> {
@@ -395,22 +408,18 @@ export class OptimizedRedisClient {
     );
   }
 
-  async xclaim(...args: any[]): Promise<any> {
-    const command = this.client.xclaim as unknown as (
-      ...commandArgs: any[]
-    ) => Promise<any>;
-    return this.executeWithProfiling('XCLAIM', () =>
-      command.apply(this.client, args)
-    );
+  async xclaim(...args: RedisValue[]): Promise<unknown[]> {
+    const command = this.client.xclaim.bind(this.client) as (
+      ...commandArgs: RedisValue[]
+    ) => Promise<unknown[]>;
+    return this.executeWithProfiling('XCLAIM', () => command(...args));
   }
 
-  async xpending(...args: any[]): Promise<any> {
-    const command = this.client.xpending as unknown as (
-      ...commandArgs: any[]
-    ) => Promise<any>;
-    return this.executeWithProfiling('XPENDING', () =>
-      command.apply(this.client, args)
-    );
+  async xpending(...args: RedisValue[]): Promise<unknown[]> {
+    const command = this.client.xpending.bind(this.client) as (
+      ...commandArgs: RedisValue[]
+    ) => Promise<unknown[]>;
+    return this.executeWithProfiling('XPENDING', () => command(...args));
   }
 
   /**
@@ -539,7 +548,7 @@ export class OptimizedPipeline {
   /**
    * Execute pipeline
    */
-  async exec(): Promise<[Error | null, any][]> {
+  async exec(): Promise<Array<[Error | null, unknown]>> {
     const start = Date.now();
     try {
       const results = await this.pipeline.exec();
@@ -565,7 +574,7 @@ export class RedisBatcher {
   private client: OptimizedRedisClient;
   private batchSize: number;
   private flushInterval: number;
-  private operations: Array<() => Promise<any>> = [];
+  private operations: Array<() => Promise<void>> = [];
   private timer: NodeJS.Timeout | null = null;
 
   constructor(
@@ -596,7 +605,7 @@ export class RedisBatcher {
 
       // Auto-flush if batch is full
       if (this.operations.length >= this.batchSize) {
-        this.flush();
+        void this.flush();
       } else {
         // Schedule auto-flush
         this.scheduleFlush();
@@ -611,7 +620,7 @@ export class RedisBatcher {
     if (this.timer) return;
 
     this.timer = setTimeout(() => {
-      this.flush();
+      void this.flush();
     }, this.flushInterval);
   }
 

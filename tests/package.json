@@ -2,17 +2,19 @@
   "name": "@taskflow/tests",
   "version": "1.0.0",
   "private": true,
-  "description": "Comprehensive test suite for Resilient TaskFlow",
+  "description": "Explicit test gates for Resilient TaskFlow",
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:unit": "vitest run unit",
-    "test:integration": "vitest run integration",
+    "test": "vitest run unit --config vitest.config.ts",
+    "test:watch": "vitest unit --config vitest.config.ts",
+    "test:unit": "vitest run unit --config vitest.config.ts",
+    "test:simulated": "vitest run simulated --config vitest.config.ts",
+    "test:integration": "vitest run integration/redis-queue.test.ts --config vitest.config.ts",
+    "test:docker-process": "pnpm test:worker-runtime -- --testNamePattern='durable lifecycle'",
+    "test:chaos": "pnpm test:worker-runtime -- --testNamePattern='failure injection'",
     "test:worker-runtime": "NODE_ENV=test DATABASE_URL=postgresql://taskflow_test:taskflow_test@127.0.0.1:55439/taskflow_test REDIS_URL=redis://127.0.0.1:56389 JWT_SECRET=taskflow-integration-secret-at-least-32-characters API_KEY_HASH_SALT=integration-test-salt LOG_LEVEL=error vitest run integration/worker-runtime.test.ts --config vitest.config.ts --reporter=verbose",
-    "test:e2e": "vitest run e2e",
-    "test:failure": "vitest run failure",
-    "test:coverage": "vitest run --coverage",
-    "test:ui": "vitest --ui"
+    "test:coverage": "vitest run unit --config vitest.config.ts --coverage",
+    "test:ui": "vitest unit --config vitest.config.ts --ui",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@taskflow/config": "workspace:*",

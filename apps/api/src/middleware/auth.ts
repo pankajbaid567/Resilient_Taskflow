@@ -1,8 +1,8 @@
+import { securityConfig } from '@taskflow/config';
+import { createLogger } from '@taskflow/logger';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import * as jose from 'jose';
 
-import { securityConfig } from '@taskflow/config';
-import { createLogger } from '@taskflow/logger';
 
 const logger = createLogger({ component: 'AuthMiddleware' });
 
@@ -50,7 +50,7 @@ export async function authenticate(
   try {
     // Method 1: API Key authentication
     if (apiKey) {
-      const user = await validateApiKey(apiKey);
+      const user = validateApiKey(apiKey);
       if (user) {
         request.user = user;
         return;
@@ -102,9 +102,7 @@ export async function authenticate(
  * In development, accepts test keys.
  * In production, validates against database (to be implemented).
  */
-async function validateApiKey(
-  apiKey: string
-): Promise<AuthenticatedUser | null> {
+function validateApiKey(apiKey: string): AuthenticatedUser | null {
   // Development mode: Accept test keys
   if (process.env.NODE_ENV !== 'production') {
     if (apiKey === 'test-api-key') {
@@ -186,7 +184,7 @@ async function validateJwtToken(
     return {
       id: payload.sub,
       email: payload.email,
-      role: payload.role as 'admin' | 'user',
+      role: payload.role,
     };
   } catch (error) {
     // Log specific JWT errors
@@ -246,7 +244,7 @@ export async function optionalAuth(
 
   try {
     if (apiKey) {
-      const user = await validateApiKey(apiKey);
+      const user = validateApiKey(apiKey);
       if (user) {
         request.user = user;
       }

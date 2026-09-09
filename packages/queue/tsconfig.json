@@ -4,6 +4,8 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": false,
+    "strictNullChecks": true,
+    "useUnknownInCatchVariables": true,
     "skipLibCheck": true
   },
   "include": ["src/**/*"],

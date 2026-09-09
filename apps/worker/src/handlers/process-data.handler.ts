@@ -73,7 +73,7 @@ export async function processDataHandler(
         break;
 
       default:
-        throw new Error(`Unknown operation: ${payload.operation}`);
+        throw new Error('Unknown data-processing operation');
     }
 
     const duration = Date.now() - startTime;

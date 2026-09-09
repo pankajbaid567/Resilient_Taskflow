@@ -7,8 +7,8 @@
  * - L3: Database (slowest, source of truth)
  */
 
-import { LRUCache } from 'lru-cache';
 import { logger } from '@taskflow/logger';
+import { LRUCache } from 'lru-cache';
 
 export interface CacheOptions {
   l1MaxSize?: number;
@@ -116,7 +116,7 @@ export class MultiLayerCache<T> {
           
           return parsed;
         }
-      } catch (error) {
+      } catch (error: unknown) {
         logger.warn('L2 cache read error', { key: fullKey, error });
       }
       this.stats.l2Misses++;
@@ -127,7 +127,7 @@ export class MultiLayerCache<T> {
     const value = await fetcher();
 
     // Populate caches in background (don't wait)
-    this.populateCaches(fullKey, value, ttlOverride).catch((error) => {
+    this.populateCaches(fullKey, value, ttlOverride).catch((error: unknown) => {
       logger.warn('Cache population error', { key: fullKey, error });
     });
 
@@ -169,7 +169,7 @@ export class MultiLayerCache<T> {
           JSON.stringify(value),
           ttlOverride?.l2 || this.options.l2TTL
         );
-      } catch (error) {
+      } catch (error: unknown) {
         logger.warn('L2 cache write error', { key: fullKey, error });
       }
     }
@@ -178,7 +178,7 @@ export class MultiLayerCache<T> {
   /**
    * Invalidate key in all cache layers
    */
-  async invalidate(key: string): Promise<void> {
+  invalidate(key: string): Promise<void> {
     const fullKey = this.buildKey(key);
 
     // Invalidate L1
@@ -191,12 +191,14 @@ export class MultiLayerCache<T> {
       // Note: We need a delete function for L2, but for simplicity we'll just let it expire
       // In production, you'd want: await this.l2Delete(fullKey);
     }
+
+    return Promise.resolve();
   }
 
   /**
    * Invalidate multiple keys by pattern
    */
-  async invalidatePattern(pattern: string): Promise<void> {
+  invalidatePattern(pattern: string): Promise<void> {
     // Invalidate L1
     if (this.l1Cache) {
       const regex = new RegExp(pattern);
@@ -214,6 +216,7 @@ export class MultiLayerCache<T> {
     }
 
     // Invalidate L2 (would need Redis SCAN + DEL in production)
+    return Promise.resolve();
   }
 
   /**
@@ -330,7 +333,7 @@ export async function writeBehind<T>(
   await cache.set(key, value, ttl);
   
   // Write to database asynchronously (fire and forget)
-  persister(value).catch((error) => {
+  void persister(value).catch((error: unknown) => {
     logger.error('Write-behind persister failed', { key, error });
   });
 }
@@ -387,7 +390,9 @@ export class RefreshAheadCache<T> extends MultiLayerCache<T> {
       
       fetcher()
         .then((value) => this.set(key, value, ttl))
-        .catch((error) => logger.warn('Refresh-ahead failed', { key, error }))
+        .catch((error: unknown) =>
+          logger.warn('Refresh-ahead failed', { key, error })
+        )
         .finally(() => this.refreshing.delete(key));
     }
   }
