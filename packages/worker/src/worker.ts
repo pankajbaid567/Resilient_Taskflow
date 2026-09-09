@@ -3,6 +3,7 @@ import os from 'node:os';
 import {
   acquireJobForDelivery,
   completeJobDelivery,
+  completeCancellation,
   failJobDelivery,
   registerWorker,
   renewJobDeliveryLease,
@@ -319,6 +320,29 @@ export class Worker {
         message,
       });
       await acknowledgeMessage(message.queue, message.messageId);
+    } catch (cancellation) {
+      // CancellationError means the handler cooperated with cancellation
+      // (or the lease renewal detected CANCEL_REQUESTED and fired the token).
+      // Persist the terminal CANCELLED state and XACK so downstream workers
+      // do not re-deliver this message unnecessarily.
+      if (cancellation instanceof CancellationError) {
+        try {
+          await completeCancellation(jobId, this.config.workerId, leaseId);
+          this.logger.info('Job cancelled', { jobId });
+        } catch (persistError) {
+          // If we lost the lease (e.g., it expired during handler teardown),
+          // leave the message pending. The replacement worker will see CANCELLED
+          // or CANCEL_REQUESTED and handle it via acquireJobForDelivery.
+          this.logger.error('Could not persist cancellation', {
+            jobId,
+            error: persistError,
+          });
+          return;
+        }
+        await acknowledgeMessage(message.queue, message.messageId);
+        return;
+      }
+      throw cancellation;
     } finally {
       this.stopLeaseRenewal(activeJob);
       this.activeJobs.delete(jobId);
@@ -356,10 +380,18 @@ export class Worker {
       return await Promise.race([
         handler(job.payload, context),
         new Promise<never>((_, reject) => {
-          timeout = setTimeout(
-            () => reject(new Error(`Job timeout after ${job.timeoutMs}ms`)),
-            job.timeoutMs
-          );
+          timeout = setTimeout(() => {
+            // On timeout: if CANCEL_REQUESTED is already set, honour the
+            // cancellation rather than triggering a retry path. The token was
+            // already cancelled by startLeaseRenewal when it detected the
+            // status change; firing it again here is a no-op (idempotent).
+            cancellationToken.cancel();
+            reject(
+              cancellationToken.isCancellationRequested
+                ? new CancellationError('Job cancelled (timeout during cancellation)')
+                : new Error(`Job timeout after ${job.timeoutMs}ms`)
+            );
+          }, job.timeoutMs);
         }),
       ]);
     } finally {
@@ -376,7 +408,22 @@ export class Worker {
           activeJob.leaseId,
           this.config.leaseDurationMs
         );
-        if (!renewed) activeJob.cancellationToken.cancel();
+
+        if (!renewed) {
+          // Lease lost (expired or revoked) — cancel the handler
+          activeJob.cancellationToken.cancel();
+          return;
+        }
+
+        // Detect CANCEL_REQUESTED: the API set this status while the handler
+        // was running. The job is still owned (lease valid), so we can signal
+        // the handler cooperatively rather than waiting for the next renewal.
+        if (renewed.status === JobStatus.CANCEL_REQUESTED) {
+          this.logger.info('Cancellation detected on lease renewal', {
+            jobId: activeJob.jobId,
+          });
+          activeJob.cancellationToken.cancel();
+        }
       } catch (error) {
         this.logger.error('Lease renewal failed', {
           jobId: activeJob.jobId,

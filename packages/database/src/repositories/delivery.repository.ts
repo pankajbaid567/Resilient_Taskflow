@@ -704,6 +704,116 @@ export async function failJobDelivery(
   });
 }
 
+/**
+ * Atomically transition a job from CANCEL_REQUESTED to CANCELLED.
+ *
+ * Called by the worker after the handler has acknowledged the cancellation
+ * signal (via CancellationToken) and stopped executing. The worker must
+ * still own a valid lease at the time of this call.
+ *
+ * After this call the Redis entry can be safely XACK'd without concern for
+ * duplicate delivery — the TERMINAL result will be returned by
+ * acquireJobForDelivery on any subsequent reclaim attempt.
+ */
+export async function completeCancellation(
+  jobId: string,
+  workerId: string,
+  leaseId: string
+): Promise<Job> {
+  return db.transaction(async (tx) => {
+    // Re-validate ownership under a row lock. The lease may have been
+    // revoked concurrently (e.g., by a replacement worker that claimed
+    // a stale PROCESSING row after a crash).
+    const [ownedJob] = await tx
+      .select()
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(jobs.workerId, workerId),
+          eq(jobs.leaseId, leaseId),
+          // Accept both CANCEL_REQUESTED (cooperative) and PROCESSING
+          // (timeout-triggered cancellation path with CANCEL_REQUESTED
+          // detected before the lease check runs).
+          sql`${jobs.status} IN ('CANCEL_REQUESTED', 'PROCESSING')`,
+          sql`${jobs.leaseExpiresAt} > clock_timestamp()`
+        )
+      )
+      .limit(1)
+      .for('update');
+
+    if (!ownedJob) {
+      throw new JobDeliveryLeaseLostError(jobId, 'complete cancellation for');
+    }
+
+    const [cancelledJob] = await tx
+      .update(jobs)
+      .set({
+        status: JobStatus.CANCELLED,
+        completedAt: sql`clock_timestamp()`,
+        leaseId: null,
+        leaseExpiresAt: null,
+        version: sql`${jobs.version} + 1`,
+      })
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(jobs.version, ownedJob.version)
+        )
+      )
+      .returning();
+
+    if (!cancelledJob) {
+      throw new JobDeliveryLeaseLostError(jobId, 'complete cancellation for');
+    }
+
+    // Record the attempt as cancelled (mirrors the FAILED attempt pattern)
+    if (ownedJob.attempts > 0) {
+      await tx
+        .insert(jobAttempts)
+        .values({
+          jobId,
+          attemptNumber: ownedJob.attempts,
+          workerId,
+          startedAt: ownedJob.startedAt
+            ? sql`${ownedJob.startedAt.toISOString()}::timestamptz`
+            : sql`clock_timestamp()`,
+          completedAt: sql`clock_timestamp()`,
+          durationMs: sql<number>`GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (clock_timestamp() - ${jobAttempts.startedAt})) * 1000))::integer`,
+          status: JobStatus.CANCELLED,
+          error: { code: 'CANCELLED', message: 'Job was cancelled' },
+          errorMessage: 'Job was cancelled',
+          metadata: { leaseId, reason: 'cancellation_requested' },
+        })
+        .onConflictDoUpdate({
+          target: [jobAttempts.jobId, jobAttempts.attemptNumber],
+          set: {
+            completedAt: sql`clock_timestamp()`,
+            status: JobStatus.CANCELLED,
+            error: { code: 'CANCELLED', message: 'Job was cancelled' },
+            errorMessage: 'Job was cancelled',
+          },
+        });
+    }
+
+    await tx.insert(jobEvents).values({
+      jobId,
+      eventType: 'cancelled',
+      fromStatus: ownedJob.status,
+      toStatus: JobStatus.CANCELLED,
+      workerId,
+      userId: ownedJob.userId,
+      metadata: {
+        leaseId,
+        attemptNumber: ownedJob.attempts,
+        previousStatus: ownedJob.status,
+      },
+    });
+
+    return cancelledJob;
+  });
+}
+
 function isTerminalStatus(status: Job['status']): boolean {
   return (
     status === JobStatus.SUCCEEDED ||

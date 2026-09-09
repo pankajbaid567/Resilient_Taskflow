@@ -474,45 +474,71 @@ export async function failJob(
  * Cancel job
  */
 export async function cancelJob(jobId: string): Promise<Job> {
-  const currentJob = await getJobById(jobId);
+  return db.transaction(async (tx) => {
+    // Lock the row to prevent concurrent state mutations
+    const [lockedJob] = await tx
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1)
+      .for('update');
 
-  if (!currentJob) {
-    throw new Error(`Job ${jobId} not found`);
-  }
+    if (!lockedJob) {
+      throw new Error(`Job ${jobId} not found`);
+    }
 
-  let nextStatus: JobStatus;
+    const cancellableStatuses = [
+      JobStatus.CREATED,
+      JobStatus.QUEUED,
+      JobStatus.RETRY_SCHEDULED,
+      JobStatus.PROCESSING,
+    ];
 
-  if (currentJob.status === 'PROCESSING') {
-    // Request cancellation for running job
-    nextStatus = JobStatus.CANCEL_REQUESTED;
-  } else if (
-    currentJob.status === 'QUEUED' ||
-    currentJob.status === 'RETRY_SCHEDULED'
-  ) {
-    // Immediately cancel queued job
-    nextStatus = JobStatus.CANCELLED;
-  } else {
-    throw new InvalidStateTransitionError(
-      `Cannot cancel job in ${currentJob.status} state`
-    );
-  }
+    if (!cancellableStatuses.includes(lockedJob.status as JobStatus)) {
+      throw new InvalidStateTransitionError(
+        `Cannot cancel job in ${lockedJob.status} state`
+      );
+    }
 
-  const [job] = await db
-    .update(jobs)
-    .set({
-      status: nextStatus,
-      completedAt:
-        nextStatus === JobStatus.CANCELLED ? new Date() : undefined,
-      version: sql`${jobs.version} + 1`,
-    })
-    .where(and(eq(jobs.id, jobId), eq(jobs.version, currentJob.version)))
-    .returning();
+    // CREATED, QUEUED, and RETRY_SCHEDULED cancel immediately.
+    // PROCESSING requires the worker to observe CANCEL_REQUESTED and call
+    // completeCancellation — which then sets the final CANCELLED state.
+    const nextStatus =
+      lockedJob.status === JobStatus.PROCESSING
+        ? JobStatus.CANCEL_REQUESTED
+        : JobStatus.CANCELLED;
 
-  if (!job) {
-    throw new Error(`Failed to cancel job ${jobId}`);
-  }
+    const isTerminal = nextStatus === JobStatus.CANCELLED;
 
-  return job;
+    const [job] = await tx
+      .update(jobs)
+      .set({
+        status: nextStatus,
+        completedAt: isTerminal ? sql`clock_timestamp()` : undefined,
+        version: sql`${jobs.version} + 1`,
+      })
+      .where(and(eq(jobs.id, jobId), eq(jobs.version, lockedJob.version)))
+      .returning();
+
+    if (!job) {
+      throw new Error(`Failed to cancel job ${jobId}`);
+    }
+
+    await tx.insert(schema.jobEvents).values({
+      jobId,
+      eventType: 'cancelled',
+      fromStatus: lockedJob.status,
+      toStatus: nextStatus,
+      userId: job.userId,
+      metadata: {
+        version: job.version,
+        previousStatus: lockedJob.status,
+        immediate: isTerminal,
+      },
+    });
+
+    return job;
+  });
 }
 
 /**
