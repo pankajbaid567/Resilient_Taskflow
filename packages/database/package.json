@@ -1,0 +1,37 @@
+{
+  "name": "@taskflow/database",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "db:generate": "drizzle-kit generate:pg",
+    "db:migrate": "tsx src/migrate.ts",
+    "db:seed": "tsx src/seed.ts",
+    "db:studio": "drizzle-kit studio",
+    "db:push": "drizzle-kit push:pg",
+    "db:drop": "drizzle-kit drop"
+  },
+  "dependencies": {
+    "@taskflow/config": "workspace:*",
+    "@taskflow/logger": "workspace:*",
+    "@taskflow/types": "workspace:*",
+    "drizzle-orm": "^0.29.3",
+    "postgres": "^3.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "drizzle-kit": "^0.20.10",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

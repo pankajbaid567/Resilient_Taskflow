@@ -1,0 +1,38 @@
+{
+  "name": "@taskflow/tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Comprehensive test suite for Resilient TaskFlow",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run unit",
+    "test:integration": "vitest run integration",
+    "test:worker-runtime": "NODE_ENV=test DATABASE_URL=postgresql://taskflow_test:taskflow_test@127.0.0.1:55439/taskflow_test REDIS_URL=redis://127.0.0.1:56389 JWT_SECRET=taskflow-integration-secret-at-least-32-characters API_KEY_HASH_SALT=integration-test-salt LOG_LEVEL=error vitest run integration/worker-runtime.test.ts --config vitest.config.ts --reporter=verbose",
+    "test:e2e": "vitest run e2e",
+    "test:failure": "vitest run failure",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui"
+  },
+  "dependencies": {
+    "@taskflow/config": "workspace:*",
+    "@taskflow/database": "workspace:*",
+    "@taskflow/events": "workspace:*",
+    "@taskflow/logger": "workspace:*",
+    "@taskflow/observability": "workspace:*",
+    "@taskflow/queue": "workspace:*",
+    "@taskflow/retry": "workspace:*",
+    "@taskflow/types": "workspace:*",
+    "@taskflow/worker": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@vitest/ui": "^1.2.0",
+    "drizzle-orm": "^0.29.3",
+    "ioredis": "^5.3.2",
+    "kafkajs": "^2.2.4",
+    "pg": "^8.11.3",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0"
+  }
+}

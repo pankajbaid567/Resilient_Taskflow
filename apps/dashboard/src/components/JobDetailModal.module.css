@@ -1,0 +1,179 @@
+.container {
+  min-height: 200px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--gray-200);
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.jobId {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--gray-900);
+  font-family: 'Courier New', monospace;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+}
+
+.cancelButton,
+.retryButton {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.cancelButton {
+  background-color: var(--danger);
+  color: white;
+}
+
+.cancelButton:hover:not(:disabled) {
+  background-color: #dc2626;
+}
+
+.retryButton {
+  background-color: var(--primary);
+  color: white;
+}
+
+.retryButton:hover:not(:disabled) {
+  background-color: var(--primary-dark);
+}
+
+.cancelButton:disabled,
+.retryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.actionError {
+  padding: 12px;
+  background-color: #fee2e2;
+  border-left: 4px solid var(--danger);
+  border-radius: 4px;
+  color: var(--danger);
+  margin-bottom: 16px;
+}
+
+.error {
+  text-align: center;
+  padding: 40px;
+  color: var(--danger);
+}
+
+.infoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.infoItem {
+  background: var(--gray-50);
+  padding: 12px;
+  border-radius: 6px;
+}
+
+.infoLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gray-600);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.infoValue {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--gray-900);
+}
+
+.section {
+  margin-bottom: 32px;
+}
+
+.sectionTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--gray-900);
+  margin-bottom: 12px;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.timelineItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: var(--gray-50);
+  border-radius: 6px;
+}
+
+.timelineIcon {
+  font-size: 20px;
+}
+
+.timelineContent {
+  flex: 1;
+}
+
+.timelineLabel {
+  font-weight: 600;
+  color: var(--gray-900);
+  margin-bottom: 2px;
+}
+
+.timelineDate {
+  font-size: 14px;
+  color: var(--gray-600);
+}
+
+.timelineRelative {
+  margin-left: 8px;
+  color: var(--gray-500);
+  font-size: 13px;
+}
+
+.codeBlock {
+  background: var(--gray-900);
+  color: #d4d4d4;
+  padding: 16px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.errorBox {
+  background: #fee2e2;
+  border: 1px solid var(--danger);
+  color: #991b1b;
+  padding: 12px;
+  border-radius: 6px;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

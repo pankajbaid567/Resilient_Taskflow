@@ -1,0 +1,98 @@
+.container {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 260px;
+  background-color: var(--gray-900);
+  color: white;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 0;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+}
+
+.logo {
+  padding: 0 24px 32px;
+  border-bottom: 1px solid var(--gray-700);
+}
+
+.logo h1 {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.logo p {
+  font-size: 14px;
+  color: var(--gray-400);
+}
+
+.nav {
+  list-style: none;
+  padding: 16px 0;
+  flex: 1;
+}
+
+.nav li {
+  margin-bottom: 4px;
+}
+
+.nav a {
+  display: flex;
+  align-items: center;
+  padding: 12px 24px;
+  color: var(--gray-300);
+  text-decoration: none;
+  transition: all 0.2s;
+  font-size: 15px;
+}
+
+.nav a:hover {
+  background-color: var(--gray-800);
+  color: white;
+}
+
+.nav a.active {
+  background-color: var(--primary);
+  color: white;
+  font-weight: 500;
+}
+
+.icon {
+  margin-right: 12px;
+  font-size: 18px;
+}
+
+.main {
+  flex: 1;
+  overflow-y: auto;
+  background-color: var(--gray-50);
+}
+
+.content {
+  padding: 32px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    width: 80px;
+  }
+
+  .logo p,
+  .nav a span:not(.icon) {
+    display: none;
+  }
+
+  .logo h1 {
+    font-size: 18px;
+  }
+
+  .content {
+    padding: 16px;
+  }
+}

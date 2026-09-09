@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@taskflow/config": ["packages/config/src/index.ts"],
+      "@taskflow/database": ["packages/database/src/index.ts"],
+      "@taskflow/database/*": ["packages/database/src/*"],
+      "@taskflow/logger": ["packages/logger/src/index.ts"],
+      "@taskflow/queue": ["packages/queue/src/index.ts"],
+      "@taskflow/retry": ["packages/retry/src/index.ts"],
+      "@taskflow/types": ["packages/types/src/index.ts"],
+      "@taskflow/worker": ["packages/worker/src/index.ts"]
+    }
+  }
+}

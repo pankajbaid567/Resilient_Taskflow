@@ -1,0 +1,82 @@
+{
+  "name": "resilient-taskflow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-grade distributed task queue and asynchronous job-processing platform",
+  "keywords": [
+    "task-queue",
+    "job-processing",
+    "distributed-systems",
+    "redis-streams",
+    "postgres",
+    "kafka",
+    "worker-pool"
+  ],
+  "author": "Pankaj Baid",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.15.0",
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "dev:api": "pnpm --filter @taskflow/api dev",
+    "dev:worker": "pnpm --filter @taskflow/worker-app dev",
+    "dev:dashboard": "pnpm --filter @taskflow/dashboard dev",
+    "demo": "tsx scripts/demo.ts",
+    "build": "turbo run build",
+    "build:dashboard": "pnpm --filter @taskflow/dashboard build",
+    "test": "turbo run test",
+    "test:watch": "turbo run test:watch",
+    "test:chaos": "vitest run tests/chaos",
+    "test:worker-integration": "pnpm --filter @taskflow/tests test:worker-runtime",
+    "chaos": "ts-node tests/chaos/run-chaos.ts",
+    "load:sustained": "k6 run tests/load/sustained-load.test.js",
+    "load:spike": "k6 run tests/load/spike-load.test.js",
+    "load:scaling": "k6 run tests/load/worker-scaling.test.js",
+    "load:mixed": "k6 run tests/load/mixed-workload.test.js",
+    "load:all": "pnpm load:sustained && pnpm load:spike && pnpm load:scaling && pnpm load:mixed",
+    "perf:report": "ts-node scripts/performance-report.ts",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "db:migrate": "pnpm --filter @taskflow/database db:migrate",
+    "db:seed": "pnpm --filter @taskflow/database db:seed",
+    "prepare": "husky install"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.29.1",
+    "husky": "^9.0.10",
+    "lint-staged": "^15.2.0",
+    "prettier": "^3.2.4",
+    "turbo": "^1.12.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "typescript": "^5.3.3"
+    }
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md}": [
+      "prettier --write"
+    ]
+  }
+}

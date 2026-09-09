@@ -1,0 +1,286 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run every Monday at 9:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v3
+        with:
+          fail-on-severity: moderate
+          deny-licenses: GPL-3.0, AGPL-3.0
+
+  npm-audit:
+    name: NPM Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8.15.0
+
+      - name: Run pnpm audit
+        run: |
+          pnpm audit --audit-level=moderate --json > audit-results.json || true
+          
+          # Check for critical or high vulnerabilities
+          CRITICAL=$(cat audit-results.json | jq '.metadata.vulnerabilities.critical // 0')
+          HIGH=$(cat audit-results.json | jq '.metadata.vulnerabilities.high // 0')
+          
+          echo "Critical vulnerabilities: $CRITICAL"
+          echo "High vulnerabilities: $HIGH"
+          
+          if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+            echo "::error::Found critical or high severity vulnerabilities"
+            cat audit-results.json | jq '.advisories'
+            exit 1
+          fi
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: npm-audit-results
+          path: audit-results.json
+          retention-days: 30
+
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript', 'typescript']
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v2
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+        with:
+          category: '/language:${{ matrix.language }}'
+
+  secret-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog OSS
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
+
+  docker-scan:
+    name: Docker Image Scan
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    strategy:
+      matrix:
+        service: [api, worker, dashboard]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t taskflow-${{ matrix.service }}:test \
+            -f apps/${{ matrix.service }}/Dockerfile .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: taskflow-${{ matrix.service }}:test
+          format: 'sarif'
+          output: 'trivy-results-${{ matrix.service }}.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
+          category: trivy-${{ matrix.service }}
+
+      - name: Run Grype vulnerability scanner
+        uses: anchore/scan-action@v3
+        with:
+          image: taskflow-${{ matrix.service }}:test
+          fail-build: true
+          severity-cutoff: high
+
+  sast:
+    name: SAST with Semgrep
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/nodejs
+            p/typescript
+            p/docker
+          generateSarif: true
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  license-check:
+    name: License Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8.15.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check licenses
+        run: |
+          npx license-checker --summary --production \
+            --exclude "MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD" \
+            --failOn "GPL;AGPL;LGPL" || true
+
+      - name: Generate license report
+        run: |
+          npx license-checker --json --production > licenses.json
+
+      - name: Upload license report
+        uses: actions/upload-artifact@v3
+        with:
+          name: license-report
+          path: licenses.json
+          retention-days: 90
+
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [npm-audit, codeql, secret-scan, docker-scan, sast, license-check]
+    if: always()
+    steps:
+      - name: Check security scan results
+        run: |
+          FAILED=0
+          
+          if [ "${{ needs.npm-audit.result }}" != "success" ]; then
+            echo "::error::NPM Audit failed"
+            FAILED=1
+          fi
+          
+          if [ "${{ needs.codeql.result }}" != "success" ]; then
+            echo "::error::CodeQL Analysis failed"
+            FAILED=1
+          fi
+          
+          if [ "${{ needs.secret-scan.result }}" != "success" ]; then
+            echo "::error::Secret Scanning failed"
+            FAILED=1
+          fi
+          
+          if [ "${{ needs.docker-scan.result }}" != "success" ]; then
+            echo "::error::Docker Image Scan failed"
+            FAILED=1
+          fi
+          
+          if [ "${{ needs.sast.result }}" != "success" ]; then
+            echo "::error::SAST Scan failed"
+            FAILED=1
+          fi
+          
+          if [ "${{ needs.license-check.result }}" != "success" ]; then
+            echo "::warning::License Check had issues"
+          fi
+          
+          if [ $FAILED -eq 1 ]; then
+            echo "Security scans failed. Review the security findings."
+            exit 1
+          fi
+          
+          echo "All security scans passed successfully!"
+
+      - name: Create security report comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const body = `## Security Scan Results
+            
+            | Check | Status |
+            |-------|--------|
+            | NPM Audit | ${{ needs.npm-audit.result == 'success' ? '✅' : '❌' }} |
+            | CodeQL | ${{ needs.codeql.result == 'success' ? '✅' : '❌' }} |
+            | Secret Scan | ${{ needs.secret-scan.result == 'success' ? '✅' : '❌' }} |
+            | Docker Scan | ${{ needs.docker-scan.result == 'success' ? '✅' : '❌' }} |
+            | SAST | ${{ needs.sast.result == 'success' ? '✅' : '❌' }} |
+            | License Check | ${{ needs.license-check.result == 'success' ? '✅' : '⚠️' }} |
+            
+            ${needs.npm-audit.result != 'success' || needs.codeql.result != 'success' || needs.secret-scan.result != 'success' || needs.docker-scan.result != 'success' || needs.sast.result != 'success' ? '⚠️ **Security issues detected. Please review the workflow logs.**' : '✅ **All security checks passed!**'}
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });

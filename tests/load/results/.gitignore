@@ -1,0 +1,6 @@
+# Ignore all load test result files
+*.html
+*.json
+
+# But keep this directory
+!.gitignore
