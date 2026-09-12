@@ -60,6 +60,10 @@ export {
   getPendingMessages,
   claimStaleMessages,
   getPendingCount,
+  resetReclaimCursor,
 } from './consumer';
 
 export type { ConsumedMessage } from './consumer';
+
+// Quarantine
+export { quarantineEntry } from './quarantine';

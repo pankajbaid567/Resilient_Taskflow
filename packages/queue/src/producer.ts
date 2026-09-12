@@ -7,7 +7,7 @@ import {
 import type { RedisJobMessage } from '@taskflow/types';
 
 import { getRedisClient } from './redis-client';
-import { getStreamKey } from './stream-names';
+import { getStreamKey, WORKER_CONSUMER_GROUP } from './stream-names';
 
 const logger = createLogger({ component: 'QueueProducer' });
 
@@ -110,7 +110,10 @@ export async function enqueueJobBatch(
   });
 
   try {
-    // Execute all commands atomically
+    // Execute all pipeline commands. NOTE: A Redis pipeline is NOT atomic—
+    // it is a network efficiency optimization that batches commands into one
+    // round trip. Partial failures are possible: if one XADD fails, the
+    // others may have succeeded. Callers must handle partial results.
     const results = await pipeline.exec();
 
     if (!results) {
@@ -155,19 +158,61 @@ export async function getQueueDepth(queueName: string): Promise<number> {
 }
 
 /**
- * Trim stream to prevent unbounded growth
+ * Trim stream to prevent unbounded growth.
  *
- * Removes old acknowledged messages.
+ * Safety: before trimming, we query the Pending Entry List (PEL) minimum
+ * delivery ID. We never trim below that boundary so entries that are pending
+ * acknowledgement cannot be silently removed from the stream history.
+ *
+ * @param queueName - Queue to trim
+ * @param maxLength - Maximum number of entries to retain (approximate)
  */
 export async function trimStream(
   queueName: string,
-  maxLength: number = 100000
+  maxLength: number = 100_000
 ): Promise<number> {
   const redis = getRedisClient();
   const streamKey = getStreamKey(queueName);
+  const groupName = WORKER_CONSUMER_GROUP;
 
   try {
-    // XTRIM with approximate trimming (more efficient)
+    // Query PEL summary to find the oldest unacknowledged delivery ID.
+    // xpending(key, group) returns [count, minId, maxId, consumers].
+    const pelSummary = (await redis.xpending(streamKey, groupName)) as [
+      number,
+      string | null,
+      string | null,
+      unknown,
+    ] | null;
+
+    if (pelSummary && pelSummary[0] > 0 && pelSummary[1]) {
+      // There are pending entries. Trim with MINID set to just before the
+      // oldest PEL entry so we never evict an unacknowledged message.
+      //
+      // We subtract 1ms from the timestamp portion to keep the boundary
+      // entry itself. MINID format is <ms>-<seq>; we reconstruct it.
+      const [msStr] = pelSummary[1].split('-');
+      const pelMinMs = Number(msStr);
+
+      if (Number.isFinite(pelMinMs) && pelMinMs > 0) {
+        // Only trim entries older than the oldest pending entry.
+        const safeTrimId = `${pelMinMs - 1}-0`;
+        const trimmed = await redis.xtrim(streamKey, 'MINID', '~', safeTrimId);
+
+        if (trimmed > 0) {
+          logger.info('Stream trimmed (PEL-safe)', {
+            queue: queueName,
+            trimmed,
+            pelMinId: pelSummary[1],
+            safeTrimId,
+          });
+        }
+
+        return trimmed;
+      }
+    }
+
+    // No PEL entries: trim freely by MAXLEN.
     const trimmed = await redis.xtrim(streamKey, 'MAXLEN', '~', maxLength);
 
     if (trimmed > 0) {

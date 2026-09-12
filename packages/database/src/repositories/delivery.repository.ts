@@ -147,7 +147,7 @@ export async function acquireJobForDelivery(
     }
 
     if (job.status === JobStatus.PROCESSING) {
-      if (!job.leaseExpiresAt || leaseIsActive) {
+      if (job.leaseExpiresAt && leaseIsActive) {
         return { kind: 'BUSY', job };
       }
 

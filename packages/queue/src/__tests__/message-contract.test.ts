@@ -16,10 +16,12 @@ import {
 type RedisMockArguments = Array<string | number>;
 
 const redis = vi.hoisted(() => ({
+  call: vi.fn<RedisMockArguments, Promise<unknown>>(),
   xadd: vi.fn<RedisMockArguments, Promise<unknown>>(),
   xreadgroup: vi.fn<RedisMockArguments, Promise<unknown>>(),
   xpending: vi.fn<RedisMockArguments, Promise<unknown>>(),
   xclaim: vi.fn<RedisMockArguments, Promise<unknown>>(),
+  xack: vi.fn<RedisMockArguments, Promise<unknown>>(),
 }));
 
 vi.mock('../redis-client', () => ({
@@ -150,15 +152,16 @@ describe('Redis job message contract', () => {
     await expect(consumeJobs('worker-1', ['default'])).rejects.toThrow();
   });
 
-  it('parses the nested entry tuples returned by ioredis XCLAIM', async () => {
-    redis.xpending.mockResolvedValue([
-      ['1003-0', 'worker:dead-worker', 30_001, 1],
-    ]);
-    redis.xclaim.mockResolvedValue([
+  it('parses the nested entry tuples returned by XAUTOCLAIM', async () => {
+    redis.call.mockResolvedValue([
+      '0-0',
       [
-        '1003-0',
-        [REDIS_JOB_MESSAGE_FIELD, JSON.stringify(envelope({ attempt: 2 }))],
+        [
+          '1003-0',
+          [REDIS_JOB_MESSAGE_FIELD, JSON.stringify(envelope({ attempt: 2 }))],
+        ],
       ],
+      [],
     ]);
 
     await expect(
@@ -172,12 +175,41 @@ describe('Redis job message contract', () => {
       },
     ]);
 
-    expect(redis.xclaim).toHaveBeenCalledWith(
+    expect(redis.call).toHaveBeenCalledWith(
+      'XAUTOCLAIM',
       getStreamKey('default'),
       WORKER_CONSUMER_GROUP,
       getConsumerName('replacement'),
       30_000,
-      '1003-0'
+      '0-0',
+      'COUNT',
+      1
+    );
+  });
+
+  it('quarantines poison messages during XAUTOCLAIM and returns valid messages', async () => {
+    redis.call.mockResolvedValue([
+      '1005-0',
+      [
+        ['1004-0', ['invalid_field', 'poison_value']],
+        [
+          '1005-0',
+          [REDIS_JOB_MESSAGE_FIELD, JSON.stringify(envelope({ attempt: 1 }))],
+        ],
+      ],
+      [],
+    ]);
+    redis.xadd.mockResolvedValue('quarantine-id');
+    redis.xack.mockResolvedValue(1);
+
+    const claimed = await claimStaleMessages('default', 'replacement', 30_000, 2);
+
+    expect(claimed).toHaveLength(1);
+    expect(claimed[0]?.messageId).toBe('1005-0');
+    expect(redis.xack).toHaveBeenCalledWith(
+      getStreamKey('default'),
+      WORKER_CONSUMER_GROUP,
+      '1004-0'
     );
   });
 });

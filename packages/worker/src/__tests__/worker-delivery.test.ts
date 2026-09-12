@@ -5,6 +5,7 @@ import {
   JobPriority,
   JobStatus,
   REDIS_JOB_MESSAGE_VERSION,
+  WorkerStatus,
 } from '@taskflow/types';
 
 import { HandlerRegistry } from '../handler-registry';
@@ -15,6 +16,7 @@ import type { TerminalPersistedEvent, WorkerConfig } from '../worker-config';
 const database = vi.hoisted(() => ({
   acquireJobForDelivery: vi.fn(),
   completeJobDelivery: vi.fn(),
+  completeCancellation: vi.fn(),
   failJobDelivery: vi.fn(),
   registerWorker: vi.fn(),
   renewJobDeliveryLease: vi.fn(),
@@ -28,6 +30,7 @@ const queue = vi.hoisted(() => ({
   claimStaleMessages: vi.fn(),
   consumeJobs: vi.fn(),
   createConsumerGroup: vi.fn(),
+  quarantineEntry: vi.fn(),
 }));
 
 vi.mock('@taskflow/database', () => database);
@@ -142,6 +145,8 @@ describe('Worker delivery acknowledgement boundary', () => {
     vi.clearAllMocks();
     database.startJobAttempt.mockResolvedValue({});
     database.renewJobDeliveryLease.mockResolvedValue(job());
+    database.updateWorkerHeartbeat.mockResolvedValue({});
+    database.updateWorkerStatus.mockResolvedValue({});
     queue.acknowledgeMessage.mockResolvedValue(true);
   });
 
@@ -279,6 +284,139 @@ describe('Worker delivery acknowledgement boundary', () => {
       'completion persisted PROCESSING'
     );
     expect(queue.acknowledgeMessage).not.toHaveBeenCalled();
+  });
+
+  it('quarantines message after 3 consecutive NOT_FOUND reclaims', async () => {
+    const handler = vi.fn();
+    const worker = createTestWorker(handler);
+    database.acquireJobForDelivery.mockResolvedValue({ kind: 'NOT_FOUND' });
+
+    const msg = message();
+    await processMessage(worker, msg);
+    expect(queue.quarantineEntry).not.toHaveBeenCalled();
+
+    await processMessage(worker, msg);
+    expect(queue.quarantineEntry).not.toHaveBeenCalled();
+
+    await processMessage(worker, msg);
+    expect(queue.quarantineEntry).toHaveBeenCalledWith(
+      msg.stream,
+      msg.messageId,
+      'JOB_NOT_FOUND',
+      expect.objectContaining({ jobId: msg.data.jobId, attempts: 3 })
+    );
+  });
+
+  it('leaves delayed RETRY_SCHEDULED job pending without quarantine', async () => {
+    const handler = vi.fn();
+    const worker = createTestWorker(handler);
+    const retryJob = {
+      ...job(JobStatus.RETRY_SCHEDULED),
+      scheduledAt: new Date(Date.now() + 60_000),
+    };
+    database.acquireJobForDelivery.mockResolvedValue({
+      kind: 'NOT_READY',
+      job: retryJob,
+    });
+
+    const msg = message();
+    for (let i = 0; i < 5; i++) {
+      await processMessage(worker, msg);
+    }
+
+    expect(queue.quarantineEntry).not.toHaveBeenCalled();
+    expect(queue.acknowledgeMessage).not.toHaveBeenCalled();
+  });
+
+  it('quarantines stuck NOT_READY message after 3 consecutive attempts', async () => {
+    const handler = vi.fn();
+    const worker = createTestWorker(handler);
+    const stuckJob = {
+      ...job(JobStatus.CREATED),
+      scheduledAt: new Date(Date.now() - 60_000),
+    };
+    database.acquireJobForDelivery.mockResolvedValue({
+      kind: 'NOT_READY',
+      job: stuckJob,
+    });
+
+    const msg = message();
+    await processMessage(worker, msg);
+    await processMessage(worker, msg);
+    expect(queue.quarantineEntry).not.toHaveBeenCalled();
+
+    await processMessage(worker, msg);
+    expect(queue.quarantineEntry).toHaveBeenCalledWith(
+      msg.stream,
+      msg.messageId,
+      'NOT_READY_CREATED',
+      expect.objectContaining({ jobId: msg.data.jobId, status: JobStatus.CREATED, attempts: 3 })
+    );
+  });
+
+  it('stop() marks worker STOPPING in database and transitions to STOPPED after handlers settle', async () => {
+    database.registerWorker.mockResolvedValue({});
+    queue.createConsumerGroup.mockResolvedValue(true);
+    const handlerDef = deferred<Record<string, unknown>>();
+    const handler = vi.fn(async () => handlerDef.promise);
+    const worker = createTestWorker(handler, { shutdownTimeoutMs: 500 });
+    await worker.start();
+
+    database.acquireJobForDelivery.mockResolvedValue({
+      kind: 'ACQUIRED',
+      job: job(),
+    });
+    database.startJobAttempt.mockResolvedValue({});
+    database.completeJobDelivery.mockResolvedValue(job(JobStatus.SUCCEEDED));
+
+    const processPromise = processMessage(worker, message());
+    await new Promise((r) => setTimeout(r, 10));
+
+    const stopPromise = worker.stop();
+
+    expect(database.updateWorkerStatus).toHaveBeenCalledWith(
+      workerId,
+      WorkerStatus.STOPPING
+    );
+
+    handlerDef.resolve({ done: true });
+    await processPromise;
+    await stopPromise;
+
+    expect(database.updateWorkerStatus).toHaveBeenCalledWith(
+      workerId,
+      WorkerStatus.STOPPED
+    );
+    expect(worker.getState()).toBe('STOPPED');
+  });
+
+  it('stop() bounds shutdown deadline and reports STOPPED when handler stalls', async () => {
+    database.registerWorker.mockResolvedValue({});
+    queue.createConsumerGroup.mockResolvedValue(true);
+    const handler = vi.fn(() => new Promise(() => {})); // Never resolves
+    const worker = createTestWorker(handler, { shutdownTimeoutMs: 50 });
+    await worker.start();
+
+    database.acquireJobForDelivery.mockResolvedValue({
+      kind: 'ACQUIRED',
+      job: job(),
+    });
+    database.startJobAttempt.mockResolvedValue({});
+
+    void processMessage(worker, message());
+    await new Promise((r) => setTimeout(r, 10));
+
+    await worker.stop();
+
+    expect(database.updateWorkerStatus).toHaveBeenCalledWith(
+      workerId,
+      WorkerStatus.STOPPING
+    );
+    expect(database.updateWorkerStatus).toHaveBeenCalledWith(
+      workerId,
+      WorkerStatus.STOPPED
+    );
+    expect(worker.getState()).toBe('STOPPED');
   });
 });
 

@@ -2,6 +2,7 @@ import { createLogger } from '@taskflow/logger';
 import { parseRedisJobMessage, REDIS_JOB_MESSAGE_FIELD } from '@taskflow/types';
 import type { RedisJobMessage } from '@taskflow/types';
 
+import { quarantineEntry } from './quarantine';
 import { getRedisClient } from './redis-client';
 import {
   getConsumerName,
@@ -75,7 +76,7 @@ function isUnknownArray(value: unknown): value is unknown[] {
 
 function parseClaimedEntry(stream: string, entry: unknown): ConsumedMessage {
   if (!isUnknownArray(entry) || entry.length !== 2) {
-    throw new Error('Redis XCLAIM returned an invalid stream entry');
+    throw new Error('Redis XCLAIM/XAUTOCLAIM returned an invalid stream entry');
   }
 
   const messageId = entry[0];
@@ -83,9 +84,9 @@ function parseClaimedEntry(stream: string, entry: unknown): ConsumedMessage {
   if (
     typeof messageId !== 'string' ||
     !isUnknownArray(fields) ||
-    !fields.every((field) => typeof field === 'string')
+    !fields.every((field): field is string => typeof field === 'string')
   ) {
-    throw new Error('Redis XCLAIM returned an invalid stream entry');
+    throw new Error('Redis XCLAIM/XAUTOCLAIM returned an invalid stream entry');
   }
 
   return parseConsumedMessage(stream, messageId, fields);
@@ -241,9 +242,11 @@ export async function acknowledgeMessageBatch(
 }
 
 /**
- * Get pending messages for a consumer
+ * Get pending messages for a consumer (XPENDING summary or detail).
  *
- * Returns messages that were delivered but not acknowledged.
+ * NOTE: This function returns at most `count` entries and starts from the
+ * beginning of the PEL. For exhaustive scanning use claimStaleMessages,
+ * which uses cursor-based XAUTOCLAIM internally.
  */
 export async function getPendingMessages(
   queueName: string,
@@ -308,69 +311,107 @@ export async function getPendingMessages(
   }
 }
 
+const reclaimCursors = new Map<string, string>();
+
 /**
- * Claim stale messages from dead/slow workers
+ * Reset in-memory reclaim cursor (e.g. on worker restart or for testing)
+ */
+export function resetReclaimCursor(queueName?: string): void {
+  if (queueName) {
+    reclaimCursors.delete(getStreamKey(queueName));
+  } else {
+    reclaimCursors.clear();
+  }
+}
+
+/**
+ * Claim stale messages from dead/slow workers using cursor-based XAUTOCLAIM.
  *
- * Transfers ownership of messages that have been idle too long.
+ * XAUTOCLAIM is used instead of XPENDING+XCLAIM for two reasons:
+ *
+ *  1. **Exhaustive**: XPENDING returns at most N entries starting from the
+ *     beginning of the PEL. XAUTOCLAIM uses a cursor so multiple calls
+ *     eventually process every pending entry, even when the PEL has more than
+ *     `limit` entries.
+ *
+ *  2. **Poison entry isolation**: Each claimed entry is parsed independently.
+ *     A malformed envelope does not block subsequent valid entries — the
+ *     poison entry is quarantined (XACK'd) and the rest are returned to the
+ *     caller for processing.
+ *
+ * @param queueName     - Queue to scan
+ * @param workerId      - Worker claiming ownership
+ * @param minIdleTimeMs - Minimum idle time before an entry is reclaimable
+ * @param limit         - Maximum entries to claim per call (default: 10)
+ * @param cursor        - Optional explicit XAUTOCLAIM cursor
+ * @returns Claimed messages
  */
 export async function claimStaleMessages(
   queueName: string,
   workerId: string,
-  minIdleTimeMs: number = 30000,
-  limit: number = 10
+  minIdleTimeMs: number = 30_000,
+  limit: number = 10,
+  cursor?: string
 ): Promise<ConsumedMessage[]> {
   const redis = getRedisClient();
   const streamKey = getStreamKey(queueName);
   const groupName = WORKER_CONSUMER_GROUP;
   const consumerName = getConsumerName(workerId);
+  const effectiveCursor = cursor ?? reclaimCursors.get(streamKey) ?? '0-0';
 
-  try {
-    // First, get stale pending messages
-    const pending = await getPendingMessages(queueName, undefined, 100);
+  // XAUTOCLAIM <key> <group> <consumer> <min-idle-time> <start-id> [COUNT <n>]
+  // Returns: [nextCursor, [[id, fields], ...], [deletedIds]]
+  const rawResult = (await redis.call(
+    'XAUTOCLAIM',
+    streamKey,
+    groupName,
+    consumerName,
+    minIdleTimeMs,
+    effectiveCursor,
+    'COUNT',
+    limit
+  )) as [string, unknown[], unknown[]];
 
-    const staleIds = pending
-      .filter((p) => p.idleTimeMs > minIdleTimeMs)
-      .slice(0, limit)
-      .map((p) => p.messageId);
+  const nextCursor = rawResult[0];
+  const entries = rawResult[1];
+  reclaimCursors.set(streamKey, nextCursor);
 
-    if (staleIds.length === 0) {
-      return [];
-    }
-
-    // Claim ownership of stale messages
-    const claimed = await redis.xclaim(
-      streamKey,
-      groupName,
-      consumerName,
-      minIdleTimeMs,
-      ...staleIds
-    );
-
-    // Parse claimed messages
-    const messages: ConsumedMessage[] = [];
-
-    for (const entry of claimed) {
-      messages.push(parseClaimedEntry(streamKey, entry));
-    }
-
-    if (messages.length > 0) {
-      logger.info('Stale messages claimed', {
-        workerId,
-        queue: queueName,
-        count: messages.length,
-        minIdleTimeMs,
-      });
-    }
-
-    return messages;
-  } catch (error) {
-    logger.error('Failed to claim stale messages', {
-      workerId,
-      queue: queueName,
-      error,
-    });
+  if (entries.length === 0) {
     return [];
   }
+
+  const messages: ConsumedMessage[] = [];
+
+  for (const entry of entries) {
+    // Parse each entry independently — a poison entry must not block the rest.
+    try {
+      messages.push(parseClaimedEntry(streamKey, entry));
+    } catch (parseError) {
+      // Quarantine: the entry is malformed or uses an unsupported schema.
+      // XACK it so it leaves the PEL and does not stall recovery of healthy
+      // entries. The entry is also recorded in the quarantine stream.
+      const entryId =
+        isUnknownArray(entry) && typeof entry[0] === 'string'
+          ? entry[0]
+          : '<unknown>';
+
+      await quarantineEntry(streamKey, entryId, 'MALFORMED_STREAM_ENTRY', {
+        queue: queueName,
+        error: String(parseError),
+      });
+    }
+  }
+
+  if (messages.length > 0) {
+    logger.info('Stale messages claimed', {
+      workerId,
+      queue: queueName,
+      count: messages.length,
+      minIdleTimeMs,
+    });
+  }
+
+  return messages;
 }
 
 /**
