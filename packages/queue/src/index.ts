@@ -59,11 +59,12 @@ export {
   acknowledgeMessageBatch,
   getPendingMessages,
   claimStaleMessages,
+  claimStaleMessagesWithReport,
   getPendingCount,
   resetReclaimCursor,
 } from './consumer';
 
-export type { ConsumedMessage } from './consumer';
+export type { ConsumedMessage, StaleClaimReport } from './consumer';
 
 // Quarantine
 export { quarantineEntry } from './quarantine';

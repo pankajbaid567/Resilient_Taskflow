@@ -1,13 +1,9 @@
 /**
  * Backoff Strategy
- * 
+ *
  * Determines the delay before retrying a failed job.
  */
-export type BackoffStrategy =
-  | 'exponential'
-  | 'linear'
-  | 'fixed'
-  | 'fibonacci';
+export type BackoffStrategy = 'exponential' | 'linear' | 'fixed' | 'fibonacci';
 
 /**
  * Backoff Configuration
@@ -116,7 +112,7 @@ export function calculateRetryTime(
 
 /**
  * Add jitter to delay
- * 
+ *
  * Jitter prevents thundering herd problem when many jobs fail simultaneously.
  * Uses full jitter algorithm: random value between 0 and calculated delay.
  */
@@ -167,7 +163,7 @@ export function formatDelay(delayMs: number): string {
 
 /**
  * Preview backoff schedule
- * 
+ *
  * Useful for debugging and configuration tuning.
  */
 export function previewBackoffSchedule(

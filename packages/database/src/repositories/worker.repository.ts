@@ -1,13 +1,23 @@
 import { WorkerStatus } from '@taskflow/types';
-import { and, eq, lt, sql } from 'drizzle-orm';
-
+import { and, asc, desc, eq, lt, sql } from 'drizzle-orm';
 
 import { db } from '../client';
 import { NewWorker, Worker, workers } from '../schema';
 
+export interface ListWorkersOptions {
+  status?: WorkerStatus;
+  limit: number;
+  offset: number;
+}
+
+export interface PaginatedWorkers {
+  workers: Worker[];
+  total: number;
+}
+
 /**
  * Worker Repository
- * 
+ *
  * Handles all database operations for workers.
  */
 
@@ -16,11 +26,11 @@ import { NewWorker, Worker, workers } from '../schema';
  */
 export async function registerWorker(data: NewWorker): Promise<Worker> {
   const [worker] = await db.insert(workers).values(data).returning();
-  
+
   if (!worker) {
     throw new Error('Failed to register worker');
   }
-  
+
   return worker;
 }
 
@@ -34,7 +44,7 @@ export async function getWorkerById(
     .select()
     .from(workers)
     .where(eq(workers.id, workerId));
-  
+
   return worker;
 }
 
@@ -42,10 +52,54 @@ export async function getWorkerById(
  * Get all active workers
  */
 export async function getActiveWorkers(): Promise<Worker[]> {
-  return db
-    .select()
+  return db.select().from(workers).where(eq(workers.status, 'ACTIVE'));
+}
+
+/** List workers from PostgreSQL, applying the status filter before pagination. */
+export async function listWorkers(
+  options: ListWorkersOptions
+): Promise<PaginatedWorkers> {
+  const predicate = options.status
+    ? eq(workers.status, options.status)
+    : undefined;
+
+  return db.transaction(async (tx) => {
+    const [workerRows, [countRow]] = await Promise.all([
+      tx
+        .select()
+        .from(workers)
+        .where(predicate)
+        .orderBy(desc(workers.startedAt), asc(workers.id))
+        .limit(options.limit)
+        .offset(options.offset),
+      tx
+        .select({ total: sql<number>`COUNT(*)::integer` })
+        .from(workers)
+        .where(predicate),
+    ]);
+
+    return {
+      workers: workerRows,
+      total: countRow?.total ?? 0,
+    };
+  });
+}
+
+/** Count active workers that declared the supplied queue name. */
+export async function countActiveWorkersForQueue(
+  queueName: string
+): Promise<number> {
+  const [countRow] = await db
+    .select({ total: sql<number>`COUNT(*)::integer` })
     .from(workers)
-    .where(eq(workers.status, 'ACTIVE'));
+    .where(
+      and(
+        eq(workers.status, WorkerStatus.ACTIVE),
+        sql`${queueName} = ANY(${workers.queues})`
+      )
+    );
+
+  return countRow?.total ?? 0;
 }
 
 /**
@@ -71,7 +125,7 @@ export async function updateWorkerHeartbeat(
     })
     .where(eq(workers.id, workerId))
     .returning();
-  
+
   return worker || null;
 }
 
@@ -83,17 +137,17 @@ export async function updateWorkerStatus(
   status: WorkerStatus
 ): Promise<Worker | null> {
   const updates: Partial<Worker> = { status };
-  
+
   if (status === WorkerStatus.STOPPED) {
     updates.stoppedAt = new Date();
   }
-  
+
   const [worker] = await db
     .update(workers)
     .set(updates)
     .where(eq(workers.id, workerId))
     .returning();
-  
+
   return worker || null;
 }
 
@@ -104,15 +158,12 @@ export async function getStaleWorkers(
   thresholdSeconds: number = 60
 ): Promise<Worker[]> {
   const cutoffTime = new Date(Date.now() - thresholdSeconds * 1000);
-  
+
   return db
     .select()
     .from(workers)
     .where(
-      and(
-        eq(workers.status, 'ACTIVE'),
-        lt(workers.lastHeartbeatAt, cutoffTime)
-      )
+      and(eq(workers.status, 'ACTIVE'), lt(workers.lastHeartbeatAt, cutoffTime))
     );
 }
 
@@ -123,7 +174,7 @@ export async function markStaleWorkersAsFailed(
   thresholdSeconds: number = 60
 ): Promise<number> {
   const cutoffTime = new Date(Date.now() - thresholdSeconds * 1000);
-  
+
   const result = await db
     .update(workers)
     .set({
@@ -131,12 +182,9 @@ export async function markStaleWorkersAsFailed(
       stoppedAt: new Date(),
     })
     .where(
-      and(
-        eq(workers.status, 'ACTIVE'),
-        lt(workers.lastHeartbeatAt, cutoffTime)
-      )
+      and(eq(workers.status, 'ACTIVE'), lt(workers.lastHeartbeatAt, cutoffTime))
     );
-  
+
   return result.length;
 }
 
@@ -170,14 +218,16 @@ export async function getWorkerStats(): Promise<
       totalJobsFailed: sql<number>`SUM(${workers.totalJobsFailed})`,
     })
     .from(workers);
-  
+
   return stats;
 }
 
 /**
  * Unregister worker (soft delete by marking as stopped)
  */
-export async function unregisterWorker(workerId: string): Promise<Worker | null> {
+export async function unregisterWorker(
+  workerId: string
+): Promise<Worker | null> {
   return updateWorkerStatus(workerId, WorkerStatus.STOPPED);
 }
 
@@ -188,15 +238,12 @@ export async function deleteOldStoppedWorkers(
   olderThanDays: number = 7
 ): Promise<number> {
   const cutoffDate = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
-  
+
   const result = await db
     .delete(workers)
     .where(
-      and(
-        eq(workers.status, 'STOPPED'),
-        lt(workers.stoppedAt, cutoffDate)
-      )
+      and(eq(workers.status, 'STOPPED'), lt(workers.stoppedAt, cutoffDate))
     );
-  
+
   return result.length;
 }

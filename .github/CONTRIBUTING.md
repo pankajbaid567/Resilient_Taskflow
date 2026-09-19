@@ -18,22 +18,26 @@ Please be respectful and constructive in all interactions. We aim to foster an i
 ### Setup Development Environment
 
 1. **Fork and clone the repository:**
+
    ```bash
    git clone https://github.com/YOUR_USERNAME/Resilient_TaskFlow.git
    cd Resilient_TaskFlow
    ```
 
 2. **Install dependencies:**
+
    ```bash
    pnpm install
    ```
 
 3. **Start development services:**
+
    ```bash
    docker-compose up -d
    ```
 
 4. **Run database migrations:**
+
    ```bash
    pnpm db:migrate
    ```
@@ -57,6 +61,7 @@ Please be respectful and constructive in all interactions. We aim to foster an i
 ### Making Changes
 
 1. **Create a feature branch:**
+
    ```bash
    git checkout -b feature/your-feature-name
    ```
@@ -66,6 +71,7 @@ Please be respectful and constructive in all interactions. We aim to foster an i
 3. **Write tests** for new functionality
 
 4. **Run tests locally:**
+
    ```bash
    pnpm lint
    pnpm typecheck
@@ -93,6 +99,7 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 - `security: description` - Security fixes
 
 **Examples:**
+
 ```bash
 feat: add job priority scheduling
 fix: resolve memory leak in worker pool
@@ -103,6 +110,7 @@ test: add integration tests for retry logic
 ### Pull Request Process
 
 1. **Push your branch:**
+
    ```bash
    git push origin feature/your-feature-name
    ```
@@ -139,6 +147,7 @@ test: add integration tests for retry logic
 - Document complex logic with comments
 
 **Example:**
+
 ```typescript
 interface JobPayload {
   type: string;
@@ -178,22 +187,24 @@ packages/
 - **E2E tests** for critical workflows
 
 **Test file naming:**
+
 ```
 src/job-processor.ts
 src/__tests__/job-processor.test.ts
 ```
 
 **Test structure:**
+
 ```typescript
 describe('JobProcessor', () => {
   describe('processJob', () => {
     it('should process job successfully', async () => {
       // Arrange
       const job = createMockJob();
-      
+
       // Act
       const result = await processJob(job);
-      
+
       // Assert
       expect(result.status).toBe('completed');
     });
@@ -212,14 +223,15 @@ describe('JobProcessor', () => {
 - Include code examples when helpful
 
 **Example:**
-```typescript
+
+````typescript
 /**
  * Submits a job to the queue for asynchronous processing.
- * 
+ *
  * @param payload - Job payload including type and data
  * @param options - Optional job configuration
  * @returns Promise resolving to created job
- * 
+ *
  * @example
  * ```typescript
  * const job = await submitJob({
@@ -234,7 +246,7 @@ async function submitJob(
 ): Promise<Job> {
   // Implementation
 }
-```
+````
 
 ## Project Structure
 
@@ -334,6 +346,7 @@ vi.mock('@taskflow/database', () => ({
 ### Documentation Updates
 
 When adding features:
+
 - Update relevant README files
 - Add API documentation
 - Update architecture diagrams if needed
@@ -380,6 +393,7 @@ See [CI/CD Documentation](../docs/ci-cd.md) for details.
 ## Recognition
 
 Contributors will be:
+
 - Listed in CONTRIBUTORS.md
 - Acknowledged in release notes
 - Thanked in the community

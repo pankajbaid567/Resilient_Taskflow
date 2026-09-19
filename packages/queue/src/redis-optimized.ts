@@ -12,9 +12,9 @@ import { redisAnalyzer } from '@taskflow/performance';
 import Redis, { type ChainableCommander, type RedisValue } from 'ioredis';
 
 type RedisStreamEntry = [id: string, fields: string[]];
-type RedisStreamReadResult =
-  | Array<[key: string, items: RedisStreamEntry[]]>
-  | null;
+type RedisStreamReadResult = Array<
+  [key: string, items: RedisStreamEntry[]]
+> | null;
 
 /**
  * Optimized Redis client wrapper

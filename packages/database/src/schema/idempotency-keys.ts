@@ -12,28 +12,28 @@ import { users } from './users';
 
 /**
  * Idempotency Keys Table
- * 
+ *
  * Prevents duplicate job submissions.
  */
 export const idempotencyKeys = pgTable(
   'idempotency_keys',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    
+
     // Key
     idempotencyKey: varchar('idempotency_key', { length: 255 }).notNull(),
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id),
-    
+
     // Reference
     jobId: uuid('job_id')
       .notNull()
-      .references(() => jobs.id),
-    
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+
     // Request fingerprint
     requestHash: varchar('request_hash', { length: 64 }).notNull(),
-    
+
     // Timing
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -47,6 +47,11 @@ export const idempotencyKeys = pgTable(
     ),
     expiresAtIdx: index('idx_idempotency_keys_expires').on(table.expiresAt),
     jobIdIdx: index('idx_idempotency_keys_job_id').on(table.jobId),
+    activeLookupIdx: index('idx_idempotency_keys_active').on(
+      table.userId,
+      table.idempotencyKey,
+      table.expiresAt
+    ),
   })
 );
 

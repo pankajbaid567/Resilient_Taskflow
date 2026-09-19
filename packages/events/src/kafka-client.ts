@@ -62,7 +62,7 @@ export interface TaskFlowKafkaConfig {
 
 /**
  * Kafka Client Wrapper
- * 
+ *
  * Provides connection management and client lifecycle.
  */
 export class KafkaClient {

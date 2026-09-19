@@ -56,11 +56,14 @@ export type JobEventType =
   | 'completed'
   | 'failed'
   | 'retried'
+  | 'cancellation_requested'
   | 'cancelled'
   | 'dead_lettered'
   | 'timeout'
   | 'lease_acquired'
-  | 'lease_expired';
+  | 'lease_expired'
+  | 'lease_renewed'
+  | 'attempt_started';
 
 /**
  * Core Job Interface
@@ -89,6 +92,7 @@ export interface Job {
   metadata: Record<string, unknown> | null;
   tags: string[];
   version: number;
+  eventSequence: number;
 }
 
 /**
@@ -116,6 +120,7 @@ export interface JobEvent {
   id: string;
   jobId: string;
   eventType: JobEventType;
+  sequence: number;
   fromStatus: JobStatus | null;
   toStatus: JobStatus;
   workerId: string | null;
@@ -228,6 +233,8 @@ export const redisJobMessageV1Schema = z
     schemaVersion: z.literal(REDIS_JOB_MESSAGE_VERSION),
     jobId: z.string().min(1),
     enqueuedAt: z.string().datetime(),
+    // Producer-supplied delivery hint. PostgreSQL job state is authoritative
+    // for retry and execution-attempt decisions.
     attempt: z.number().int().positive(),
     queue: z.string().min(1),
     type: z.string().min(1).optional(),
@@ -321,21 +328,41 @@ export type JobHandler<P = Record<string, unknown>, R = unknown> = (
  */
 export type JobHandlerRegistry = Map<string, JobHandler>;
 
+/** Shared limits enforced by HTTP validation and PostgreSQL constraints. */
+export const QUEUE_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+export const MAX_JOB_ATTEMPTS = 10;
+export const MAX_JOB_TIMEOUT_MS = 86_400_000;
+export const MAX_JOB_TAGS = 32;
+export const MAX_JOB_TAG_LENGTH = 64;
+
+export const queueNameSchema = z
+  .string()
+  .min(1)
+  .max(63)
+  .regex(
+    QUEUE_NAME_PATTERN,
+    'Queue names must start with a lowercase letter or digit and contain only lowercase letters, digits, dots, underscores, or hyphens'
+  );
+
 /**
  * Job Submission Request Schema
  */
-export const submitJobSchema = z.object({
-  type: z.string().min(1),
-  payload: z.record(z.unknown()),
-  queue: z.string().optional().default('default'),
-  priority: z.nativeEnum(JobPriority).optional().default(JobPriority.NORMAL),
-  maxAttempts: z.number().int().positive().optional(),
-  timeoutMs: z.number().int().positive().optional(),
-  scheduledAt: z.coerce.date().optional(),
-  idempotencyKey: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
-  tags: z.array(z.string()).optional(),
-});
+export const submitJobSchema = z
+  .object({
+    type: z.string().trim().min(1).max(255),
+    payload: z.record(z.unknown()),
+    queue: queueNameSchema.optional().default('default'),
+    priority: z.nativeEnum(JobPriority).optional().default(JobPriority.NORMAL),
+    maxAttempts: z.number().int().min(1).max(MAX_JOB_ATTEMPTS).optional(),
+    timeoutMs: z.number().int().min(1).max(MAX_JOB_TIMEOUT_MS).optional(),
+    scheduledAt: z.coerce.date().optional(),
+    metadata: z.record(z.unknown()).optional(),
+    tags: z
+      .array(z.string().trim().min(1).max(MAX_JOB_TAG_LENGTH))
+      .max(MAX_JOB_TAGS)
+      .optional(),
+  })
+  .strict();
 
 export type SubmitJobRequest = z.infer<typeof submitJobSchema>;
 

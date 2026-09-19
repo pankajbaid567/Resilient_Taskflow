@@ -98,9 +98,9 @@ export default function DeadLetterQueue() {
             <div className={styles.warningContent}>
               <h3 className={styles.warningTitle}>Dead Letter Queue</h3>
               <p className={styles.warningMessage}>
-                These jobs have exceeded their maximum retry attempts and require
-                manual intervention. Review the error details and requeue them when
-                ready.
+                These jobs have exceeded their maximum retry attempts and
+                require manual intervention. Review the error details and
+                requeue them when ready.
               </p>
             </div>
           </div>

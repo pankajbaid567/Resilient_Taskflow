@@ -101,14 +101,14 @@ for (const message of messages) {
   try {
     // 1. Fetch full job from PostgreSQL
     const job = await getJob(message.data.jobId);
-    
+
     // 2. Acquire lease
     const acquired = await acquireLease(job.id, workerId);
     if (!acquired) continue;
-    
+
     // 3. Execute job
     await executeJob(job);
-    
+
     // 4. Acknowledge Redis message
     await acknowledgeMessage(message.queue, message.messageId);
   } catch (error) {
@@ -127,7 +127,7 @@ const claimed = await claimStaleMessages(
   'default',
   workerId,
   30000, // minIdleTimeMs
-  10     // limit
+  10 // limit
 );
 
 // Process claimed messages (same as consumed)
@@ -140,33 +140,33 @@ for (const message of claimed) {
 
 ### Producer Operations
 
-| Function | Description |
-|----------|-------------|
-| `enqueueJob(jobId, queue, attempt)` | Add job to stream |
-| `enqueueJobBatch(jobs)` | Add multiple jobs (pipeline) |
-| `getQueueDepth(queue)` | Get stream length |
-| `trimStream(queue, maxLength)` | Trim old messages |
+| Function                            | Description                  |
+| ----------------------------------- | ---------------------------- |
+| `enqueueJob(jobId, queue, attempt)` | Add job to stream            |
+| `enqueueJobBatch(jobs)`             | Add multiple jobs (pipeline) |
+| `getQueueDepth(queue)`              | Get stream length            |
+| `trimStream(queue, maxLength)`      | Trim old messages            |
 
 ### Consumer Group Operations
 
-| Function | Description |
-|----------|-------------|
-| `createConsumerGroup(queue)` | Create consumer group |
-| `deleteConsumerGroup(queue)` | Delete consumer group |
-| `getConsumerGroupInfo(queue)` | Get group stats |
-| `getConsumers(queue)` | List consumers |
-| `deleteConsumer(queue, consumer)` | Remove consumer |
+| Function                          | Description           |
+| --------------------------------- | --------------------- |
+| `createConsumerGroup(queue)`      | Create consumer group |
+| `deleteConsumerGroup(queue)`      | Delete consumer group |
+| `getConsumerGroupInfo(queue)`     | Get group stats       |
+| `getConsumers(queue)`             | List consumers        |
+| `deleteConsumer(queue, consumer)` | Remove consumer       |
 
 ### Consumer Operations
 
-| Function | Description |
-|----------|-------------|
-| `consumeJobs(workerId, queues, opts)` | Read new messages |
-| `acknowledgeMessage(queue, msgId)` | ACK single message |
-| `acknowledgeMessageBatch(queue, msgIds)` | ACK multiple messages |
-| `getPendingMessages(queue, workerId)` | Get unACKed messages |
+| Function                                       | Description               |
+| ---------------------------------------------- | ------------------------- |
+| `consumeJobs(workerId, queues, opts)`          | Read new messages         |
+| `acknowledgeMessage(queue, msgId)`             | ACK single message        |
+| `acknowledgeMessageBatch(queue, msgIds)`       | ACK multiple messages     |
+| `getPendingMessages(queue, workerId)`          | Get unACKed messages      |
 | `claimStaleMessages(queue, workerId, minIdle)` | Recover from dead workers |
-| `getPendingCount(queue)` | Count pending messages |
+| `getPendingCount(queue)`                       | Count pending messages    |
 
 ## Failure Handling
 
@@ -212,6 +212,7 @@ for (const message of claimed) {
 **Throughput**: ~50,000-100,000 messages/sec (single Redis)
 
 **Latency**:
+
 - Enqueue (XADD): <1ms
 - Consume (XREADGROUP): <5ms (blocking)
 - Acknowledge (XACK): <1ms
@@ -219,18 +220,19 @@ for (const message of claimed) {
 **Memory**: ~1KB per message
 
 **Scalability**:
+
 - Horizontal: Add more worker processes
 - Vertical: Scale Redis (cluster/replicas)
 
 ## Comparison: Custom vs BullMQ
 
-| Aspect | This Implementation | BullMQ |
-|--------|---------------------|--------|
-| Learning | Deep understanding | Library usage |
-| Control | Full control | Limited by API |
-| Features | Core queue only | Comprehensive |
-| Complexity | Lower | Higher |
-| Interview Value | High (demonstrates knowledge) | Medium |
+| Aspect          | This Implementation           | BullMQ         |
+| --------------- | ----------------------------- | -------------- |
+| Learning        | Deep understanding            | Library usage  |
+| Control         | Full control                  | Limited by API |
+| Features        | Core queue only               | Comprehensive  |
+| Complexity      | Lower                         | Higher         |
+| Interview Value | High (demonstrates knowledge) | Medium         |
 
 ## Design Decisions
 
@@ -239,6 +241,7 @@ for (const message of claimed) {
 See [ADR-010](../../docs/decisions/010-build-queue-from-scratch.md).
 
 **TLDR**: Building from scratch demonstrates understanding of:
+
 - Consumer groups
 - Message acknowledgement
 - Stale consumer detection
@@ -274,18 +277,18 @@ pnpm test:coverage
 
 ## Redis Commands Used
 
-| Command | Purpose |
-|---------|---------|
-| `XADD` | Add message to stream |
-| `XLEN` | Get stream length |
-| `XTRIM` | Trim old messages |
-| `XGROUP CREATE` | Create consumer group |
-| `XGROUP DESTROY` | Delete consumer group |
-| `XREADGROUP` | Read messages as consumer |
-| `XACK` | Acknowledge messages |
-| `XPENDING` | Get pending messages |
-| `XCLAIM` | Claim stale messages |
-| `XINFO` | Get stream/group/consumer info |
+| Command          | Purpose                        |
+| ---------------- | ------------------------------ |
+| `XADD`           | Add message to stream          |
+| `XLEN`           | Get stream length              |
+| `XTRIM`          | Trim old messages              |
+| `XGROUP CREATE`  | Create consumer group          |
+| `XGROUP DESTROY` | Delete consumer group          |
+| `XREADGROUP`     | Read messages as consumer      |
+| `XACK`           | Acknowledge messages           |
+| `XPENDING`       | Get pending messages           |
+| `XCLAIM`         | Claim stale messages           |
+| `XINFO`          | Get stream/group/consumer info |
 
 ## Further Reading
 

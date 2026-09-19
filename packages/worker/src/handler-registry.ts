@@ -2,7 +2,7 @@ import { JobHandler } from '@taskflow/types';
 
 /**
  * Job Handler Registry
- * 
+ *
  * Maps job types to handler functions.
  * Workers use this to look up and execute jobs.
  */

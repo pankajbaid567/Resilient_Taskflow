@@ -1,5 +1,12 @@
-import { JOB_STATUS_VALUES, JobStatus } from '@taskflow/types';
 import {
+  JOB_STATUS_VALUES,
+  JobStatus,
+  MAX_JOB_ATTEMPTS,
+  MAX_JOB_TIMEOUT_MS,
+} from '@taskflow/types';
+import { sql } from 'drizzle-orm';
+import {
+  check,
   index,
   integer,
   jsonb,
@@ -9,7 +16,6 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-
 
 import { queues } from './queues';
 import { users } from './users';
@@ -87,6 +93,9 @@ export const jobs = pgTable(
 
     // Versioning (for optimistic locking)
     version: integer('version').notNull().default(1),
+
+    // Monotonic sequence allocated once for every lifecycle event.
+    eventSequence: integer('event_sequence').notNull().default(0),
   },
   (table) => ({
     // Indexes for common queries
@@ -99,6 +108,51 @@ export const jobs = pgTable(
       table.leaseExpiresAt
     ),
     createdAtIdx: index('idx_jobs_created_at').on(table.createdAt),
+    eventSequenceCheck: check(
+      'jobs_event_sequence_non_negative',
+      sql`${table.eventSequence} >= 0`
+    ),
+    attemptsNonNegativeCheck: check(
+      'jobs_attempts_non_negative',
+      sql`${table.attempts} >= 0`
+    ),
+    maxAttemptsPositiveCheck: check(
+      'jobs_max_attempts_positive',
+      sql`${table.maxAttempts} > 0`
+    ),
+    maxAttemptsBoundedCheck: check(
+      'jobs_max_attempts_bounded',
+      sql`${table.maxAttempts} <= ${sql.raw(String(MAX_JOB_ATTEMPTS))}`
+    ),
+    attemptsWithinBudgetCheck: check(
+      'jobs_attempts_within_budget',
+      sql`${table.attempts} <= ${table.maxAttempts}`
+    ),
+    timeoutPositiveCheck: check(
+      'jobs_timeout_positive',
+      sql`${table.timeoutMs} > 0`
+    ),
+    timeoutBoundedCheck: check(
+      'jobs_timeout_bounded',
+      sql`${table.timeoutMs} <= ${sql.raw(String(MAX_JOB_TIMEOUT_MS))}`
+    ),
+    versionPositiveCheck: check(
+      'jobs_version_positive',
+      sql`${table.version} > 0`
+    ),
+    leaseStateCheck: check(
+      'jobs_lease_state_consistent',
+      sql`(
+        (${table.status} IN ('PROCESSING', 'CANCEL_REQUESTED')
+          AND ${table.workerId} IS NOT NULL
+          AND ${table.leaseId} IS NOT NULL
+          AND ${table.leaseExpiresAt} IS NOT NULL)
+        OR
+        (${table.status} NOT IN ('PROCESSING', 'CANCEL_REQUESTED')
+          AND ${table.leaseId} IS NULL
+          AND ${table.leaseExpiresAt} IS NULL)
+      )`
+    ),
 
     // Composite indexes for worker queries
     queueStatusPriorityIdx: index('idx_jobs_queue_status_priority').on(
@@ -107,6 +161,10 @@ export const jobs = pgTable(
       table.priority,
       table.createdAt
     ),
+    // Partial, GIN, per-column ordered, expression, and INCLUDE indexes are
+    // intentionally migration-owned: drizzle-kit 0.20 drops those attributes
+    // when reading Drizzle 0.29 declarations. Migrations 0002 and 0006 are the
+    // authority for every idx_jobs_* performance index not declared above.
   })
 );
 

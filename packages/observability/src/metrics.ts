@@ -1,12 +1,11 @@
-import { register, Counter, Gauge, Histogram, Summary } from 'prom-client';
-
 import { createLogger } from '@taskflow/logger';
+import { Counter, Gauge, Histogram, register, Summary } from 'prom-client';
 
 const logger = createLogger({ component: 'Metrics' });
 
 /**
  * Prometheus Metrics Registry
- * 
+ *
  * Comprehensive metrics for distributed task queue system.
  */
 
@@ -505,7 +504,7 @@ export async function getMetrics(): Promise<string> {
 /**
  * Get metrics registry (for custom scrapers)
  */
-export function getRegistry() {
+export function getRegistry(): typeof register {
   return register;
 }
 

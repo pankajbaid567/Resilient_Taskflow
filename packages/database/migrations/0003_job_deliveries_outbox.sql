@@ -7,19 +7,19 @@
 -- the same transaction that changes the job status to QUEUED, so no job
 -- can become QUEUED without a delivery intent row.
 --
--- Redis loss guarantees:
---   - If Redis AOF/RDB is in use: the stream survives restarts and the
---     delivery row's purpose is completed.
---   - If stream entries can be lost: the dispatcher's stale-delivery scan
---     periodically republishes rows that are PENDING/PUBLISHED but whose
---     job is still QUEUED or RETRY_SCHEDULED and scheduledAt <= now().
---     Duplicate XADD is safe because the worker deduplicates via the
---     database lease (acquireJobForDelivery returns BUSY or TERMINAL).
+-- Redis loss recovery:
+--   - The dispatcher republishes missing or no-longer-deliverable PUBLISHED
+--     entries for due QUEUED/RETRY_SCHEDULED jobs and for expired
+--     PROCESSING/CANCEL_REQUESTED leases.
+--   - Duplicate XADD remains possible. The worker's PostgreSQL lease fences
+--     terminal commits, but handler effects still require idempotency.
 
 CREATE TABLE job_deliveries (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   job_id       uuid NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
   queue_name   text NOT NULL,
+  -- Producer-supplied delivery hint. PostgreSQL jobs.attempts is authoritative
+  -- for execution/retry decisions; the current retry path reuses this entry.
   attempt      integer NOT NULL DEFAULT 1,
 
   -- Delivery lifecycle: PENDING → PUBLISHED | FAILED

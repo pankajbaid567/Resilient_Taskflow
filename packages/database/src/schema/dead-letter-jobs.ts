@@ -57,13 +57,12 @@ export const deadLetterJobs = pgTable(
     metadata: jsonb('metadata'),
   },
   (table) => ({
-    originalJobIdIdx: index('idx_dead_letter_jobs_original').on(
-      table.originalJobId
-    ),
     userIdIdx: index('idx_dead_letter_jobs_user_id').on(table.userId),
     queueIdIdx: index('idx_dead_letter_jobs_queue_id').on(table.queueId),
     createdAtIdx: index('idx_dead_letter_jobs_created_at').on(table.createdAt),
     requeuedIdx: index('idx_dead_letter_jobs_requeued').on(table.requeued),
+    // idx_dead_letter_jobs_queue_created orders only created_at DESC;
+    // migrations/0002_performance_indexes.sql owns that raw definition.
   })
 );
 

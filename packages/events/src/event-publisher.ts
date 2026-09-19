@@ -62,7 +62,7 @@ export interface EventPublisherConfig {
 
 /**
  * Event Publisher
- * 
+ *
  * Publishes job lifecycle events to Kafka/Redpanda.
  */
 export class EventPublisher {
@@ -205,17 +205,18 @@ export class EventPublisher {
     // Send to Kafka
     const producer = await this.getProducer();
 
-    const messages = Array.from(grouped.entries()).flatMap(([topic, envelopes]) =>
-      envelopes.map((envelope) => ({
-        topic,
-        messages: [
-          {
-            key: envelope.event.jobId,
-            value: JSON.stringify(envelope),
-            headers: this.buildHeaders(envelope),
-          },
-        ],
-      }))
+    const messages = Array.from(grouped.entries()).flatMap(
+      ([topic, envelopes]) =>
+        envelopes.map((envelope) => ({
+          topic,
+          messages: [
+            {
+              key: envelope.event.jobId,
+              value: JSON.stringify(envelope),
+              headers: this.buildHeaders(envelope),
+            },
+          ],
+        }))
     );
 
     await producer.sendBatch({
@@ -333,7 +334,11 @@ export function resetEventPublisher(): void {
  * Convenience functions for publishing specific events
  */
 
-export async function publishJobCreated(event: Omit<JobEvent, 'eventType' | 'timestamp'> & { eventType: JobEventType.CREATED }): Promise<void> {
+export async function publishJobCreated(
+  event: Omit<JobEvent, 'eventType' | 'timestamp'> & {
+    eventType: JobEventType.CREATED;
+  }
+): Promise<void> {
   const publisher = getEventPublisher();
   await publisher.publish({
     ...event,
@@ -341,7 +346,11 @@ export async function publishJobCreated(event: Omit<JobEvent, 'eventType' | 'tim
   } as JobEvent);
 }
 
-export async function publishJobStarted(event: Omit<JobEvent, 'eventType' | 'timestamp'> & { eventType: JobEventType.STARTED }): Promise<void> {
+export async function publishJobStarted(
+  event: Omit<JobEvent, 'eventType' | 'timestamp'> & {
+    eventType: JobEventType.STARTED;
+  }
+): Promise<void> {
   const publisher = getEventPublisher();
   await publisher.publish({
     ...event,
@@ -349,7 +358,11 @@ export async function publishJobStarted(event: Omit<JobEvent, 'eventType' | 'tim
   } as JobEvent);
 }
 
-export async function publishJobCompleted(event: Omit<JobEvent, 'eventType' | 'timestamp'> & { eventType: JobEventType.COMPLETED }): Promise<void> {
+export async function publishJobCompleted(
+  event: Omit<JobEvent, 'eventType' | 'timestamp'> & {
+    eventType: JobEventType.COMPLETED;
+  }
+): Promise<void> {
   const publisher = getEventPublisher();
   await publisher.publish({
     ...event,
@@ -357,7 +370,11 @@ export async function publishJobCompleted(event: Omit<JobEvent, 'eventType' | 't
   } as JobEvent);
 }
 
-export async function publishJobFailed(event: Omit<JobEvent, 'eventType' | 'timestamp'> & { eventType: JobEventType.FAILED }): Promise<void> {
+export async function publishJobFailed(
+  event: Omit<JobEvent, 'eventType' | 'timestamp'> & {
+    eventType: JobEventType.FAILED;
+  }
+): Promise<void> {
   const publisher = getEventPublisher();
   await publisher.publish({
     ...event,
@@ -365,7 +382,11 @@ export async function publishJobFailed(event: Omit<JobEvent, 'eventType' | 'time
   } as JobEvent);
 }
 
-export async function publishJobCancelled(event: Omit<JobEvent, 'eventType' | 'timestamp'> & { eventType: JobEventType.CANCELLED }): Promise<void> {
+export async function publishJobCancelled(
+  event: Omit<JobEvent, 'eventType' | 'timestamp'> & {
+    eventType: JobEventType.CANCELLED;
+  }
+): Promise<void> {
   const publisher = getEventPublisher();
   await publisher.publish({
     ...event,

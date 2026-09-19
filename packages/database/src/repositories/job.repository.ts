@@ -1,14 +1,10 @@
 import { JobStatus } from '@taskflow/types';
-import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
-
+import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 
 import { db } from '../client';
 import * as schema from '../schema';
 import { Job, jobs, NewJob } from '../schema';
-import {
-  InvalidStateTransitionError,
-  validateTransition,
-} from '../state-machine';
+import { InvalidStateTransitionError } from '../state-machine';
 
 import { insertPendingDelivery } from './dispatch.repository';
 
@@ -18,54 +14,121 @@ import { insertPendingDelivery } from './dispatch.repository';
  * Handles all database operations for jobs.
  */
 
+type DatabaseTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export interface JobWithQueue {
+  job: Job;
+  queueName: string;
+}
+
+export interface PaginatedJobsWithQueue {
+  jobs: JobWithQueue[];
+  total: number;
+}
+
+export type IdempotentJobCreationResult = JobWithQueue & {
+  disposition: 'created' | 'replayed';
+};
+
+export class IdempotencyConflictError extends Error {
+  readonly statusCode = 409;
+
+  constructor() {
+    super('Idempotency key was already used for a different request');
+    this.name = 'IdempotencyConflictError';
+  }
+}
+
+async function resolveQueueName(
+  tx: DatabaseTransaction,
+  queueId: string
+): Promise<string> {
+  const [queue] = await tx
+    .select({ name: schema.queues.name })
+    .from(schema.queues)
+    .where(eq(schema.queues.id, queueId))
+    .limit(1);
+
+  if (!queue) {
+    throw new Error(
+      `Queue ${queueId} not found while creating delivery intent`
+    );
+  }
+
+  return queue.name;
+}
+
+async function createJobInTransaction(
+  tx: DatabaseTransaction,
+  data: NewJob
+): Promise<JobWithQueue> {
+  const isDue = data.scheduledAt ? data.scheduledAt <= new Date() : true;
+  const queueName = await resolveQueueName(tx, data.queueId);
+  const [job] = await tx
+    .insert(jobs)
+    .values({ ...data, status: JobStatus.CREATED, eventSequence: 1 })
+    .returning();
+
+  if (!job) {
+    throw new Error('Failed to create job');
+  }
+
+  await tx.insert(schema.jobEvents).values({
+    jobId: job.id,
+    eventType: 'created',
+    sequence: job.eventSequence,
+    fromStatus: null,
+    toStatus: JobStatus.CREATED,
+    userId: job.userId,
+    createdAt: sql`clock_timestamp()`,
+    metadata: { version: job.version },
+  });
+
+  if (!isDue) {
+    return { job, queueName };
+  }
+
+  const [queuedJob] = await tx
+    .update(jobs)
+    .set({
+      status: JobStatus.QUEUED,
+      version: sql`${jobs.version} + 1`,
+      eventSequence: sql`${jobs.eventSequence} + 1`,
+    })
+    .where(
+      and(
+        eq(jobs.id, job.id),
+        eq(jobs.status, JobStatus.CREATED),
+        eq(jobs.version, job.version)
+      )
+    )
+    .returning();
+
+  if (!queuedJob) {
+    throw new Error(`Failed to queue newly created job ${job.id}`);
+  }
+
+  await insertPendingDelivery(tx, queuedJob.id, queueName, 1);
+  await tx.insert(schema.jobEvents).values({
+    jobId: queuedJob.id,
+    eventType: 'queued',
+    sequence: queuedJob.eventSequence,
+    fromStatus: JobStatus.CREATED,
+    toStatus: JobStatus.QUEUED,
+    userId: queuedJob.userId,
+    createdAt: sql`clock_timestamp()`,
+    metadata: { version: queuedJob.version, source: 'atomic_create' },
+  });
+
+  return { job: queuedJob, queueName };
+}
+
 /**
  * Create a new job
  */
 export async function createJob(data: NewJob): Promise<Job> {
-  return db.transaction(async (tx) => {
-    // For immediate jobs, start in QUEUED so the dispatcher can publish
-    // without a separate status update step.
-    const isDue = data.scheduledAt ? data.scheduledAt <= new Date() : true;
-    const effectiveData: NewJob = isDue
-      ? { ...data, status: 'QUEUED' as JobStatus }
-      : data;
-
-    const [job] = await tx.insert(jobs).values(effectiveData).returning();
-
-    if (!job) {
-      throw new Error('Failed to create job');
-    }
-
-    await tx.insert(schema.jobEvents).values({
-      jobId: job.id,
-      eventType: 'created',
-      fromStatus: null,
-      toStatus: job.status,
-      userId: job.userId,
-      metadata: { version: job.version },
-    });
-
-    // Atomically create a delivery intent if the job is immediately due.
-    // The queue name is encoded from data.metadata.queue (set by API/caller).
-    if (isDue) {
-      const queueName =
-        typeof (data.metadata as Record<string, unknown> | null)?.queue === 'string'
-          ? (data.metadata as Record<string, unknown>).queue as string
-          : 'default';
-      await insertPendingDelivery(tx, job.id, queueName, 1);
-
-      await tx.insert(schema.jobEvents).values({
-        jobId: job.id,
-        eventType: 'queued',
-        fromStatus: 'CREATED' as JobStatus,
-        toStatus: 'QUEUED' as JobStatus,
-        userId: job.userId,
-        metadata: { version: job.version + 1, source: 'atomic_create' },
-      });
-    }
-
-    return job;
-  });
+  const result = await db.transaction((tx) => createJobInTransaction(tx, data));
+  return result.job;
 }
 
 /**
@@ -74,6 +137,53 @@ export async function createJob(data: NewJob): Promise<Job> {
 export async function getJobById(jobId: string): Promise<Job | undefined> {
   const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
   return job;
+}
+
+/** Resolve a job only inside its tenant boundary, including its real queue. */
+export async function getJobForUser(
+  jobId: string,
+  userId: string
+): Promise<JobWithQueue | undefined> {
+  const [result] = await db
+    .select({ job: jobs, queueName: schema.queues.name })
+    .from(jobs)
+    .innerJoin(schema.queues, eq(schema.queues.id, jobs.queueId))
+    .where(and(eq(jobs.id, jobId), eq(jobs.userId, userId)))
+    .limit(1);
+
+  return result;
+}
+
+/** Tenant-scoped listing and count from one database snapshot. */
+export async function getJobsForUser(
+  userId: string,
+  options: {
+    limit: number;
+    offset: number;
+    status?: JobStatus;
+  }
+): Promise<PaginatedJobsWithQueue> {
+  const conditions = [eq(jobs.userId, userId)];
+  if (options.status) conditions.push(eq(jobs.status, options.status));
+
+  return db.transaction(async (tx) => {
+    const [rows, totals] = await Promise.all([
+      tx
+        .select({ job: jobs, queueName: schema.queues.name })
+        .from(jobs)
+        .innerJoin(schema.queues, eq(schema.queues.id, jobs.queueId))
+        .where(and(...conditions))
+        .orderBy(desc(jobs.createdAt), desc(jobs.id))
+        .limit(options.limit)
+        .offset(options.offset),
+      tx
+        .select({ total: sql<number>`COUNT(*)::integer` })
+        .from(jobs)
+        .where(and(...conditions)),
+    ]);
+
+    return { jobs: rows, total: totals[0]?.total ?? 0 };
+  });
 }
 
 /**
@@ -112,7 +222,9 @@ export async function getJobsReadyToQueue(limit: number = 100): Promise<Job[]> {
   return db
     .select()
     .from(jobs)
-    .where(and(eq(jobs.status, 'CREATED'), lt(jobs.scheduledAt, new Date())))
+    .where(
+      and(eq(jobs.status, JobStatus.CREATED), lt(jobs.scheduledAt, new Date()))
+    )
     .limit(limit);
 }
 
@@ -120,14 +232,10 @@ export async function getJobsReadyToQueue(limit: number = 100): Promise<Job[]> {
  * Atomically promote a CREATED job to QUEUED and insert a PENDING delivery
  * row so the Dispatcher will publish it to Redis.
  *
- * This replaces the non-atomic pattern of calling enqueueJob (XADD) and
- * then updateJobStatus separately. The Scheduler calls this when a delayed
- * job's scheduledAt becomes due.
+ * This is the only delayed-job promotion mutation. The scheduler calls it
+ * when a job's scheduledAt becomes due.
  */
-export async function promoteJobToQueued(
-  jobId: string,
-  queueName: string
-): Promise<Job> {
+export async function promoteJobToQueued(jobId: string): Promise<Job> {
   return db.transaction(async (tx) => {
     const [lockedJob] = await tx
       .select()
@@ -135,7 +243,7 @@ export async function promoteJobToQueued(
       .where(
         and(
           eq(jobs.id, jobId),
-          eq(jobs.status, 'CREATED'),
+          eq(jobs.status, JobStatus.CREATED),
           sql`${jobs.scheduledAt} <= clock_timestamp()`
         )
       )
@@ -148,25 +256,38 @@ export async function promoteJobToQueued(
       );
     }
 
+    const queueName = await resolveQueueName(tx, lockedJob.queueId);
+
     const [promoted] = await tx
       .update(jobs)
       .set({
         status: JobStatus.QUEUED,
         version: sql`${jobs.version} + 1`,
+        eventSequence: sql`${jobs.eventSequence} + 1`,
       })
-      .where(and(eq(jobs.id, jobId), eq(jobs.version, lockedJob.version)))
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(jobs.status, lockedJob.status),
+          eq(jobs.version, lockedJob.version)
+        )
+      )
       .returning();
 
     if (!promoted) {
-      throw new Error(`Concurrent modification prevented promotion of job ${jobId}`);
+      throw new Error(
+        `Concurrent modification prevented promotion of job ${jobId}`
+      );
     }
 
     await tx.insert(schema.jobEvents).values({
       jobId,
       eventType: 'queued',
+      sequence: promoted.eventSequence,
       fromStatus: JobStatus.CREATED,
       toStatus: JobStatus.QUEUED,
       userId: promoted.userId,
+      createdAt: sql`clock_timestamp()`,
       metadata: { version: promoted.version, source: 'scheduler' },
     });
 
@@ -190,11 +311,19 @@ export async function getJobsReadyToProcess(
     .where(
       and(
         eq(jobs.queueId, queueId),
-        eq(jobs.status, 'QUEUED'),
+        eq(jobs.status, JobStatus.QUEUED),
         lt(jobs.scheduledAt, new Date())
       )
     )
-    .orderBy(desc(jobs.priority), asc(jobs.createdAt))
+    .orderBy(
+      sql`CASE ${jobs.priority}
+        WHEN 'CRITICAL' THEN 4
+        WHEN 'HIGH' THEN 3
+        WHEN 'NORMAL' THEN 2
+        WHEN 'LOW' THEN 1
+      END DESC`,
+      asc(jobs.createdAt)
+    )
     .limit(limit);
 }
 
@@ -208,7 +337,10 @@ export async function getJobsReadyForRetry(
     .select()
     .from(jobs)
     .where(
-      and(eq(jobs.status, 'RETRY_SCHEDULED'), lt(jobs.scheduledAt, new Date()))
+      and(
+        eq(jobs.status, JobStatus.RETRY_SCHEDULED),
+        lt(jobs.scheduledAt, new Date())
+      )
     )
     .limit(limit);
 }
@@ -223,268 +355,32 @@ export async function getJobsWithExpiredLeases(
     .select()
     .from(jobs)
     .where(
-      and(eq(jobs.status, 'PROCESSING'), lt(jobs.leaseExpiresAt, new Date()))
+      and(
+        eq(jobs.status, JobStatus.PROCESSING),
+        lt(jobs.leaseExpiresAt, new Date())
+      )
     )
     .limit(limit);
 }
 
 /**
- * Update job status with state machine validation
- */
-export async function updateJobStatus(
-  jobId: string,
-  newStatus: JobStatus,
-  updates: Partial<Job> = {}
-): Promise<Job> {
-  return db.transaction(async (tx) => {
-    const [currentJob] = await tx
-      .select()
-      .from(jobs)
-      .where(eq(jobs.id, jobId))
-      .limit(1)
-      .for('update');
-
-    if (!currentJob) {
-      throw new Error(`Job ${jobId} not found`);
-    }
-
-    validateTransition(currentJob.status as JobStatus, newStatus);
-
-    const [updatedJob] = await tx
-      .update(jobs)
-      .set({
-        ...updates,
-        status: newStatus,
-        version: sql`${jobs.version} + 1`,
-      })
-      .where(and(eq(jobs.id, jobId), eq(jobs.version, currentJob.version)))
-      .returning();
-
-    if (!updatedJob) {
-      throw new Error(
-        `Failed to update job ${jobId}. Concurrent modification detected.`
-      );
-    }
-
-    await tx.insert(schema.jobEvents).values({
-      jobId,
-      eventType: eventTypeForStatus(newStatus),
-      fromStatus: currentJob.status,
-      toStatus: newStatus,
-      workerId: updatedJob.workerId,
-      userId: updatedJob.userId,
-      metadata: { version: updatedJob.version },
-    });
-
-    return updatedJob;
-  });
-}
-
-/**
- * Acquire job lease (for worker to process)
- *
- * Uses optimistic locking to ensure only one worker can acquire lease.
- */
-export async function acquireJobLease(
-  jobId: string,
-  workerId: string,
-  leaseDurationMs: number = 30000
-): Promise<Job | null> {
-  const leaseId = crypto.randomUUID();
-  const leaseExpiresAt = new Date(Date.now() + leaseDurationMs);
-
-  const [job] = await db
-    .update(jobs)
-    .set({
-      status: 'PROCESSING',
-      workerId,
-      leaseId,
-      leaseExpiresAt,
-      startedAt: sql`COALESCE(${jobs.startedAt}, NOW())`,
-      attempts: sql`${jobs.attempts} + 1`,
-      version: sql`${jobs.version} + 1`,
-    })
-    .where(
-      and(
-        eq(jobs.id, jobId),
-        eq(jobs.status, 'QUEUED'),
-        lt(jobs.scheduledAt, new Date()),
-        or(
-          sql`${jobs.leaseExpiresAt} IS NULL`,
-          lt(jobs.leaseExpiresAt, new Date())
-        )
-      )
-    )
-    .returning();
-
-  return job || null;
-}
-
-/**
- * Renew job lease (worker extends lease)
- */
-export async function renewJobLease(
-  jobId: string,
-  workerId: string,
-  leaseId: string,
-  leaseDurationMs: number = 30000
-): Promise<Job | null> {
-  const leaseExpiresAt = new Date(Date.now() + leaseDurationMs);
-
-  const [job] = await db
-    .update(jobs)
-    .set({
-      leaseExpiresAt,
-      version: sql`${jobs.version} + 1`,
-    })
-    .where(
-      and(
-        eq(jobs.id, jobId),
-        eq(jobs.workerId, workerId),
-        eq(jobs.leaseId, leaseId),
-        eq(jobs.status, 'PROCESSING')
-      )
-    )
-    .returning();
-
-  return job || null;
-}
-
-/**
- * Release job lease (worker releases without completion)
- */
-export async function releaseJobLease(
-  jobId: string,
-  workerId: string,
-  leaseId: string
-): Promise<Job | null> {
-  const [job] = await db
-    .update(jobs)
-    .set({
-      status: 'QUEUED',
-      workerId: null,
-      leaseId: null,
-      leaseExpiresAt: null,
-      version: sql`${jobs.version} + 1`,
-    })
-    .where(
-      and(
-        eq(jobs.id, jobId),
-        eq(jobs.workerId, workerId),
-        eq(jobs.leaseId, leaseId)
-      )
-    )
-    .returning();
-
-  return job || null;
-}
-
-/**
- * Complete job successfully
- */
-export async function completeJob(
-  jobId: string,
-  workerId: string,
-  result: Record<string, unknown>
-): Promise<Job> {
-  const [job] = await db
-    .update(jobs)
-    .set({
-      status: 'SUCCEEDED',
-      result,
-      completedAt: new Date(),
-      leaseId: null,
-      leaseExpiresAt: null,
-      version: sql`${jobs.version} + 1`,
-    })
-    .where(
-      and(
-        eq(jobs.id, jobId),
-        eq(jobs.workerId, workerId),
-        eq(jobs.status, 'PROCESSING')
-      )
-    )
-    .returning();
-
-  if (!job) {
-    throw new Error(`Failed to complete job ${jobId}`);
-  }
-
-  return job;
-}
-
-/**
- * Fail job with optional retry scheduling
- */
-export async function failJob(
-  jobId: string,
-  workerId: string,
-  error: Record<string, unknown>,
-  options: {
-    shouldRetry: boolean;
-    retryDelayMs?: number;
-  }
-): Promise<Job> {
-  const { shouldRetry, retryDelayMs = 0 } = options;
-
-  const currentJob = await getJobById(jobId);
-  if (!currentJob) {
-    throw new Error(`Job ${jobId} not found`);
-  }
-
-  // Determine next status
-  let nextStatus: JobStatus;
-  let scheduledAt = currentJob.scheduledAt;
-
-  if (shouldRetry && currentJob.attempts < currentJob.maxAttempts) {
-    nextStatus = JobStatus.RETRY_SCHEDULED;
-    scheduledAt = new Date(Date.now() + retryDelayMs);
-  } else {
-    nextStatus = JobStatus.DEAD_LETTERED;
-  }
-
-  const [job] = await db
-    .update(jobs)
-    .set({
-      status: nextStatus,
-      error,
-      failedAt: new Date(),
-      scheduledAt,
-      leaseId: null,
-      leaseExpiresAt: null,
-      version: sql`${jobs.version} + 1`,
-    })
-    .where(
-      and(
-        eq(jobs.id, jobId),
-        eq(jobs.workerId, workerId),
-        eq(jobs.status, 'PROCESSING')
-      )
-    )
-    .returning();
-
-  if (!job) {
-    throw new Error(`Failed to fail job ${jobId}`);
-  }
-
-  return job;
-}
-
-/**
  * Cancel job
  */
-export async function cancelJob(jobId: string): Promise<Job> {
+export async function cancelJobForUser(
+  jobId: string,
+  userId: string
+): Promise<JobWithQueue | undefined> {
   return db.transaction(async (tx) => {
     // Lock the row to prevent concurrent state mutations
     const [lockedJob] = await tx
       .select()
       .from(jobs)
-      .where(eq(jobs.id, jobId))
+      .where(and(eq(jobs.id, jobId), eq(jobs.userId, userId)))
       .limit(1)
       .for('update');
 
     if (!lockedJob) {
-      throw new Error(`Job ${jobId} not found`);
+      return undefined;
     }
 
     const cancellableStatuses = [
@@ -516,8 +412,15 @@ export async function cancelJob(jobId: string): Promise<Job> {
         status: nextStatus,
         completedAt: isTerminal ? sql`clock_timestamp()` : undefined,
         version: sql`${jobs.version} + 1`,
+        eventSequence: sql`${jobs.eventSequence} + 1`,
       })
-      .where(and(eq(jobs.id, jobId), eq(jobs.version, lockedJob.version)))
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(jobs.status, lockedJob.status),
+          eq(jobs.version, lockedJob.version)
+        )
+      )
       .returning();
 
     if (!job) {
@@ -526,7 +429,8 @@ export async function cancelJob(jobId: string): Promise<Job> {
 
     await tx.insert(schema.jobEvents).values({
       jobId,
-      eventType: 'cancelled',
+      eventType: isTerminal ? 'cancelled' : 'cancellation_requested',
+      sequence: job.eventSequence,
       fromStatus: lockedJob.status,
       toStatus: nextStatus,
       userId: job.userId,
@@ -537,7 +441,8 @@ export async function cancelJob(jobId: string): Promise<Job> {
       },
     });
 
-    return job;
+    const queueName = await resolveQueueName(tx, job.queueId);
+    return { job, queueName };
   });
 }
 
@@ -622,192 +527,18 @@ export async function deleteOldCompletedJobs(
   return result.length;
 }
 
-/**
- * Get job counts by status
- */
-export async function getJobCounts(): Promise<{
-  created: number;
-  queued: number;
-  running: number;
-  completed: number;
-  failed: number;
-  cancelled: number;
-  dead_lettered: number;
-}> {
-  const results = await db
-    .select({
-      status: jobs.status,
-      count: sql<number>`cast(count(*) as int)`,
-    })
-    .from(jobs)
-    .groupBy(jobs.status);
-
-  const counts = {
-    created: 0,
-    queued: 0,
-    running: 0,
-    completed: 0,
-    failed: 0,
-    cancelled: 0,
-    dead_lettered: 0,
-  };
-
-  for (const row of results) {
-    if (row.status in counts) {
-      counts[row.status as keyof typeof counts] = row.count;
-    }
-  }
-
-  return counts;
+/** Count all jobs by the shared, canonical database state names. */
+export async function getJobCounts(): Promise<Record<JobStatus, number>> {
+  return countJobsByStatus();
 }
 
 /**
- * Get queue statistics by name
- */
-export async function getQueueStatsByName(_queueName: string): Promise<{
-  created: number;
-  queued: number;
-  running: number;
-  completed: number;
-  failed: number;
-  cancelled: number;
-  dead_lettered: number;
-}> {
-  // TODO: Join with queues table to filter by queue name
-  // For now, return all jobs
-  return getJobCounts();
-}
-
-/**
- * Schedule job for retry
- */
-export async function scheduleJobRetry(
-  jobId: string,
-  scheduledAt: Date,
-  error?: {
-    error: string;
-    stackTrace?: string;
-  }
-): Promise<Job> {
-  const [job] = await db
-    .update(jobs)
-    .set({
-      status: 'RETRY_SCHEDULED',
-      scheduledAt,
-      error: error ? { message: error.error, stack: error.stackTrace } : null,
-    })
-    .where(eq(jobs.id, jobId))
-    .returning();
-
-  if (!job) {
-    throw new Error(`Job ${jobId} not found`);
-  }
-
-  return job;
-}
-
-/**
- * Move job to dead letter queue
- */
-export async function moveJobToDeadLetter(
-  jobId: string,
-  reason: string
-): Promise<void> {
-  const job = await getJobById(jobId);
-
-  if (!job) {
-    throw new Error(`Job ${jobId} not found`);
-  }
-
-  // Update job status to DEAD_LETTERED
-  await db
-    .update(jobs)
-    .set({
-      status: 'DEAD_LETTERED',
-      failedAt: new Date(),
-    })
-    .where(eq(jobs.id, jobId));
-
-  // Insert into dead_letter_jobs table
-  await db.insert(schema.deadLetterJobs).values({
-    id: crypto.randomUUID(),
-    originalJobId: job.id,
-    userId: job.userId,
-    queueId: job.queueId,
-    type: job.type,
-    payload: job.payload,
-    attempts: job.attempts,
-    lastError: job.error,
-    lastErrorMessage:
-      typeof job.error === 'string' ? job.error : JSON.stringify(job.error),
-    createdAt: job.createdAt,
-    failedAt: job.failedAt || new Date(),
-    requeued: false,
-    requeuedAt: null,
-    requeuedJobId: null,
-    metadata: job.metadata
-      ? {
-          ...(job.metadata as Record<string, unknown>),
-          deadLetterReason: reason,
-          deadLetteredAt: new Date().toISOString(),
-        }
-      : {
-          deadLetterReason: reason,
-          deadLetteredAt: new Date().toISOString(),
-        },
-  });
-}
-
-/**
- * Check if idempotency key exists and return existing job
- */
-export async function getJobByIdempotencyKey(
-  userId: string,
-  idempotencyKey: string
-): Promise<Job | undefined> {
-  // Find idempotency key
-  const [idempotencyRecord] = await db
-    .select()
-    .from(schema.idempotencyKeys)
-    .where(
-      and(
-        eq(schema.idempotencyKeys.userId, userId),
-        eq(schema.idempotencyKeys.idempotencyKey, idempotencyKey),
-        gt(schema.idempotencyKeys.expiresAt, new Date()) // Not expired
-      )
-    );
-
-  if (!idempotencyRecord) {
-    return undefined;
-  }
-
-  // Return associated job
-  return getJobById(idempotencyRecord.jobId);
-}
-
-/**
- * Create idempotency key record
- */
-export async function createIdempotencyKey(
-  userId: string,
-  idempotencyKey: string,
-  jobId: string,
-  requestHash: string,
-  expiresAt: Date
-): Promise<void> {
-  await db.insert(schema.idempotencyKeys).values({
-    id: crypto.randomUUID(),
-    userId,
-    idempotencyKey,
-    jobId,
-    requestHash,
-    createdAt: new Date(),
-    expiresAt,
-  });
-}
-
-/**
- * Create job with idempotency key in a transaction
+ * Create or replay a job under a per-user idempotency key.
+ *
+ * The transaction-scoped advisory lock serializes the read/delete/insert
+ * sequence even when no key row exists yet. PostgreSQL's unique constraint is
+ * the final integrity backstop. Expired keys are deleted under the same lock,
+ * so their value can be reused without racing another submitter.
  */
 export async function createJobWithIdempotency(
   jobData: NewJob,
@@ -815,88 +546,81 @@ export async function createJobWithIdempotency(
   idempotencyKey: string,
   requestHash: string,
   idempotencyExpirationMs: number = 86400000 // 24 hours
-): Promise<Job> {
-  return await db.transaction(async (tx) => {
-    // Check if idempotency key already exists
+): Promise<IdempotentJobCreationResult> {
+  if (jobData.userId !== userId) {
+    throw new Error('Idempotency owner must match the job owner');
+  }
+  if (idempotencyKey.length < 1 || idempotencyKey.length > 255) {
+    throw new RangeError('Idempotency key must contain 1-255 characters');
+  }
+  if (!/^[a-f0-9]{64}$/.test(requestHash)) {
+    throw new RangeError('Request hash must be a SHA-256 hexadecimal digest');
+  }
+  if (
+    !Number.isInteger(idempotencyExpirationMs) ||
+    idempotencyExpirationMs < 1
+  ) {
+    throw new RangeError('Idempotency expiration must be a positive integer');
+  }
+
+  return db.transaction(async (tx) => {
+    const lockIdentity = JSON.stringify([userId, idempotencyKey]);
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockIdentity}, 0))`
+    );
+
     const [existingKey] = await tx
-      .select()
+      .select({
+        record: schema.idempotencyKeys,
+        isActive: sql<boolean>`${schema.idempotencyKeys.expiresAt} > clock_timestamp()`,
+      })
       .from(schema.idempotencyKeys)
       .where(
         and(
           eq(schema.idempotencyKeys.userId, userId),
-          eq(schema.idempotencyKeys.idempotencyKey, idempotencyKey),
-          gt(schema.idempotencyKeys.expiresAt, new Date())
+          eq(schema.idempotencyKeys.idempotencyKey, idempotencyKey)
         )
-      );
+      )
+      .limit(1)
+      .for('update');
 
-    if (existingKey) {
-      // Return existing job
-      const [existingJob] = await tx
-        .select()
+    if (existingKey?.isActive) {
+      if (existingKey.record.requestHash !== requestHash) {
+        throw new IdempotencyConflictError();
+      }
+
+      const [existing] = await tx
+        .select({ job: jobs, queueName: schema.queues.name })
         .from(jobs)
-        .where(eq(jobs.id, existingKey.jobId));
+        .innerJoin(schema.queues, eq(schema.queues.id, jobs.queueId))
+        .where(eq(jobs.id, existingKey.record.jobId))
+        .limit(1);
 
-      if (!existingJob) {
+      if (!existing) {
         throw new Error('Idempotency key exists but job not found');
       }
 
-      return existingJob;
+      return { ...existing, disposition: 'replayed' as const };
     }
 
-    // For immediate jobs, start in QUEUED so the dispatcher publishes
-    // without a separate status update step.
-    const isDue = jobData.scheduledAt ? jobData.scheduledAt <= new Date() : true;
-    const effectiveData: NewJob = isDue
-      ? { ...jobData, status: 'QUEUED' as JobStatus }
-      : jobData;
-
-    // Create new job
-    const [job] = await tx.insert(jobs).values(effectiveData).returning();
-
-    if (!job) {
-      throw new Error('Failed to create job');
+    if (existingKey) {
+      await tx
+        .delete(schema.idempotencyKeys)
+        .where(eq(schema.idempotencyKeys.id, existingKey.record.id));
     }
 
-    await tx.insert(schema.jobEvents).values({
-      jobId: job.id,
-      eventType: 'created',
-      fromStatus: null,
-      toStatus: job.status,
-      userId: job.userId,
-      metadata: { version: job.version },
-    });
-
-    // Atomically create a delivery intent row if the job is immediately due.
-    if (isDue) {
-      const queueName =
-        typeof (jobData.metadata as Record<string, unknown> | null)?.queue === 'string'
-          ? (jobData.metadata as Record<string, unknown>).queue as string
-          : 'default';
-      await insertPendingDelivery(tx, job.id, queueName, 1);
-
-      await tx.insert(schema.jobEvents).values({
-        jobId: job.id,
-        eventType: 'queued',
-        fromStatus: 'CREATED' as JobStatus,
-        toStatus: 'QUEUED' as JobStatus,
-        userId: job.userId,
-        metadata: { version: job.version + 1, source: 'atomic_create' },
-      });
-    }
-
-    // Create idempotency key
+    const created = await createJobInTransaction(tx, jobData);
     const expiresAt = new Date(Date.now() + idempotencyExpirationMs);
     await tx.insert(schema.idempotencyKeys).values({
       id: crypto.randomUUID(),
       userId,
       idempotencyKey,
-      jobId: job.id,
+      jobId: created.job.id,
       requestHash,
-      createdAt: new Date(),
       expiresAt,
     });
 
-    return job;
+    return { ...created, disposition: 'created' as const };
   });
 }
 
@@ -906,29 +630,7 @@ export async function createJobWithIdempotency(
 export async function cleanupExpiredIdempotencyKeys(): Promise<number> {
   const result = await db
     .delete(schema.idempotencyKeys)
-    .where(lt(schema.idempotencyKeys.expiresAt, new Date()));
+    .where(sql`${schema.idempotencyKeys.expiresAt} <= clock_timestamp()`);
 
   return result.length;
-}
-
-function eventTypeForStatus(status: JobStatus): string {
-  switch (status) {
-    case JobStatus.CREATED:
-      return 'created';
-    case JobStatus.QUEUED:
-      return 'queued';
-    case JobStatus.PROCESSING:
-      return 'started';
-    case JobStatus.SUCCEEDED:
-      return 'completed';
-    case JobStatus.FAILED:
-      return 'failed';
-    case JobStatus.RETRY_SCHEDULED:
-      return 'retried';
-    case JobStatus.CANCEL_REQUESTED:
-    case JobStatus.CANCELLED:
-      return 'cancelled';
-    case JobStatus.DEAD_LETTERED:
-      return 'dead_lettered';
-  }
 }

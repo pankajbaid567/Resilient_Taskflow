@@ -2,7 +2,7 @@
 
 /**
  * TaskFlow Demo Script
- * 
+ *
  * Demonstrates the complete job processing flow:
  * 1. Submit jobs via API
  * 2. Workers pick up and process jobs
@@ -10,20 +10,32 @@
  * 4. Show metrics
  */
 
-import { generateJwtToken } from '../apps/api/src/middleware/auth';
-
 const API_URL = process.env.API_URL || 'http://localhost:3000';
-const API_KEY = process.env.API_KEY || 'test-api-key';
+const API_KEY = process.env.API_KEY;
+
+function apiKeyHeader(): { 'X-API-Key': string } {
+  if (!API_KEY) {
+    throw new Error(
+      'API_KEY is required and must match an active, unexpired, unrevoked api_keys row'
+    );
+  }
+
+  return { 'X-API-Key': API_KEY };
+}
 
 /**
  * Submit a job to the API
  */
-async function submitJob(type: string, payload: Record<string, unknown>, priority: string = 'NORMAL') {
+async function submitJob(
+  type: string,
+  payload: Record<string, unknown>,
+  priority: string = 'NORMAL'
+) {
   const response = await fetch(`${API_URL}/api/v1/jobs`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-API-Key': API_KEY,
+      ...apiKeyHeader(),
     },
     body: JSON.stringify({
       type,
@@ -46,7 +58,7 @@ async function submitJob(type: string, payload: Record<string, unknown>, priorit
 async function getJobStatus(jobId: string) {
   const response = await fetch(`${API_URL}/api/v1/jobs/${jobId}`, {
     headers: {
-      'X-API-Key': API_KEY,
+      ...apiKeyHeader(),
     },
   });
 
@@ -60,7 +72,10 @@ async function getJobStatus(jobId: string) {
 /**
  * Wait for job to complete
  */
-async function waitForJob(jobId: string, maxWaitMs: number = 30000): Promise<any> {
+async function waitForJob(
+  jobId: string,
+  maxWaitMs: number = 30000
+): Promise<any> {
   const startTime = Date.now();
   const pollInterval = 500;
 
@@ -87,7 +102,10 @@ function sleep(ms: number): Promise<void> {
 /**
  * Print colored output
  */
-function print(message: string, color: 'green' | 'red' | 'yellow' | 'blue' | 'cyan' = 'cyan') {
+function print(
+  message: string,
+  color: 'green' | 'red' | 'yellow' | 'blue' | 'cyan' = 'cyan'
+) {
   const colors = {
     green: '\x1b[32m',
     red: '\x1b[31m',
@@ -104,9 +122,18 @@ function print(message: string, color: 'green' | 'red' | 'yellow' | 'blue' | 'cy
  * Main demo
  */
 async function main() {
-  print('╔════════════════════════════════════════════════════════════════╗', 'cyan');
-  print('║             TaskFlow End-to-End Demo                          ║', 'cyan');
-  print('╚════════════════════════════════════════════════════════════════╝', 'cyan');
+  print(
+    '╔════════════════════════════════════════════════════════════════╗',
+    'cyan'
+  );
+  print(
+    '║             TaskFlow End-to-End Demo                          ║',
+    'cyan'
+  );
+  print(
+    '╚════════════════════════════════════════════════════════════════╝',
+    'cyan'
+  );
   console.log();
 
   try {
@@ -114,12 +141,21 @@ async function main() {
     print('1. Checking API health...', 'blue');
     const healthResponse = await fetch(`${API_URL}/health`);
     const health = await healthResponse.json();
-    
+
     if (health.status === 'healthy') {
       print('   ✓ API is healthy', 'green');
-      print(`   ✓ PostgreSQL: ${health.postgres ? 'connected' : 'disconnected'}`, 'green');
-      print(`   ✓ Redis: ${health.redis ? 'connected' : 'disconnected'}`, 'green');
-      print(`   ✓ Kafka: ${health.kafka ? 'connected' : 'disconnected'}`, 'green');
+      print(
+        `   ✓ PostgreSQL: ${health.postgres ? 'connected' : 'disconnected'}`,
+        'green'
+      );
+      print(
+        `   ✓ Redis: ${health.redis ? 'connected' : 'disconnected'}`,
+        'green'
+      );
+      print(
+        `   ✓ Kafka: ${health.kafka ? 'connected' : 'disconnected'}`,
+        'green'
+      );
     } else {
       print('   ✗ API is not healthy', 'red');
       return;
@@ -128,7 +164,7 @@ async function main() {
 
     // Submit test jobs
     print('2. Submitting test jobs...', 'blue');
-    
+
     const jobs = [];
 
     // Job 1: Send email (HIGH priority)
@@ -197,33 +233,47 @@ async function main() {
 
     // Wait for jobs to be processed
     print('3. Waiting for jobs to be processed by workers...', 'blue');
-    print('   (Make sure you have started workers with: pnpm dev:worker)', 'yellow');
+    print(
+      '   (Make sure you have started workers with: pnpm dev:worker)',
+      'yellow'
+    );
     console.log();
 
     for (const job of jobs) {
       print(`   Polling job ${job.jobId}...`, 'yellow');
-      
+
       try {
         const completedJob = await waitForJob(job.jobId, 30000);
-        
+
         if (completedJob.status === 'SUCCEEDED') {
           print(`   ✓ Job ${job.jobId} succeeded`, 'green');
           if (completedJob.result) {
-            console.log(`      Result: ${JSON.stringify(completedJob.result).substring(0, 100)}...`);
+            console.log(
+              `      Result: ${JSON.stringify(completedJob.result).substring(0, 100)}...`
+            );
           }
         } else if (completedJob.status === 'FAILED') {
           print(`   ✗ Job ${job.jobId} failed: ${completedJob.error}`, 'red');
         } else if (completedJob.status === 'DLQ') {
-          print(`   ✗ Job ${job.jobId} moved to DLQ: ${completedJob.error}`, 'red');
+          print(
+            `   ✗ Job ${job.jobId} moved to DLQ: ${completedJob.error}`,
+            'red'
+          );
         }
 
         console.log(`      Status: ${completedJob.status}`);
-        console.log(`      Created: ${new Date(completedJob.createdAt).toLocaleTimeString()}`);
-        console.log(`      Updated: ${new Date(completedJob.updatedAt).toLocaleTimeString()}`);
+        console.log(
+          `      Created: ${new Date(completedJob.createdAt).toLocaleTimeString()}`
+        );
+        console.log(
+          `      Updated: ${new Date(completedJob.updatedAt).toLocaleTimeString()}`
+        );
         console.log();
       } catch (error) {
         print(`   ✗ Job ${job.jobId} timeout or error`, 'red');
-        console.log(`      ${error instanceof Error ? error.message : String(error)}`);
+        console.log(
+          `      ${error instanceof Error ? error.message : String(error)}`
+        );
         console.log();
       }
     }
@@ -231,7 +281,10 @@ async function main() {
     // Summary
     print('4. Demo Summary', 'blue');
     print('   ┌─────────────────────────────────────────┐', 'cyan');
-    print(`   │ Jobs Submitted: ${jobs.length}                        │`, 'cyan');
+    print(
+      `   │ Jobs Submitted: ${jobs.length}                        │`,
+      'cyan'
+    );
     print('   │                                         │', 'cyan');
     print('   │ ✓ Job submission working                │', 'green');
     print('   │ ✓ Worker processing working             │', 'green');
@@ -247,7 +300,6 @@ async function main() {
     print('  - Check Prometheus metrics: http://localhost:9090', 'cyan');
     print('  - View API docs: http://localhost:3000/docs', 'cyan');
     console.log();
-
   } catch (error) {
     print('Demo failed:', 'red');
     console.error(error);

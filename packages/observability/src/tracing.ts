@@ -1,33 +1,50 @@
-import { NodeSDK } from '@opentelemetry/sdk-node';
+import type { ClientRequest, IncomingMessage } from 'node:http';
+
+import {
+  type Attributes,
+  context,
+  type Context,
+  type Span,
+  SpanStatusCode,
+  trace,
+  type Tracer,
+} from '@opentelemetry/api';
+import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { Resource } from '@opentelemetry/resources';
+import { NodeSDK } from '@opentelemetry/sdk-node';
 import {
   SEMRESATTRS_SERVICE_NAME,
   SEMRESATTRS_SERVICE_VERSION,
 } from '@opentelemetry/semantic-conventions';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
-import {
-  trace,
-  context,
-  Context,
-  Span,
-  SpanStatusCode,
-  Tracer,
-} from '@opentelemetry/api';
-
 import { env } from '@taskflow/config';
 import { createLogger } from '@taskflow/logger';
 
 const logger = createLogger({ component: 'Tracing' });
+const DEFAULT_TRACE_EXPORTER_URL = 'http://localhost:4318/v1/traces';
 
 /**
  * OpenTelemetry SDK Instance
  */
 let sdk: NodeSDK | null = null;
+let shutdownPromise: Promise<void> | null = null;
+
+function getRequestId(request: ClientRequest | IncomingMessage): string {
+  const header =
+    'getHeader' in request
+      ? request.getHeader('x-request-id')
+      : request.headers['x-request-id'];
+
+  if (Array.isArray(header)) {
+    return header[0] ?? 'unknown';
+  }
+
+  return header === undefined ? 'unknown' : String(header);
+}
 
 /**
  * Initialize OpenTelemetry Tracing
- * 
+ *
  * Automatically instruments:
  * - HTTP/HTTPS
  * - Fastify
@@ -35,10 +52,14 @@ let sdk: NodeSDK | null = null;
  * - Redis
  * - DNS
  * - Net
- * 
+ *
  * Exports traces to OTLP collector (Jaeger, Tempo, etc.)
  */
 export function initializeTracing(serviceName: string): NodeSDK {
+  if (shutdownPromise) {
+    throw new Error('Cannot initialize tracing while shutdown is in progress');
+  }
+
   if (sdk) {
     logger.warn('Tracing already initialized');
     return sdk;
@@ -49,11 +70,13 @@ export function initializeTracing(serviceName: string): NodeSDK {
     [SEMRESATTRS_SERVICE_VERSION]: '1.0.0',
   });
 
+  const exporterUrl =
+    env.OTEL_EXPORTER_OTLP_ENDPOINT || DEFAULT_TRACE_EXPORTER_URL;
   const traceExporter = new OTLPTraceExporter({
-    url: env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318/v1/traces',
+    url: exporterUrl,
   });
 
-  sdk = new NodeSDK({
+  const nextSdk = new NodeSDK({
     resource,
     traceExporter,
     metricReader: undefined, // Use Prometheus for metrics
@@ -66,8 +89,11 @@ export function initializeTracing(serviceName: string): NodeSDK {
         // HTTP/HTTPS
         '@opentelemetry/instrumentation-http': {
           enabled: true,
-          requestHook: (span: Span, request: any) => {
-            span.setAttribute('http.request_id', request.headers['x-request-id'] || 'unknown');
+          requestHook: (
+            span: Span,
+            request: ClientRequest | IncomingMessage
+          ) => {
+            span.setAttribute('http.request_id', getRequestId(request));
           },
         },
         // PostgreSQL
@@ -91,22 +117,15 @@ export function initializeTracing(serviceName: string): NodeSDK {
     ],
   });
 
-  sdk.start();
+  nextSdk.start();
+  sdk = nextSdk;
 
   logger.info('OpenTelemetry tracing initialized', {
     serviceName,
-    exporterUrl: env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318',
+    exporterUrl,
   });
 
-  // Graceful shutdown
-  process.on('SIGTERM', () => {
-    sdk
-      ?.shutdown()
-      .then(() => logger.info('OpenTelemetry SDK shut down successfully'))
-      .catch((error) => logger.error('Error shutting down OpenTelemetry SDK', { error }));
-  });
-
-  return sdk;
+  return nextSdk;
 }
 
 /**
@@ -118,7 +137,7 @@ export function getTracer(name: string = 'taskflow'): Tracer {
 
 /**
  * Create a new span for custom instrumentation
- * 
+ *
  * Example:
  * ```typescript
  * const span = startSpan('processJob', { jobId: '123' });
@@ -132,7 +151,7 @@ export function getTracer(name: string = 'taskflow'): Tracer {
  * }
  * ```
  */
-export function startSpan(name: string, attributes?: Record<string, any>): Span {
+export function startSpan(name: string, attributes?: Attributes): Span {
   const tracer = getTracer();
   const span = tracer.startSpan(name, {
     attributes: attributes || {},
@@ -158,11 +177,13 @@ export function recordError(span: Span, error: Error): void {
 /**
  * Add attributes to current span
  */
-export function addSpanAttributes(attributes: Record<string, any>): void {
+export function addSpanAttributes(attributes: Attributes): void {
   const span = trace.getActiveSpan();
   if (span) {
     Object.entries(attributes).forEach(([key, value]) => {
-      span.setAttribute(key, value);
+      if (value !== undefined) {
+        span.setAttribute(key, value);
+      }
     });
   }
 }
@@ -170,7 +191,7 @@ export function addSpanAttributes(attributes: Record<string, any>): void {
 /**
  * Add event to current span
  */
-export function addSpanEvent(name: string, attributes?: Record<string, any>): void {
+export function addSpanEvent(name: string, attributes?: Attributes): void {
   const span = trace.getActiveSpan();
   if (span) {
     span.addEvent(name, attributes);
@@ -179,7 +200,7 @@ export function addSpanEvent(name: string, attributes?: Record<string, any>): vo
 
 /**
  * Execute function within a span context
- * 
+ *
  * Example:
  * ```typescript
  * await withSpan('processJob', { jobId: '123' }, async (span) => {
@@ -190,7 +211,7 @@ export function addSpanEvent(name: string, attributes?: Record<string, any>): vo
  */
 export async function withSpan<T>(
   name: string,
-  attributes: Record<string, any>,
+  attributes: Attributes,
   fn: (span: Span) => Promise<T>
 ): Promise<T> {
   const tracer = getTracer();
@@ -344,7 +365,11 @@ export const WorkerTracing = {
   /**
    * Record lease acquisition
    */
-  recordLeaseAcquisition(jobId: string, workerId: string, leaseMs: number): void {
+  recordLeaseAcquisition(
+    jobId: string,
+    workerId: string,
+    leaseMs: number
+  ): void {
     addSpanEvent('lease.acquired', {
       'job.id': jobId,
       'worker.id': workerId,
@@ -401,12 +426,34 @@ export const QueueTracing = {
 /**
  * Shutdown tracing (for graceful shutdown)
  */
-export async function shutdownTracing(): Promise<void> {
-  if (sdk) {
-    await sdk.shutdown();
-    sdk = null;
-    logger.info('OpenTelemetry SDK shut down');
+export function shutdownTracing(): Promise<void> {
+  if (shutdownPromise) {
+    return shutdownPromise;
   }
+
+  if (!sdk) {
+    return Promise.resolve();
+  }
+
+  const activeSdk = sdk;
+  sdk = null;
+
+  shutdownPromise = Promise.resolve()
+    .then(() => activeSdk.shutdown())
+    .then(() => {
+      logger.info('OpenTelemetry SDK shut down');
+    })
+    .catch((error: unknown) => {
+      logger.error('Error shutting down OpenTelemetry SDK', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    })
+    .finally(() => {
+      shutdownPromise = null;
+    });
+
+  return shutdownPromise;
 }
 
 export default {

@@ -12,6 +12,7 @@ import {
   updateWorkerStatus,
 } from '@taskflow/database';
 import { createWorkerLogger } from '@taskflow/logger';
+import { PermanentJobError } from '@taskflow/retry';
 import {
   acknowledgeMessage,
   claimStaleMessages,
@@ -32,15 +33,35 @@ import { HandlerRegistry } from './handler-registry';
 import { createWorkerConfig, type WorkerConfig } from './worker-config';
 
 export type WorkerState =
-  'IDLE' | 'STARTING' | 'RUNNING' | 'STOPPING' | 'STOPPED';
+  'IDLE' | 'STARTING' | 'RUNNING' | 'STOPPING' | 'STOPPED' | 'STOPPED_UNCLEAN';
 
 interface ActiveJob {
   jobId: string;
   messageId: string;
   leaseId: string;
   cancellationToken: CancellationToken;
+  interruptionReason?: WorkerInterruptionReason;
+  interruptHandler?: (reason: WorkerInterruptionReason) => void;
+  timeoutError?: HandlerTimeoutError;
   leaseRenewalTimer?: NodeJS.Timeout;
   stopRenewal?: () => void;
+}
+
+type WorkerInterruptionReason =
+  'LEASE_LOST' | 'LEASE_RENEWAL_FAILED' | 'SHUTDOWN' | 'USER_CANCELLATION';
+
+class HandlerTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Job timeout after ${timeoutMs}ms`);
+    this.name = 'HandlerTimeoutError';
+  }
+}
+
+class HandlerInterruptedError extends Error {
+  constructor(readonly reason: WorkerInterruptionReason) {
+    super(`Job handler interrupted: ${reason}`);
+    this.name = 'HandlerInterruptedError';
+  }
 }
 
 export interface WorkerStats {
@@ -63,8 +84,11 @@ export class Worker {
   private readonly activeJobs = new Map<string, ActiveJob>();
   private readonly activeMessages = new Set<string>();
   private readonly handlerPromises = new Set<Promise<void>>();
+  private readonly rawHandlerPromises = new Set<Promise<unknown>>();
   private readonly unresolvedReclaims = new Map<string, number>();
   private state: WorkerState = 'IDLE';
+  private stopRequested = false;
+  private startupSettled?: Promise<void>;
   private heartbeatTimer?: NodeJS.Timeout;
   private pollingPromise?: Promise<void>;
   private stats: WorkerStats = {
@@ -86,6 +110,10 @@ export class Worker {
       throw new Error(`Cannot start worker in ${this.state} state`);
     }
     this.state = 'STARTING';
+    let resolveStartup!: () => void;
+    this.startupSettled = new Promise<void>((resolve) => {
+      resolveStartup = resolve;
+    });
 
     try {
       await registerWorker({
@@ -101,8 +129,15 @@ export class Worker {
         metadata: { nodeVersion: process.version },
       });
 
+      if (this.stopRequested) {
+        throw new Error('Worker startup interrupted by shutdown');
+      }
+
       for (const queue of this.config.queues) {
         await createConsumerGroup(queue);
+        if (this.stopRequested) {
+          throw new Error('Worker startup interrupted by shutdown');
+        }
       }
 
       this.state = 'RUNNING';
@@ -113,40 +148,92 @@ export class Worker {
         concurrency: this.config.concurrency,
       });
     } catch (error) {
-      this.state = 'STOPPED';
+      if (!this.stopRequested) {
+        this.state = 'STOPPED';
+      }
       throw error;
+    } finally {
+      resolveStartup();
     }
   }
 
   async stop(): Promise<void> {
-    if (this.state === 'STOPPED' || this.state === 'IDLE') return;
+    if (
+      this.state === 'STOPPED' ||
+      this.state === 'STOPPED_UNCLEAN' ||
+      this.state === 'IDLE'
+    ) {
+      return;
+    }
+    this.stopRequested = true;
     this.state = 'STOPPING';
     if (this.heartbeatTimer) {
       clearTimeout(this.heartbeatTimer);
       this.heartbeatTimer = undefined;
     }
 
-    // Set PostgreSQL status to STOPPING so schedulers and monitors detect graceful shutdown
-    await updateWorkerStatus(this.config.workerId, WorkerStatus.STOPPING).catch(
-      () => null
-    );
+    const stoppingStatusUpdate = (async () => {
+      await this.startupSettled;
+      await updateWorkerStatus(this.config.workerId, WorkerStatus.STOPPING);
+    })().catch((error: unknown) => {
+      this.logger.error('Could not persist STOPPING worker status', { error });
+    });
 
-    // Cancel all active cancellation tokens and stop lease renewals
+    // Stop lease ownership immediately. Cooperative handlers receive the
+    // signal, but a JavaScript promise cannot forcibly terminate arbitrary
+    // handler code or external effects already in progress.
     for (const activeJob of this.activeJobs.values()) {
-      activeJob.cancellationToken.cancel();
       this.stopLeaseRenewal(activeJob);
+      this.interruptActiveJob(activeJob, 'SHUTDOWN');
     }
 
-    // Wait for in-flight handler promises or shutdown timeout
-    const deadline = sleep(this.config.shutdownTimeoutMs);
-    const handlersSettled = Promise.allSettled(Array.from(this.handlerPromises));
-    await Promise.race([handlersSettled, deadline]);
-
-    await this.pollingPromise?.catch(() => undefined);
-    await updateWorkerStatus(this.config.workerId, WorkerStatus.STOPPED).catch(
-      () => null
+    let deadlineTimer: NodeJS.Timeout | undefined;
+    const drained = (async () => {
+      await stoppingStatusUpdate;
+      await Promise.allSettled([
+        ...Array.from(this.handlerPromises),
+        ...Array.from(this.rawHandlerPromises),
+      ]);
+      await this.pollingPromise?.catch(() => undefined);
+      await updateWorkerStatus(this.config.workerId, WorkerStatus.STOPPED);
+      return true;
+    })();
+    const deadline = new Promise<false>((resolve) => {
+      deadlineTimer = setTimeout(
+        () => resolve(false),
+        this.config.shutdownTimeoutMs
+      );
+    });
+    const handlersStopped = await Promise.race([drained, deadline]).catch(
+      (error: unknown) => {
+        this.logger.error('Worker shutdown drain failed', { error });
+        return false;
+      }
     );
-    this.state = 'STOPPED';
+    if (deadlineTimer) clearTimeout(deadlineTimer);
+
+    if (!handlersStopped) {
+      this.state = 'STOPPED_UNCLEAN';
+      this.logger.warn(
+        'Worker shutdown deadline reached; drain is incomplete and handler code may still be running',
+        {
+          activeDeliveries: this.activeMessages.size,
+          rawHandlers: this.rawHandlerPromises.size,
+        }
+      );
+      // Observe eventual rejection after stop() returns. Keep the durable
+      // worker state at STOPPING because raw external effects were not proven
+      // to have stopped; a process supervisor may terminate the process.
+      void drained
+        .then(() => {
+          this.state = 'STOPPED';
+        })
+        .catch((error: unknown) => {
+          this.logger.error('Worker background drain failed', { error });
+        });
+    } else {
+      this.state = 'STOPPED';
+    }
   }
 
   private startHeartbeat(): void {
@@ -176,7 +263,9 @@ export class Worker {
         totalJobsFailed: this.stats.totalFailed,
       })
     )
-      .catch((error) => this.logger.error('Worker initial heartbeat failed', { error }))
+      .catch((error) =>
+        this.logger.error('Worker initial heartbeat failed', { error })
+      )
       .finally(scheduleNext);
   }
 
@@ -239,12 +328,20 @@ export class Worker {
 
       this.activeMessages.add(deliveryKey);
 
-      let rawHandlerPromise: Promise<unknown> | undefined;
+      let rawHandlerStarted = false;
 
       const promise = (async () => {
         try {
           await this.processMessage(message, (raw) => {
-            rawHandlerPromise = raw;
+            rawHandlerStarted = true;
+            this.rawHandlerPromises.add(raw);
+            const releaseCapacity = () => {
+              this.rawHandlerPromises.delete(raw);
+              this.activeMessages.delete(deliveryKey);
+            };
+            // Use both settlement branches instead of an ignored finally()
+            // promise, which would itself reject when the handler rejected.
+            void raw.then(releaseCapacity, releaseCapacity);
           });
         } catch (error) {
           this.logger.error('Unexpected delivery error', {
@@ -253,21 +350,17 @@ export class Worker {
             error,
           });
         } finally {
-          if (rawHandlerPromise) {
-            // Retain capacity slot until the underlying asynchronous handler promise settles
-            void rawHandlerPromise.finally(() => {
-              this.activeMessages.delete(deliveryKey);
-            });
-          } else {
+          if (!rawHandlerStarted) {
             this.activeMessages.delete(deliveryKey);
           }
         }
       })();
 
       this.handlerPromises.add(promise);
-      void promise.finally(() => {
-        this.handlerPromises.delete(promise);
-      });
+      void promise.then(
+        () => this.handlerPromises.delete(promise),
+        () => this.handlerPromises.delete(promise)
+      );
     }
   }
 
@@ -278,6 +371,10 @@ export class Worker {
     const { jobId } = message.data;
     await this.config.beforeLease?.(message);
 
+    if (this.stopRequested) {
+      return;
+    }
+
     // Database errors deliberately escape this call. The outer handler logs
     // them and the Redis entry remains pending for a later reclaim.
     const lease = await acquireJobForDelivery(
@@ -286,34 +383,46 @@ export class Worker {
       this.config.leaseDurationMs
     );
 
+    // stop() can race an in-progress database call. Do not start a handler or
+    // renew a newly acquired lease after shutdown has begun; leave the Redis
+    // entry pending and let the lease expire for a replacement worker.
+    if (this.stopRequested) {
+      return;
+    }
+
     if (lease.kind === 'TERMINAL') {
-      this.unresolvedReclaims.delete(message.messageId);
+      this.unresolvedReclaims.delete(getDeliveryKey(message));
       assertDurableTerminalStatus(lease.job.status, jobId);
       await acknowledgeMessage(message.queue, message.messageId);
       return;
     }
 
     if (lease.kind === 'NOT_FOUND') {
-      const attempts = (this.unresolvedReclaims.get(message.messageId) ?? 0) + 1;
-      this.unresolvedReclaims.set(message.messageId, attempts);
+      const attempts = this.getDeliveryAttempts(message);
       if (attempts >= 3) {
         this.logger.warn('Quarantining persistent not-found job message', {
           jobId,
           messageId: message.messageId,
           attempts,
         });
-        await quarantineEntry(message.stream, message.messageId, 'JOB_NOT_FOUND', {
-          jobId,
-          attempts,
-        });
-        this.unresolvedReclaims.delete(message.messageId);
+        await quarantineEntry(
+          message.stream,
+          message.messageId,
+          'JOB_NOT_FOUND',
+          {
+            jobId,
+            attempts,
+          }
+        );
+        this.unresolvedReclaims.delete(getDeliveryKey(message));
       }
       return;
     }
 
     if (lease.kind === 'NOT_READY') {
       const { status, scheduledAt } = lease.job;
-      const isFuture = scheduledAt && new Date(scheduledAt).getTime() > Date.now();
+      const isFuture =
+        scheduledAt && new Date(scheduledAt).getTime() > Date.now();
 
       if (status === JobStatus.RETRY_SCHEDULED && isFuture) {
         // Legitimate delayed retry: leave pending in Redis PEL until due
@@ -325,23 +434,22 @@ export class Worker {
         return;
       }
 
-      // If not due to a future schedule, track reclaims and quarantine if stuck
-      const attempts = (this.unresolvedReclaims.get(message.messageId) ?? 0) + 1;
-      this.unresolvedReclaims.set(message.messageId, attempts);
-      if (attempts >= 3) {
-        this.logger.warn('Quarantining stuck not-ready job message', {
-          jobId,
-          messageId: message.messageId,
-          status,
-          attempts,
-        });
-        await quarantineEntry(message.stream, message.messageId, `NOT_READY_${status}`, {
-          jobId,
-          status,
-          attempts,
-        });
-        this.unresolvedReclaims.delete(message.messageId);
+      if (status === JobStatus.CANCEL_REQUESTED) {
+        // Defensive fallback: the database acquisition boundary normally
+        // reports an active request as BUSY and recovers an expired request to
+        // terminal CANCELLED. Never treat cancellation as poison data.
+        return;
       }
+
+      // The database row exists and is nonterminal. Even if its timing/state is
+      // unexpected, transport quarantine would XACK the only known delivery
+      // and could strand the job. Keep it pending for durable recovery.
+      this.logger.warn('Leaving known nonterminal job delivery pending', {
+        jobId,
+        messageId: message.messageId,
+        status,
+        scheduledAt,
+      });
       return;
     }
 
@@ -349,7 +457,7 @@ export class Worker {
       return;
     }
 
-    this.unresolvedReclaims.delete(message.messageId);
+    this.unresolvedReclaims.delete(getDeliveryKey(message));
 
     const leaseId = lease.job.leaseId;
     if (!leaseId) throw new Error(`Acquired job ${jobId} without a lease ID`);
@@ -369,23 +477,49 @@ export class Worker {
       // persisted, no handler or external effect is invoked.
       await startJobAttempt(jobId, this.config.workerId, leaseId);
 
+      if (activeJob.interruptionReason === 'USER_CANCELLATION') {
+        throw new CancellationError(
+          'Job cancellation requested before execution'
+        );
+      }
+      if (activeJob.interruptionReason) {
+        return;
+      }
+
       let result: Record<string, unknown>;
       try {
-        result = normalizeResult(
-          await this.runHandler(
-            lease.job as unknown as Job,
-            activeJob.cancellationToken,
-            onRawHandlerPromise
-          )
+        const rawResult = await this.runHandler(
+          lease.job as unknown as Job,
+          activeJob,
+          onRawHandlerPromise
         );
+        if (activeJob.timeoutError) {
+          throw activeJob.timeoutError;
+        }
+        result = normalizeResult(rawResult);
       } catch (error) {
-        if (error instanceof CancellationError) throw error;
+        // A non-user interruption relinquishes this delivery without changing
+        // its database state or acknowledging Redis. Recovery is fenced by the
+        // current lease expiry.
+        if (
+          error instanceof HandlerInterruptedError ||
+          (activeJob.interruptionReason &&
+            activeJob.interruptionReason !== 'USER_CANCELLATION')
+        ) {
+          return;
+        }
+
+        // Cancellation wins only after the worker observed a durable
+        // CANCEL_REQUESTED row and the underlying handler has settled.
+        if (activeJob.interruptionReason === 'USER_CANCELLATION') {
+          throw new CancellationError('Job cancellation requested');
+        }
 
         const failure = await failJobDelivery(
           jobId,
           this.config.workerId,
           leaseId,
-          serializeError(error),
+          activeJob.timeoutError ?? error,
           {
             baseDelayMs: this.config.retryBaseDelayMs,
             maxDelayMs: this.config.retryMaxDelayMs,
@@ -404,8 +538,30 @@ export class Worker {
             status: JobStatus.DEAD_LETTERED,
             message,
           });
-          await acknowledgeMessage(message.queue, message.messageId);
+        } else {
+          const scheduledAt = new Date(failure.job.scheduledAt).getTime();
+          const availableAt = new Date(
+            failure.successorDelivery.availableAt
+          ).getTime();
+          if (
+            failure.job.status !== JobStatus.RETRY_SCHEDULED ||
+            failure.successorDelivery.status !== 'PENDING' ||
+            failure.successorDelivery.attempt !== failure.job.attempts + 1 ||
+            availableAt !== scheduledAt
+          ) {
+            throw new Error(
+              `Cannot acknowledge job ${jobId}: retry successor was not durably persisted`
+            );
+          }
         }
+        await acknowledgeMessage(message.queue, message.messageId);
+        return;
+      }
+
+      if (activeJob.interruptionReason === 'USER_CANCELLATION') {
+        throw new CancellationError('Job cancellation requested');
+      }
+      if (activeJob.interruptionReason) {
         return;
       }
 
@@ -428,11 +584,13 @@ export class Worker {
       });
       await acknowledgeMessage(message.queue, message.messageId);
     } catch (cancellation) {
-      // CancellationError means the handler cooperated with cancellation
-      // (or the lease renewal detected CANCEL_REQUESTED and fired the token).
-      // Persist the terminal CANCELLED state and XACK so downstream workers
-      // do not re-deliver this message unnecessarily.
-      if (cancellation instanceof CancellationError) {
+      // A terminal cancellation requires both a worker-observed durable
+      // request and a settled handler. A handler throwing CancellationError
+      // on its own is treated by the ordinary failure path above.
+      if (
+        cancellation instanceof CancellationError &&
+        activeJob.interruptionReason === 'USER_CANCELLATION'
+      ) {
         try {
           await completeCancellation(jobId, this.config.workerId, leaseId);
           this.logger.info('Job cancelled', { jobId });
@@ -458,12 +616,16 @@ export class Worker {
 
   private async runHandler(
     job: Job,
-    cancellationToken: CancellationToken,
+    activeJob: ActiveJob,
     onRawPromise?: (promise: Promise<unknown>) => void
   ): Promise<unknown> {
+    const { cancellationToken } = activeJob;
     const handler = this.handlers.get(job.type);
     if (!handler)
-      throw new Error(`No handler registered for job type: ${job.type}`);
+      throw new PermanentJobError(
+        `No handler registered for job type: ${job.type}`,
+        'HANDLER_NOT_REGISTERED'
+      );
 
     const context: JobHandlerContext = {
       job: {
@@ -483,35 +645,62 @@ export class Worker {
       },
     };
 
+    let timeout: NodeJS.Timeout | undefined;
+    let rejectInterruption:
+      ((reason: WorkerInterruptionReason) => void) | undefined;
+    const interruption = new Promise<never>((_, reject) => {
+      rejectInterruption = (reason) => {
+        if (reason === 'USER_CANCELLATION') return;
+        reject(new HandlerInterruptedError(reason));
+      };
+    });
+    activeJob.interruptHandler = rejectInterruption;
+
+    if (activeJob.interruptionReason === 'USER_CANCELLATION') {
+      throw new CancellationError(
+        'Job cancellation requested before execution'
+      );
+    }
+    if (activeJob.interruptionReason) {
+      throw new HandlerInterruptedError(activeJob.interruptionReason);
+    }
+
     const handlerExecution = handler(job.payload, context);
     onRawPromise?.(handlerExecution);
 
-    let timeout: NodeJS.Timeout | undefined;
     try {
       return await Promise.race([
         handlerExecution,
+        interruption,
         new Promise<never>((_, reject) => {
           timeout = setTimeout(() => {
             // Documented timeout behavior:
             // Promise.race does not terminate the underlying JavaScript asynchronous
             // execution of the handler function. Cooperating handlers should periodically
             // check context.cancellationToken.isCancellationRequested.
-            // If a handler continues running after timeout and attempts external effects,
-            // lease renewal has stopped and the cancellation token has fired, causing
-            // database effects to be rejected at the fencing/lease boundary.
-            // On timeout: if CANCEL_REQUESTED is already set, honour the cancellation
-            // rather than triggering a retry path.
+            // The token is advisory: arbitrary handler SQL and external effects
+            // are not fenced by this runtime. Capacity remains occupied until
+            // the raw promise settles, and retries may duplicate external work.
+            if (activeJob.interruptionReason === 'USER_CANCELLATION') {
+              // The raw handler has not settled, so do not claim cancellation
+              // completed. Leave the delivery pending for lease-expiry recovery.
+              reject(new HandlerInterruptedError('USER_CANCELLATION'));
+              return;
+            }
+            if (activeJob.interruptionReason) {
+              reject(new HandlerInterruptedError(activeJob.interruptionReason));
+              return;
+            }
+
+            activeJob.timeoutError = new HandlerTimeoutError(job.timeoutMs);
             cancellationToken.cancel();
-            reject(
-              cancellationToken.isCancellationRequested
-                ? new CancellationError('Job cancelled (timeout during cancellation)')
-                : new Error(`Job timeout after ${job.timeoutMs}ms`)
-            );
+            reject(activeJob.timeoutError);
           }, job.timeoutMs);
         }),
       ]);
     } finally {
       if (timeout) clearTimeout(timeout);
+      activeJob.interruptHandler = undefined;
     }
   }
 
@@ -539,7 +728,7 @@ export class Worker {
 
           if (!renewed) {
             // Lease lost (expired or revoked) — cancel the handler
-            activeJob.cancellationToken.cancel();
+            this.interruptActiveJob(activeJob, 'LEASE_LOST');
             return;
           }
 
@@ -547,14 +736,14 @@ export class Worker {
             this.logger.info('Cancellation detected on lease renewal', {
               jobId: activeJob.jobId,
             });
-            activeJob.cancellationToken.cancel();
+            this.interruptActiveJob(activeJob, 'USER_CANCELLATION');
           }
         } catch (error) {
           this.logger.error('Lease renewal failed', {
             jobId: activeJob.jobId,
             error,
           });
-          activeJob.cancellationToken.cancel();
+          this.interruptActiveJob(activeJob, 'LEASE_RENEWAL_FAILED');
         } finally {
           scheduleNext();
         }
@@ -570,6 +759,28 @@ export class Worker {
       clearTimeout(activeJob.leaseRenewalTimer);
       activeJob.leaseRenewalTimer = undefined;
     }
+  }
+
+  private interruptActiveJob(
+    activeJob: ActiveJob,
+    reason: WorkerInterruptionReason
+  ): void {
+    if (!activeJob.interruptionReason) {
+      activeJob.interruptionReason = reason;
+    }
+    activeJob.cancellationToken.cancel();
+    activeJob.interruptHandler?.(activeJob.interruptionReason);
+  }
+
+  private getDeliveryAttempts(message: ConsumedMessage): number {
+    if (message.deliveryCount !== undefined) {
+      return message.deliveryCount;
+    }
+
+    const deliveryKey = getDeliveryKey(message);
+    const attempts = (this.unresolvedReclaims.get(deliveryKey) ?? 0) + 1;
+    this.unresolvedReclaims.set(deliveryKey, attempts);
+    return attempts;
   }
 
   private updateStats(success: boolean, durationMs: number): void {
@@ -608,17 +819,6 @@ function normalizeResult(result: unknown): Record<string, unknown> {
     return result as Record<string, unknown>;
   }
   return { value: result ?? null };
-}
-
-function serializeError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      ...(error.stack ? { stack: error.stack } : {}),
-    };
-  }
-  return { message: String(error) };
 }
 
 function assertDurableTerminalStatus(status: string, jobId: string): void {

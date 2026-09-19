@@ -6,7 +6,10 @@ interface StatusBadgeProps {
   size?: 'small' | 'medium';
 }
 
-export default function StatusBadge({ status, size = 'medium' }: StatusBadgeProps) {
+export default function StatusBadge({
+  status,
+  size = 'medium',
+}: StatusBadgeProps) {
   const color = getStatusColor(status);
 
   return (

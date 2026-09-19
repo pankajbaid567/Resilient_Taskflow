@@ -1,8 +1,8 @@
 /**
  * @taskflow/events
- * 
+ *
  * Kafka/Redpanda event streaming for TaskFlow.
- * 
+ *
  * Features:
  * - Job lifecycle events (created, started, completed, etc.)
  * - Event publishing with batching support
@@ -51,8 +51,4 @@ export {
 } from './event-publisher';
 
 // Topic Manager
-export {
-  TopicManager,
-  TopicConfig,
-  createTopicManager,
-} from './topic-manager';
+export { TopicManager, TopicConfig, createTopicManager } from './topic-manager';

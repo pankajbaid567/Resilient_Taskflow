@@ -5,6 +5,7 @@ Comprehensive observability package for Resilient TaskFlow distributed task queu
 ## Features
 
 ### Prometheus Metrics
+
 - **70+ metrics** covering jobs, queues, workers, API, database, Redis, Kafka
 - Counters, gauges, histograms, and summaries
 - Industry-standard naming (`taskflow_*`)
@@ -12,6 +13,7 @@ Comprehensive observability package for Resilient TaskFlow distributed task queu
 - Production-ready buckets and percentiles
 
 ### OpenTelemetry Distributed Tracing
+
 - Automatic instrumentation for Fastify, PostgreSQL, Redis, HTTP
 - Custom span creation and attributes
 - Job lifecycle tracing
@@ -31,31 +33,44 @@ pnpm add @taskflow/observability
 ### 1. Initialize Tracing (Application Startup)
 
 ```typescript
-import { initializeTracing } from '@taskflow/observability';
+import { initializeTracing, shutdownTracing } from '@taskflow/observability';
 
 // Initialize before any other imports
 initializeTracing('taskflow-api'); // or 'taskflow-worker'
+
+// The application owns SIGTERM/SIGINT and calls this from its shutdown path.
+await shutdownTracing();
 ```
+
+`initializeTracing` never installs process signal handlers. Repeated initialization
+returns the active SDK, and concurrent shutdown calls share one shutdown operation.
 
 ### 2. Prometheus Metrics
 
 #### Increment Counters
 
 ```typescript
-import { jobsSubmittedTotal, jobsCompletedTotal } from '@taskflow/observability';
+import {
+  jobsSubmittedTotal,
+  jobsCompletedTotal,
+} from '@taskflow/observability';
 
 // Job submitted
-jobsSubmittedTotal.labels({
-  queue: 'default',
-  type: 'send_email',
-  priority: 'NORMAL',
-}).inc();
+jobsSubmittedTotal
+  .labels({
+    queue: 'default',
+    type: 'send_email',
+    priority: 'NORMAL',
+  })
+  .inc();
 
 // Job completed
-jobsCompletedTotal.labels({
-  queue: 'default',
-  type: 'send_email',
-}).inc();
+jobsCompletedTotal
+  .labels({
+    queue: 'default',
+    type: 'send_email',
+  })
+  .inc();
 ```
 
 #### Update Gauges
@@ -79,11 +94,13 @@ const startTime = Date.now();
 // ... process job
 const durationSeconds = (Date.now() - startTime) / 1000;
 
-jobDurationSeconds.labels({
-  queue: 'default',
-  type: 'send_email',
-  status: 'completed',
-}).observe(durationSeconds);
+jobDurationSeconds
+  .labels({
+    queue: 'default',
+    type: 'send_email',
+    status: 'completed',
+  })
+  .observe(durationSeconds);
 ```
 
 #### Export Metrics Endpoint
@@ -132,9 +149,9 @@ const span = JobTracing.startJobProcessing(jobId, jobType, queue);
 try {
   // Record events
   JobTracing.recordJobStarted(jobId, workerId);
-  
+
   // ... process job
-  
+
   JobTracing.recordJobCompleted(jobId, durationMs);
   span.setStatus({ code: SpanStatusCode.OK });
 } catch (error) {
@@ -175,86 +192,86 @@ QueueTracing.recordMessageAcknowledged(queue, messageId);
 
 ### Job Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `taskflow_jobs_submitted_total` | Counter | Total jobs submitted |
-| `taskflow_jobs_started_total` | Counter | Total jobs started by workers |
-| `taskflow_jobs_completed_total` | Counter | Total jobs completed successfully |
-| `taskflow_jobs_failed_total` | Counter | Total jobs failed |
-| `taskflow_jobs_retried_total` | Counter | Total job retries |
-| `taskflow_jobs_dead_lettered_total` | Counter | Total jobs moved to DLQ |
-| `taskflow_jobs_cancelled_total` | Counter | Total jobs cancelled |
-| `taskflow_jobs_timed_out_total` | Counter | Total jobs timed out |
-| `taskflow_jobs_current` | Gauge | Current jobs by status |
-| `taskflow_job_duration_seconds` | Histogram | Job execution duration |
-| `taskflow_job_wait_duration_seconds` | Histogram | Time from submission to start |
-| `taskflow_job_retry_attempts` | Histogram | Number of retry attempts |
+| Metric                               | Type      | Description                       |
+| ------------------------------------ | --------- | --------------------------------- |
+| `taskflow_jobs_submitted_total`      | Counter   | Total jobs submitted              |
+| `taskflow_jobs_started_total`        | Counter   | Total jobs started by workers     |
+| `taskflow_jobs_completed_total`      | Counter   | Total jobs completed successfully |
+| `taskflow_jobs_failed_total`         | Counter   | Total jobs failed                 |
+| `taskflow_jobs_retried_total`        | Counter   | Total job retries                 |
+| `taskflow_jobs_dead_lettered_total`  | Counter   | Total jobs moved to DLQ           |
+| `taskflow_jobs_cancelled_total`      | Counter   | Total jobs cancelled              |
+| `taskflow_jobs_timed_out_total`      | Counter   | Total jobs timed out              |
+| `taskflow_jobs_current`              | Gauge     | Current jobs by status            |
+| `taskflow_job_duration_seconds`      | Histogram | Job execution duration            |
+| `taskflow_job_wait_duration_seconds` | Histogram | Time from submission to start     |
+| `taskflow_job_retry_attempts`        | Histogram | Number of retry attempts          |
 
 ### Queue Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `taskflow_queue_depth` | Gauge | Current jobs waiting in queue |
-| `taskflow_queue_lag_seconds` | Gauge | Age of oldest job in queue |
+| Metric                        | Type  | Description                        |
+| ----------------------------- | ----- | ---------------------------------- |
+| `taskflow_queue_depth`        | Gauge | Current jobs waiting in queue      |
+| `taskflow_queue_lag_seconds`  | Gauge | Age of oldest job in queue         |
 | `taskflow_redis_consumer_lag` | Gauge | Pending messages in consumer group |
-| `taskflow_dlq_depth` | Gauge | Current jobs in DLQ |
+| `taskflow_dlq_depth`          | Gauge | Current jobs in DLQ                |
 
 ### Worker Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `taskflow_workers_active` | Gauge | Number of active workers |
-| `taskflow_worker_failures_total` | Counter | Total worker failures |
-| `taskflow_worker_heartbeats_total` | Counter | Total worker heartbeats |
-| `taskflow_worker_jobs_concurrent` | Gauge | Current jobs being processed |
-| `taskflow_worker_lease_renewals_total` | Counter | Total lease renewals |
-| `taskflow_worker_lease_acquisition_failures_total` | Counter | Lease acquisition failures |
+| Metric                                             | Type    | Description                  |
+| -------------------------------------------------- | ------- | ---------------------------- |
+| `taskflow_workers_active`                          | Gauge   | Number of active workers     |
+| `taskflow_worker_failures_total`                   | Counter | Total worker failures        |
+| `taskflow_worker_heartbeats_total`                 | Counter | Total worker heartbeats      |
+| `taskflow_worker_jobs_concurrent`                  | Gauge   | Current jobs being processed |
+| `taskflow_worker_lease_renewals_total`             | Counter | Total lease renewals         |
+| `taskflow_worker_lease_acquisition_failures_total` | Counter | Lease acquisition failures   |
 
 ### Scheduler Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `taskflow_scheduler_runs_total` | Counter | Total scheduler cycles |
-| `taskflow_scheduler_jobs_scheduled_total` | Counter | Total jobs scheduled |
-| `taskflow_scheduler_errors_total` | Counter | Total scheduler errors |
-| `taskflow_scheduler_run_duration_seconds` | Histogram | Scheduler cycle duration |
-| `taskflow_scheduler_lag_seconds` | Gauge | How late jobs are being scheduled |
+| Metric                                    | Type      | Description                       |
+| ----------------------------------------- | --------- | --------------------------------- |
+| `taskflow_scheduler_runs_total`           | Counter   | Total scheduler cycles            |
+| `taskflow_scheduler_jobs_scheduled_total` | Counter   | Total jobs scheduled              |
+| `taskflow_scheduler_errors_total`         | Counter   | Total scheduler errors            |
+| `taskflow_scheduler_run_duration_seconds` | Histogram | Scheduler cycle duration          |
+| `taskflow_scheduler_lag_seconds`          | Gauge     | How late jobs are being scheduled |
 
 ### API Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `taskflow_http_requests_total` | Counter | Total HTTP requests |
-| `taskflow_http_request_duration_seconds` | Histogram | HTTP request duration |
-| `taskflow_rate_limit_hits_total` | Counter | Total rate limit checks |
-| `taskflow_rate_limit_duration_seconds` | Histogram | Rate limit check duration |
-| `taskflow_idempotency_key_hits_total` | Counter | Total idempotency key checks |
+| Metric                                   | Type      | Description                  |
+| ---------------------------------------- | --------- | ---------------------------- |
+| `taskflow_http_requests_total`           | Counter   | Total HTTP requests          |
+| `taskflow_http_request_duration_seconds` | Histogram | HTTP request duration        |
+| `taskflow_rate_limit_hits_total`         | Counter   | Total rate limit checks      |
+| `taskflow_rate_limit_duration_seconds`   | Histogram | Rate limit check duration    |
+| `taskflow_idempotency_key_hits_total`    | Counter   | Total idempotency key checks |
 
 ### Kafka/Event Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `taskflow_events_published_total` | Counter | Total events published |
-| `taskflow_event_publish_failures_total` | Counter | Event publish failures |
+| Metric                                    | Type      | Description            |
+| ----------------------------------------- | --------- | ---------------------- |
+| `taskflow_events_published_total`         | Counter   | Total events published |
+| `taskflow_event_publish_failures_total`   | Counter   | Event publish failures |
 | `taskflow_event_publish_duration_seconds` | Histogram | Event publish duration |
-| `taskflow_event_batch_size` | Summary | Events in batch |
+| `taskflow_event_batch_size`               | Summary   | Events in batch        |
 
 ### Database Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `taskflow_db_queries_total` | Counter | Total database queries |
-| `taskflow_db_query_duration_seconds` | Histogram | Database query duration |
-| `taskflow_db_connection_pool_size` | Gauge | Connection pool size |
-| `taskflow_db_transaction_duration_seconds` | Histogram | Transaction duration |
+| Metric                                     | Type      | Description             |
+| ------------------------------------------ | --------- | ----------------------- |
+| `taskflow_db_queries_total`                | Counter   | Total database queries  |
+| `taskflow_db_query_duration_seconds`       | Histogram | Database query duration |
+| `taskflow_db_connection_pool_size`         | Gauge     | Connection pool size    |
+| `taskflow_db_transaction_duration_seconds` | Histogram | Transaction duration    |
 
 ### Redis Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `taskflow_redis_commands_total` | Counter | Total Redis commands |
-| `taskflow_redis_command_duration_seconds` | Histogram | Redis command duration |
-| `taskflow_redis_connection_pool_size` | Gauge | Redis connection pool size |
+| Metric                                    | Type      | Description                |
+| ----------------------------------------- | --------- | -------------------------- |
+| `taskflow_redis_commands_total`           | Counter   | Total Redis commands       |
+| `taskflow_redis_command_duration_seconds` | Histogram | Redis command duration     |
+| `taskflow_redis_connection_pool_size`     | Gauge     | Redis connection pool size |
 
 ## Prometheus Configuration
 
@@ -279,33 +296,38 @@ scrape_configs:
 ### Useful Queries (PromQL)
 
 #### Job Throughput
+
 ```promql
 rate(taskflow_jobs_completed_total[5m])
 ```
 
 #### Job Success Rate
+
 ```promql
-rate(taskflow_jobs_completed_total[5m]) 
-/ 
+rate(taskflow_jobs_completed_total[5m])
+/
 (rate(taskflow_jobs_completed_total[5m]) + rate(taskflow_jobs_failed_total[5m]))
 ```
 
 #### P95 Job Duration
+
 ```promql
-histogram_quantile(0.95, 
+histogram_quantile(0.95,
   rate(taskflow_job_duration_seconds_bucket[5m])
 )
 ```
 
 #### Queue Backlog Growth Rate
+
 ```promql
 deriv(taskflow_queue_depth[5m])
 ```
 
 #### Worker Utilization
+
 ```promql
-taskflow_worker_jobs_concurrent 
-/ 
+taskflow_worker_jobs_concurrent
+/
 10  # max concurrency
 ```
 
@@ -333,8 +355,8 @@ services:
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:
-      - "16686:16686"  # Jaeger UI
-      - "4318:4318"    # OTLP HTTP
+      - '16686:16686' # Jaeger UI
+      - '4318:4318' # OTLP HTTP
     environment:
       - COLLECTOR_OTLP_ENABLED=true
 ```
@@ -346,12 +368,12 @@ services:
 services:
   tempo:
     image: grafana/tempo:latest
-    command: ["-config.file=/etc/tempo.yaml"]
+    command: ['-config.file=/etc/tempo.yaml']
     volumes:
       - ./tempo.yaml:/etc/tempo.yaml
     ports:
-      - "4318:4318"  # OTLP HTTP
-      - "3200:3200"  # Tempo HTTP
+      - '4318:4318' # OTLP HTTP
+      - '3200:3200' # Tempo HTTP
 ```
 
 ## Best Practices
@@ -359,20 +381,26 @@ services:
 ### 1. Metric Cardinality
 
 **❌ Bad** (unbounded cardinality):
+
 ```typescript
-jobsSubmittedTotal.labels({
-  userId: userId,  // Millions of users!
-  jobId: jobId,    // Unbounded!
-}).inc();
+jobsSubmittedTotal
+  .labels({
+    userId: userId, // Millions of users!
+    jobId: jobId, // Unbounded!
+  })
+  .inc();
 ```
 
 **✅ Good** (bounded cardinality):
+
 ```typescript
-jobsSubmittedTotal.labels({
-  queue: queue,    // ~10 queues
-  type: jobType,   // ~50 types
-  priority: priority, // 4 priorities
-}).inc();
+jobsSubmittedTotal
+  .labels({
+    queue: queue, // ~10 queues
+    type: jobType, // ~50 types
+    priority: priority, // 4 priorities
+  })
+  .inc();
 ```
 
 ### 2. Histogram Buckets
@@ -381,24 +409,26 @@ Choose buckets based on expected distribution:
 
 ```typescript
 // API latency (milliseconds)
-buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 5]
+buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 5];
 
 // Job duration (seconds)
-buckets: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300]
+buckets: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300];
 
 // Queue depth (jobs)
-buckets: [0, 10, 50, 100, 500, 1000, 5000, 10000]
+buckets: [0, 10, 50, 100, 500, 1000, 5000, 10000];
 ```
 
 ### 3. Span Attributes
 
 **❌ Bad** (too many/sensitive):
+
 ```typescript
-span.setAttribute('user.email', 'user@example.com');  // PII!
+span.setAttribute('user.email', 'user@example.com'); // PII!
 span.setAttribute('payload', JSON.stringify(payload)); // Too large!
 ```
 
 **✅ Good** (minimal/safe):
+
 ```typescript
 span.setAttribute('job.id', jobId);
 span.setAttribute('job.type', jobType);
@@ -413,7 +443,7 @@ Always record errors in spans:
 try {
   // ... work
 } catch (error) {
-  recordError(span, error);  // Records exception + sets ERROR status
+  recordError(span, error); // Records exception + sets ERROR status
   throw error;
 } finally {
   endSpan(span);
@@ -433,11 +463,13 @@ export OTEL_TRACES_SAMPLER_ARG=0.1
 ## Performance Impact
 
 ### Metrics
+
 - **Memory**: ~10MB for 70 metrics with typical cardinality
 - **CPU**: <1% overhead for metric updates
 - **Scrape latency**: 5-50ms depending on metric count
 
 ### Tracing
+
 - **Memory**: ~1KB per span
 - **CPU**: <2% overhead with 100% sampling
 - **Network**: ~5KB per span over HTTP
@@ -466,7 +498,11 @@ import('./app').then(({ createApp }) => {
 
 ```typescript
 // apps/worker/src/index.ts
-import { initializeTracing, JobTracing, workersActive } from '@taskflow/observability';
+import {
+  initializeTracing,
+  JobTracing,
+  workersActive,
+} from '@taskflow/observability';
 
 initializeTracing('taskflow-worker');
 

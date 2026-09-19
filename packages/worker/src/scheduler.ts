@@ -1,6 +1,9 @@
-import { getJobsReadyToQueue, promoteJobToQueued } from '@taskflow/database';
+import {
+  getJobsReadyToQueue,
+  promoteJobToQueued,
+  type Job,
+} from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
-
 
 const logger = createLogger({ component: 'Scheduler' });
 
@@ -41,20 +44,21 @@ export interface SchedulerStats {
 
 /**
  * Scheduler
- * 
+ *
  * Background service that:
  * - Polls database for CREATED jobs with scheduledAt <= now()
- * - Enqueues them to Redis Streams
- * - Updates status to QUEUED
- * 
+ * - Atomically updates status to QUEUED and writes a durable outbox intent
+ *
  * This enables delayed job execution:
- * - Immediate jobs: scheduledAt = now() → enqueued immediately in API
- * - Delayed jobs: scheduledAt = future → picked up by scheduler when ready
+ * - Immediate jobs: the API transaction writes QUEUED plus an outbox intent
+ * - Delayed jobs: the scheduler writes QUEUED plus an outbox intent when due
+ * - The dispatcher is the only component that publishes intents to Redis
  */
 export class Scheduler {
   private config: Required<SchedulerConfig>;
   private timer?: NodeJS.Timeout;
   private isRunning = false;
+  private cyclePromise?: Promise<void>;
   private stats: SchedulerStats = {
     totalRuns: 0,
     totalJobsScheduled: 0,
@@ -92,17 +96,17 @@ export class Scheduler {
     logger.info('Starting scheduler');
 
     // Run immediately, then on interval
-    this.runSchedulingCycle();
+    this.triggerSchedulingCycle();
 
     this.timer = setInterval(() => {
-      this.runSchedulingCycle();
+      this.triggerSchedulingCycle();
     }, this.config.intervalMs);
   }
 
   /**
    * Stop the scheduler
    */
-  stop(): void {
+  async stop(): Promise<void> {
     if (!this.timer) {
       logger.warn('Scheduler not running');
       return;
@@ -112,6 +116,23 @@ export class Scheduler {
 
     clearInterval(this.timer);
     this.timer = undefined;
+    await this.cyclePromise;
+  }
+
+  /** Start one serialized cycle and retain it so shutdown can await it. */
+  private triggerSchedulingCycle(): void {
+    if (this.isRunning) {
+      logger.debug('Scheduling cycle already running, skipping');
+      return;
+    }
+
+    const cycle = this.runSchedulingCycle();
+    const trackedCycle = cycle.finally(() => {
+      if (this.cyclePromise === trackedCycle) {
+        this.cyclePromise = undefined;
+      }
+    });
+    this.cyclePromise = trackedCycle;
   }
 
   /**
@@ -156,14 +177,9 @@ export class Scheduler {
 
       for (const job of jobs) {
         try {
-          // Resolve queue from the queues FK stored in job.metadata, not raw JSON.
-          // The API always stores the queue name in metadata.queue.
-          const queueName =
-            typeof (job.metadata as Record<string, unknown> | null)?.queue === 'string'
-              ? (job.metadata as Record<string, unknown>).queue as string
-              : 'default';
-
-          await promoteJobToQueued(job.id, queueName);
+          // promoteJobToQueued resolves the authoritative queue name through
+          // jobs.queue_id inside the same transaction as the state transition.
+          await promoteJobToQueued(job.id);
 
           successCount++;
 
@@ -171,7 +187,7 @@ export class Scheduler {
             jobId: job.id,
             type: job.type,
             priority: job.priority,
-            queue: queueName,
+            queueId: job.queueId,
             scheduledAt: job.scheduledAt,
           });
         } catch (error) {
@@ -210,12 +226,17 @@ export class Scheduler {
   /**
    * Count jobs by priority for logging
    */
-  private countByPriority(jobs: any[]): Record<string, number> {
-    return jobs.reduce((acc, job) => {
-      const priority = job.priority || 'NORMAL';
-      acc[priority] = (acc[priority] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+  private countByPriority(
+    jobs: Array<Pick<Job, 'priority'>>
+  ): Record<string, number> {
+    return jobs.reduce(
+      (acc, job) => {
+        const priority = job.priority;
+        acc[priority] = (acc[priority] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
   }
 }
 

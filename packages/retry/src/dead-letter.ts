@@ -132,9 +132,7 @@ export interface DLQStats {
 /**
  * Calculate DLQ statistics
  */
-export function calculateDLQStats(
-  entries: DeadLetterEntry[]
-): DLQStats {
+export function calculateDLQStats(entries: DeadLetterEntry[]): DLQStats {
   const stats: DLQStats = {
     totalJobs: entries.length,
     byReason: {
@@ -155,7 +153,9 @@ export function calculateDLQStats(
   // Calculate statistics
   for (const entry of entries) {
     // By reason
-    const reason = (entry.metadata?.deadLetterReason as DeadLetterReason) || 'max_attempts_exceeded';
+    const reason =
+      (entry.metadata?.deadLetterReason as DeadLetterReason) ||
+      'max_attempts_exceeded';
     stats.byReason[reason] = (stats.byReason[reason] || 0) + 1;
 
     // By job type
@@ -176,7 +176,7 @@ export function calculateDLQStats(
 
 /**
  * Check if DLQ needs attention
- * 
+ *
  * Returns true if:
  * - Too many jobs in DLQ
  * - High rate of non-retryable errors

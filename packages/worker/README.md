@@ -24,7 +24,8 @@ persistence, and acknowledgement ordering.
 - A Redis message is acknowledged only after PostgreSQL durably records a
   terminal state, or when a reclaimed message is found to be terminal already.
 - Lease-acquisition errors and nonterminal lease outcomes remain pending for a
-  later claim. Idle pending entries are reclaimed with `XCLAIM`.
+  later claim. Idle pending entries are reclaimed with cursor-based
+  `XAUTOCLAIM`.
 - Handler execution is at least once. Database lease fencing prevents stale
   workers from winning a terminal commit, but does not make external handler
   effects exactly once. Handlers must provide their own idempotency boundary.

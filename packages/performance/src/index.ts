@@ -6,7 +6,12 @@ import { profiler } from './profiler.js';
 import { queryAnalyzer } from './query-analyzer.js';
 import { redisAnalyzer } from './redis-analyzer.js';
 
-export { Profiler, profiler, type ProfileResult, type ProfileStats } from './profiler.js';
+export {
+  Profiler,
+  profiler,
+  type ProfileResult,
+  type ProfileStats,
+} from './profiler.js';
 export {
   QueryAnalyzer,
   queryAnalyzer,
@@ -31,7 +36,12 @@ export function generatePerformanceReport(): string {
   lines.push('');
   lines.push('█'.repeat(120));
   lines.push('█' + ' '.repeat(118) + '█');
-  lines.push('█' + ' COMPREHENSIVE PERFORMANCE ANALYSIS REPORT'.padStart(75) + ' '.repeat(43) + '█');
+  lines.push(
+    '█' +
+      ' COMPREHENSIVE PERFORMANCE ANALYSIS REPORT'.padStart(75) +
+      ' '.repeat(43) +
+      '█'
+  );
   lines.push('█' + ' '.repeat(118) + '█');
   lines.push('█'.repeat(120));
   lines.push('');

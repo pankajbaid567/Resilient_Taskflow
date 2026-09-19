@@ -3,7 +3,7 @@ import pino from 'pino';
 
 /**
  * Create Pino Logger Instance
- * 
+ *
  * Configuration:
  * - Development: Pretty-printed with colors
  * - Production: JSON structured logs

@@ -11,6 +11,74 @@ import { getStreamKey, WORKER_CONSUMER_GROUP } from './stream-names';
 
 const logger = createLogger({ component: 'QueueProducer' });
 
+function parseStreamId(value: unknown, label: string): [bigint, bigint] {
+  if (typeof value !== 'string') {
+    throw new Error(`${label} is not a Redis stream ID`);
+  }
+
+  const match = /^(\d+)-(\d+)$/.exec(value);
+  if (!match?.[1] || !match[2]) {
+    throw new Error(`${label} is not a Redis stream ID: ${value}`);
+  }
+
+  return [BigInt(match[1]), BigInt(match[2])];
+}
+
+function compareStreamIds(left: string, right: string): number {
+  const [leftMs, leftSequence] = parseStreamId(left, 'left stream ID');
+  const [rightMs, rightSequence] = parseStreamId(right, 'right stream ID');
+
+  if (leftMs !== rightMs) {
+    return leftMs < rightMs ? -1 : 1;
+  }
+  if (leftSequence === rightSequence) {
+    return 0;
+  }
+  return leftSequence < rightSequence ? -1 : 1;
+}
+
+function readGroupField(group: unknown[], fieldName: string): unknown {
+  for (let index = 0; index < group.length; index += 2) {
+    if (group[index] === fieldName) {
+      return group[index + 1];
+    }
+  }
+  return undefined;
+}
+
+function findLastDeliveredId(rawGroups: unknown): string {
+  if (!Array.isArray(rawGroups)) {
+    throw new Error('Redis XINFO GROUPS returned an invalid response');
+  }
+
+  const groups: unknown[][] = rawGroups.every(Array.isArray)
+    ? (rawGroups as unknown[][])
+    : [rawGroups];
+  const group = groups.find(
+    (candidate) => readGroupField(candidate, 'name') === WORKER_CONSUMER_GROUP
+  );
+  const lastDeliveredId = group
+    ? readGroupField(group, 'last-delivered-id')
+    : undefined;
+
+  if (typeof lastDeliveredId !== 'string') {
+    throw new Error(
+      `Redis consumer group ${WORKER_CONSUMER_GROUP} was not found`
+    );
+  }
+
+  parseStreamId(lastDeliveredId, 'consumer-group last-delivered ID');
+  return lastDeliveredId;
+}
+
+function getEntryId(entry: unknown, label: string): string {
+  if (!Array.isArray(entry) || typeof entry[0] !== 'string') {
+    throw new Error(`${label} did not contain a Redis stream ID`);
+  }
+  parseStreamId(entry[0], label);
+  return entry[0];
+}
+
 function createJobMessage(
   jobId: string,
   queueName: string,
@@ -36,7 +104,8 @@ function createJobMessage(
  *
  * @param jobId - Unique job identifier
  * @param queueName - Queue name
- * @param attempt - Attempt number (for retries)
+ * @param attempt - Producer-supplied delivery hint. It is not the
+ * authoritative PostgreSQL execution-attempt count.
  * @returns Message ID from Redis
  */
 export async function enqueueJob(
@@ -171,55 +240,87 @@ export async function trimStream(
   queueName: string,
   maxLength: number = 100_000
 ): Promise<number> {
+  if (!Number.isSafeInteger(maxLength) || maxLength <= 0) {
+    throw new Error('maxLength must be a positive safe integer');
+  }
+
   const redis = getRedisClient();
   const streamKey = getStreamKey(queueName);
   const groupName = WORKER_CONSUMER_GROUP;
 
   try {
-    // Query PEL summary to find the oldest unacknowledged delivery ID.
-    // xpending(key, group) returns [count, minId, maxId, consumers].
-    const pelSummary = (await redis.xpending(streamKey, groupName)) as [
-      number,
-      string | null,
-      string | null,
-      unknown,
-    ] | null;
-
-    if (pelSummary && pelSummary[0] > 0 && pelSummary[1]) {
-      // There are pending entries. Trim with MINID set to just before the
-      // oldest PEL entry so we never evict an unacknowledged message.
-      //
-      // We subtract 1ms from the timestamp portion to keep the boundary
-      // entry itself. MINID format is <ms>-<seq>; we reconstruct it.
-      const [msStr] = pelSummary[1].split('-');
-      const pelMinMs = Number(msStr);
-
-      if (Number.isFinite(pelMinMs) && pelMinMs > 0) {
-        // Only trim entries older than the oldest pending entry.
-        const safeTrimId = `${pelMinMs - 1}-0`;
-        const trimmed = await redis.xtrim(streamKey, 'MINID', '~', safeTrimId);
-
-        if (trimmed > 0) {
-          logger.info('Stream trimmed (PEL-safe)', {
-            queue: queueName,
-            trimmed,
-            pelMinId: pelSummary[1],
-            safeTrimId,
-          });
-        }
-
-        return trimmed;
-      }
+    const streamLength = Number(await redis.xlen(streamKey));
+    if (!Number.isSafeInteger(streamLength) || streamLength < 0) {
+      throw new Error('Redis XLEN returned an invalid stream length');
+    }
+    if (streamLength <= maxLength) {
+      return 0;
     }
 
-    // No PEL entries: trim freely by MAXLEN.
-    const trimmed = await redis.xtrim(streamKey, 'MAXLEN', '~', maxLength);
+    // Find the oldest entry that the retention target would keep. We combine
+    // this with the delivery boundary below, retaining extra entries whenever
+    // required to protect pending or not-yet-delivered work.
+    const retainedEntries = (await redis.xrevrange(
+      streamKey,
+      '+',
+      '-',
+      'COUNT',
+      maxLength
+    )) as unknown[];
+    if (retainedEntries.length < maxLength) {
+      // The stream shrank concurrently; there is no longer evidence that it
+      // exceeds the configured retention.
+      return 0;
+    }
+    const retentionBoundary = getEntryId(
+      retainedEntries[retainedEntries.length - 1],
+      'Redis XREVRANGE retention boundary'
+    );
+
+    // Snapshot the group position before reading the PEL. With this order, a
+    // concurrent XREADGROUP is safe: either XPENDING observes its claimed
+    // entries, or their IDs are later than this last-delivered boundary.
+    const groups = await redis.xinfo('GROUPS', streamKey);
+    const lastDeliveredId = findLastDeliveredId(groups);
+
+    // Query PEL summary to find the oldest unacknowledged delivery ID.
+    // xpending(key, group) returns [count, minId, maxId, consumers].
+    const pelSummary = (await redis.xpending(streamKey, groupName)) as
+      [number, string | null, string | null, unknown] | null;
+
+    if (!pelSummary || !Number.isSafeInteger(Number(pelSummary[0]))) {
+      throw new Error('Redis XPENDING returned an invalid summary');
+    }
+
+    let deliveryBoundary: string;
+    if (Number(pelSummary[0]) > 0) {
+      if (!pelSummary[1]) {
+        throw new Error('Redis XPENDING omitted its oldest pending ID');
+      }
+      parseStreamId(pelSummary[1], 'oldest pending ID');
+      deliveryBoundary = pelSummary[1];
+    } else {
+      // An empty PEL does not mean the stream is fully consumed. Retain the
+      // snapshotted last-delivered entry plus every later ID. If delivery
+      // occurred after the snapshot, those entries have later IDs; if it
+      // occurred before XPENDING, its oldest pending ID was observed above.
+      deliveryBoundary = lastDeliveredId;
+    }
+
+    const safeTrimId =
+      compareStreamIds(retentionBoundary, deliveryBoundary) <= 0
+        ? retentionBoundary
+        : deliveryBoundary;
+    const trimmed = await redis.xtrim(streamKey, 'MINID', safeTrimId);
 
     if (trimmed > 0) {
-      logger.info('Stream trimmed', {
+      logger.info('Stream trimmed at safe delivery boundary', {
         queue: queueName,
         trimmed,
         maxLength,
+        retentionBoundary,
+        deliveryBoundary,
+        safeTrimId,
       });
     }
 

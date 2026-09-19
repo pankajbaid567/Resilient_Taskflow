@@ -1,7 +1,7 @@
-
 import { getJobCounts } from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
 import { getMetrics, jobsCurrentByStatus } from '@taskflow/observability';
+import { JobStatus } from '@taskflow/types';
 import { FastifyInstance } from 'fastify';
 
 const logger = createLogger({ component: 'MetricsRoutes' });
@@ -22,27 +22,11 @@ export function metricsRoutes(app: FastifyInstance): Promise<void> {
     try {
       // Update job count gauges from database
       const jobCounts = await getJobCounts();
-      jobsCurrentByStatus
-        .labels({ status: 'created', queue: 'all' })
-        .set(jobCounts.created);
-      jobsCurrentByStatus
-        .labels({ status: 'queued', queue: 'all' })
-        .set(jobCounts.queued);
-      jobsCurrentByStatus
-        .labels({ status: 'running', queue: 'all' })
-        .set(jobCounts.running);
-      jobsCurrentByStatus
-        .labels({ status: 'completed', queue: 'all' })
-        .set(jobCounts.completed);
-      jobsCurrentByStatus
-        .labels({ status: 'failed', queue: 'all' })
-        .set(jobCounts.failed);
-      jobsCurrentByStatus
-        .labels({ status: 'cancelled', queue: 'all' })
-        .set(jobCounts.cancelled);
-      jobsCurrentByStatus
-        .labels({ status: 'dead_lettered', queue: 'all' })
-        .set(jobCounts.dead_lettered);
+      for (const status of Object.values(JobStatus)) {
+        jobsCurrentByStatus
+          .labels({ status, queue: 'all' })
+          .set(jobCounts[status]);
+      }
 
       // Get all metrics from prom-client registry
       const metricsText = await getMetrics();

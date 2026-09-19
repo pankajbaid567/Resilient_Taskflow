@@ -5,7 +5,12 @@ import {
 } from '@taskflow/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { claimStaleMessages, consumeJobs } from '../consumer';
+import {
+  claimStaleMessages,
+  claimStaleMessagesWithReport,
+  consumeJobs,
+  resetReclaimCursor,
+} from '../consumer';
 import { enqueueJob } from '../producer';
 import {
   getConsumerName,
@@ -44,6 +49,7 @@ function envelope(
 describe('Redis job message contract', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetReclaimCursor();
   });
 
   it('accepts only the versioned v1 envelope', () => {
@@ -116,6 +122,7 @@ describe('Redis job message contract', () => {
         stream: getStreamKey('default'),
         queue: 'default',
         data: envelope(),
+        deliveryCount: 1,
       },
     ]);
 
@@ -163,6 +170,9 @@ describe('Redis job message contract', () => {
       ],
       [],
     ]);
+    redis.xpending.mockResolvedValue([
+      ['1003-0', getConsumerName('replacement'), 0, 2],
+    ]);
 
     await expect(
       claimStaleMessages('default', 'replacement', 30_000, 1)
@@ -172,6 +182,7 @@ describe('Redis job message contract', () => {
         stream: getStreamKey('default'),
         queue: 'default',
         data: envelope({ attempt: 2 }),
+        deliveryCount: 2,
       },
     ]);
 
@@ -201,8 +212,16 @@ describe('Redis job message contract', () => {
     ]);
     redis.xadd.mockResolvedValue('quarantine-id');
     redis.xack.mockResolvedValue(1);
+    redis.xpending.mockResolvedValue([
+      ['1005-0', getConsumerName('replacement'), 0, 2],
+    ]);
 
-    const claimed = await claimStaleMessages('default', 'replacement', 30_000, 2);
+    const claimed = await claimStaleMessages(
+      'default',
+      'replacement',
+      30_000,
+      2
+    );
 
     expect(claimed).toHaveLength(1);
     expect(claimed[0]?.messageId).toBe('1005-0');
@@ -211,5 +230,74 @@ describe('Redis job message contract', () => {
       WORKER_CONSUMER_GROUP,
       '1004-0'
     );
+    expect(redis.xadd).toHaveBeenCalledWith(
+      `${getStreamKey('default')}:quarantine`,
+      '*',
+      'messageId',
+      '1004-0',
+      'originalStream',
+      getStreamKey('default'),
+      'reason',
+      'MALFORMED_STREAM_ENTRY',
+      'quarantinedAt',
+      expect.any(String),
+      'metadata',
+      expect.any(String),
+      'rawEntry',
+      JSON.stringify(['1004-0', ['invalid_field', 'poison_value']])
+    );
+  });
+
+  it('reports stream entries Redis found missing while reclaiming', async () => {
+    redis.call.mockResolvedValue(['0-0', [], ['900-0', '901-0']]);
+
+    await expect(
+      claimStaleMessagesWithReport('default', 'replacement', 30_000, 2)
+    ).resolves.toEqual({
+      messages: [],
+      nextCursor: '0-0',
+      deletedMessageIds: ['900-0', '901-0'],
+    });
+  });
+
+  it('keeps reclaim cursors independent for each stream consumer', async () => {
+    redis.call
+      .mockResolvedValueOnce(['1500-0', [], []])
+      .mockResolvedValueOnce(['1600-0', [], []])
+      .mockResolvedValueOnce(['0-0', [], []]);
+
+    await claimStaleMessages('default', 'replacement-a', 30_000, 1);
+    await claimStaleMessages('default', 'replacement-b', 30_000, 1);
+    await claimStaleMessages('default', 'replacement-a', 30_000, 1);
+
+    expect(redis.call.mock.calls.map((call) => call[5])).toEqual([
+      '0-0',
+      '0-0',
+      '1500-0',
+    ]);
+  });
+
+  it('does not advance the reclaim cursor past a quarantine write failure', async () => {
+    redis.call
+      .mockResolvedValueOnce(['1200-0', [], []])
+      .mockResolvedValueOnce([
+        '1300-0',
+        [['1250-0', ['invalid_field', 'poison_value']]],
+        [],
+      ])
+      .mockResolvedValueOnce(['0-0', [], []]);
+    redis.xadd.mockRejectedValueOnce(new Error('quarantine unavailable'));
+
+    await claimStaleMessages('default', 'replacement', 30_000, 1);
+    await expect(
+      claimStaleMessages('default', 'replacement', 30_000, 1)
+    ).rejects.toThrow('quarantine unavailable');
+    await claimStaleMessages('default', 'replacement', 30_000, 1);
+
+    expect(redis.call.mock.calls.map((call) => call[5])).toEqual([
+      '0-0',
+      '1200-0',
+      '1200-0',
+    ]);
   });
 });

@@ -2,7 +2,8 @@ import type { Config } from 'drizzle-kit';
 
 export default {
   schema: './src/schema/index.ts',
-  out: './drizzle',
+  // The custom migration runner and drizzle-kit share one authoritative path.
+  out: './migrations',
   driver: 'pg',
   dbCredentials: {
     connectionString: process.env.DATABASE_URL || '',

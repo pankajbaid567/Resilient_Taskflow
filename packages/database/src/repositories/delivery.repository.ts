@@ -1,6 +1,6 @@
+import { decideJobRetry } from '@taskflow/retry';
 import { JobStatus } from '@taskflow/types';
-import { and, eq, getTableColumns, sql } from 'drizzle-orm';
-
+import { and, eq, getTableColumns, or, sql } from 'drizzle-orm';
 
 import { db } from '../client';
 import {
@@ -12,7 +12,10 @@ import {
   jobs,
   Queue,
   queues,
+  type JobDelivery,
 } from '../schema';
+
+import { insertPendingDelivery } from './dispatch.repository';
 
 /**
  * Result of trying to turn a Redis delivery into an owned database lease.
@@ -35,7 +38,12 @@ export interface JobDeliveryFailureOptions {
 
 export type JobDeliveryFailureOutcome =
   | { job: Job; terminal: true }
-  | { job: Job; terminal: false; retryDelayMs: number };
+  | {
+      job: Job;
+      terminal: false;
+      retryDelayMs: number;
+      successorDelivery: JobDelivery;
+    };
 
 /**
  * Raised when a worker attempts to mutate a job with a stale or expired lease.
@@ -46,6 +54,18 @@ export class JobDeliveryLeaseLostError extends Error {
       `Cannot ${operation} job ${jobId}: delivery lease is no longer owned`
     );
     this.name = 'JobDeliveryLeaseLostError';
+  }
+}
+
+/**
+ * Raised when cancellation completion is attempted without a durable request.
+ */
+export class JobCancellationNotRequestedError extends Error {
+  constructor(jobId: string, status: Job['status']) {
+    super(
+      `Cannot complete cancellation for job ${jobId}: current status is ${status}`
+    );
+    this.name = 'JobCancellationNotRequestedError';
   }
 }
 
@@ -103,6 +123,110 @@ export async function acquireJobForDelivery(
       return { kind: 'TERMINAL', job };
     }
 
+    if (job.status === JobStatus.CANCEL_REQUESTED) {
+      if (job.leaseExpiresAt && leaseIsActive) {
+        return { kind: 'BUSY', job };
+      }
+
+      const [cancelledJob] = await tx
+        .update(jobs)
+        .set({
+          status: JobStatus.CANCELLED,
+          completedAt: sql`clock_timestamp()`,
+          leaseId: null,
+          leaseExpiresAt: null,
+          version: sql`${jobs.version} + 1`,
+          eventSequence: sql`${jobs.eventSequence} + 1`,
+        })
+        .where(
+          and(
+            eq(jobs.id, job.id),
+            eq(jobs.status, JobStatus.CANCEL_REQUESTED),
+            eq(jobs.version, job.version),
+            or(
+              sql`${jobs.leaseExpiresAt} IS NULL`,
+              sql`${jobs.leaseExpiresAt} <= clock_timestamp()`
+            )
+          )
+        )
+        .returning();
+
+      if (!cancelledJob) {
+        throw new Error(`Failed to recover cancelled job ${job.id}`);
+      }
+
+      if (job.attempts > 0) {
+        const cancellationError = {
+          code: 'CANCELLED',
+          message: 'Job cancellation recovered after its lease expired',
+        };
+        const [cancelledAttempt] = await tx
+          .update(jobAttempts)
+          .set({
+            completedAt: sql`clock_timestamp()`,
+            durationMs: sql<number>`GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (clock_timestamp() - ${jobAttempts.startedAt})) * 1000))::integer`,
+            status: JobStatus.CANCELLED,
+            error: cancellationError,
+            errorMessage: cancellationError.message,
+            metadata: {
+              leaseId: job.leaseId,
+              reason: 'cancellation_recovered_after_lease_expiry',
+              recoveryWorkerId: workerId,
+            },
+          })
+          .where(
+            and(
+              eq(jobAttempts.jobId, job.id),
+              eq(jobAttempts.attemptNumber, job.attempts),
+              eq(jobAttempts.status, JobStatus.PROCESSING)
+            )
+          )
+          .returning({ id: jobAttempts.id });
+
+        if (!cancelledAttempt) {
+          await tx.insert(jobAttempts).values({
+            jobId: job.id,
+            attemptNumber: job.attempts,
+            workerId: job.workerId,
+            // No current-attempt row means the execution boundary was never
+            // durably recorded. Do not reuse jobs.startedAt, which may belong
+            // to the first attempt of a retrying job.
+            startedAt: observedAt,
+            completedAt: sql`clock_timestamp()`,
+            durationMs: 0,
+            status: JobStatus.CANCELLED,
+            error: cancellationError,
+            errorMessage: cancellationError.message,
+            metadata: {
+              leaseId: job.leaseId,
+              reason: 'cancellation_recovered_after_lease_expiry',
+              recoveryWorkerId: workerId,
+              attemptRecordMissing: true,
+            },
+          });
+        }
+      }
+
+      await tx.insert(jobEvents).values({
+        jobId: job.id,
+        eventType: 'cancelled',
+        sequence: cancelledJob.eventSequence,
+        fromStatus: JobStatus.CANCEL_REQUESTED,
+        toStatus: JobStatus.CANCELLED,
+        workerId,
+        userId: job.userId,
+        metadata: {
+          expiredLeaseId: job.leaseId,
+          previousWorkerId: job.workerId,
+          recoveryWorkerId: workerId,
+          attemptNumber: job.attempts,
+          reason: 'lease_expired_after_cancellation_request',
+        },
+      });
+
+      return { kind: 'TERMINAL', job: cancelledJob };
+    }
+
     if (job.status === JobStatus.RETRY_SCHEDULED) {
       if (!scheduledIsDue) {
         return { kind: 'NOT_READY', job };
@@ -116,6 +240,7 @@ export async function acquireJobForDelivery(
           leaseId: null,
           leaseExpiresAt: null,
           version: sql`${jobs.version} + 1`,
+          eventSequence: sql`${jobs.eventSequence} + 1`,
         })
         .where(
           and(
@@ -134,6 +259,7 @@ export async function acquireJobForDelivery(
       await tx.insert(jobEvents).values({
         jobId: job.id,
         eventType: 'retried',
+        sequence: promotedJob.eventSequence,
         fromStatus: JobStatus.RETRY_SCHEDULED,
         toStatus: JobStatus.QUEUED,
         userId: job.userId,
@@ -157,20 +283,11 @@ export async function acquireJobForDelivery(
       };
 
       if (job.attempts > 0) {
-        const durationMs = elapsedMilliseconds(job.startedAt, observedAt);
-        const attemptStartedAt = job.startedAt
-          ? sql`${job.startedAt.toISOString()}::timestamptz`
-          : sql`clock_timestamp()`;
-
-        await tx
-          .insert(jobAttempts)
-          .values({
-            jobId: job.id,
-            attemptNumber: job.attempts,
-            workerId: job.workerId,
-            startedAt: attemptStartedAt,
+        const [expiredAttempt] = await tx
+          .update(jobAttempts)
+          .set({
             completedAt: sql`clock_timestamp()`,
-            durationMs,
+            durationMs: sql<number>`GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (clock_timestamp() - ${jobAttempts.startedAt})) * 1000))::integer`,
             status: JobStatus.FAILED,
             error: leaseExpiredError,
             errorMessage: leaseExpiredError.message,
@@ -179,20 +296,33 @@ export async function acquireJobForDelivery(
               leaseId: job.leaseId,
             },
           })
-          .onConflictDoUpdate({
-            target: [jobAttempts.jobId, jobAttempts.attemptNumber],
-            set: {
-              completedAt: sql`clock_timestamp()`,
-              durationMs,
-              status: JobStatus.FAILED,
-              error: leaseExpiredError,
-              errorMessage: leaseExpiredError.message,
-              metadata: {
-                reason: 'lease_expired',
-                leaseId: job.leaseId,
-              },
+          .where(
+            and(
+              eq(jobAttempts.jobId, job.id),
+              eq(jobAttempts.attemptNumber, job.attempts),
+              eq(jobAttempts.status, JobStatus.PROCESSING)
+            )
+          )
+          .returning({ id: jobAttempts.id });
+
+        if (!expiredAttempt) {
+          await tx.insert(jobAttempts).values({
+            jobId: job.id,
+            attemptNumber: job.attempts,
+            workerId: job.workerId,
+            startedAt: observedAt,
+            completedAt: sql`clock_timestamp()`,
+            durationMs: 0,
+            status: JobStatus.FAILED,
+            error: leaseExpiredError,
+            errorMessage: leaseExpiredError.message,
+            metadata: {
+              reason: 'lease_expired',
+              leaseId: job.leaseId,
+              attemptRecordMissing: true,
             },
           });
+        }
       }
 
       if (job.attempts >= job.maxAttempts) {
@@ -206,6 +336,7 @@ export async function acquireJobForDelivery(
             leaseId: null,
             leaseExpiresAt: null,
             version: sql`${jobs.version} + 1`,
+            eventSequence: sql`${jobs.eventSequence} + 1`,
           })
           .where(
             and(
@@ -244,6 +375,7 @@ export async function acquireJobForDelivery(
         await tx.insert(jobEvents).values({
           jobId: job.id,
           eventType: 'lease_expired',
+          sequence: deadLetteredJob.eventSequence,
           fromStatus: JobStatus.PROCESSING,
           toStatus: JobStatus.DEAD_LETTERED,
           workerId: job.workerId,
@@ -267,6 +399,7 @@ export async function acquireJobForDelivery(
           leaseId: null,
           leaseExpiresAt: null,
           version: sql`${jobs.version} + 1`,
+          eventSequence: sql`${jobs.eventSequence} + 1`,
         })
         .where(
           and(
@@ -284,6 +417,7 @@ export async function acquireJobForDelivery(
       await tx.insert(jobEvents).values({
         jobId: job.id,
         eventType: 'lease_expired',
+        sequence: recoveredJob.eventSequence,
         fromStatus: JobStatus.PROCESSING,
         toStatus: JobStatus.QUEUED,
         workerId: job.workerId,
@@ -303,6 +437,10 @@ export async function acquireJobForDelivery(
       return { kind: 'NOT_READY', job };
     }
 
+    if (job.attempts >= job.maxAttempts) {
+      return { kind: 'NOT_READY', job };
+    }
+
     const [leasedJob] = await tx
       .update(jobs)
       .set({
@@ -313,13 +451,15 @@ export async function acquireJobForDelivery(
         startedAt: sql`COALESCE(${jobs.startedAt}, clock_timestamp())`,
         attempts: sql`${jobs.attempts} + 1`,
         version: sql`${jobs.version} + 1`,
+        eventSequence: sql`${jobs.eventSequence} + 1`,
       })
       .where(
         and(
           eq(jobs.id, job.id),
           eq(jobs.status, JobStatus.QUEUED),
           eq(jobs.version, job.version),
-          sql`${jobs.scheduledAt} <= clock_timestamp()`
+          sql`${jobs.scheduledAt} <= clock_timestamp()`,
+          sql`${jobs.attempts} < ${jobs.maxAttempts}`
         )
       )
       .returning();
@@ -331,6 +471,7 @@ export async function acquireJobForDelivery(
     await tx.insert(jobEvents).values({
       jobId: job.id,
       eventType: 'lease_acquired',
+      sequence: leasedJob.eventSequence,
       fromStatus: JobStatus.QUEUED,
       toStatus: JobStatus.PROCESSING,
       workerId,
@@ -393,6 +534,39 @@ export async function startJobAttempt(
       .returning();
 
     if (createdAttempt) {
+      const [sequencedJob] = await tx
+        .update(jobs)
+        .set({ eventSequence: sql`${jobs.eventSequence} + 1` })
+        .where(
+          and(
+            eq(jobs.id, jobId),
+            eq(jobs.status, JobStatus.PROCESSING),
+            eq(jobs.workerId, workerId),
+            eq(jobs.leaseId, leaseId),
+            eq(jobs.version, job.version),
+            sql`${jobs.leaseExpiresAt} > clock_timestamp()`
+          )
+        )
+        .returning();
+
+      if (!sequencedJob) {
+        throw new JobDeliveryLeaseLostError(jobId, 'start attempt for');
+      }
+
+      await tx.insert(jobEvents).values({
+        jobId,
+        eventType: 'attempt_started',
+        sequence: sequencedJob.eventSequence,
+        fromStatus: JobStatus.PROCESSING,
+        toStatus: JobStatus.PROCESSING,
+        workerId,
+        userId: job.userId,
+        metadata: {
+          leaseId,
+          attemptNumber: job.attempts,
+        },
+      });
+
       return createdAttempt;
     }
 
@@ -420,7 +594,9 @@ export async function startJobAttempt(
 }
 
 /**
- * Renew a lease only while the caller still owns an unexpired fence.
+ * Renew a lease only while the caller still owns an unexpired fence. A
+ * cancellation request retains that fence so the owner can observe the state,
+ * stop its handler, and durably complete cancellation.
  */
 export async function renewJobDeliveryLease(
   jobId: string,
@@ -430,24 +606,49 @@ export async function renewJobDeliveryLease(
 ): Promise<Job | null> {
   assertPositiveDuration(duration, 'duration');
 
-  const [job] = await db
-    .update(jobs)
-    .set({
-      leaseExpiresAt: sql`clock_timestamp() + (${duration} * INTERVAL '1 millisecond')`,
-      version: sql`${jobs.version} + 1`,
-    })
-    .where(
-      and(
-        eq(jobs.id, jobId),
-        eq(jobs.status, JobStatus.PROCESSING),
-        eq(jobs.workerId, workerId),
-        eq(jobs.leaseId, leaseId),
-        sql`${jobs.leaseExpiresAt} > clock_timestamp()`
+  return db.transaction(async (tx) => {
+    const [job] = await tx
+      .update(jobs)
+      .set({
+        leaseExpiresAt: sql`clock_timestamp() + (${duration} * INTERVAL '1 millisecond')`,
+        version: sql`${jobs.version} + 1`,
+        eventSequence: sql`${jobs.eventSequence} + 1`,
+      })
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          or(
+            eq(jobs.status, JobStatus.PROCESSING),
+            eq(jobs.status, JobStatus.CANCEL_REQUESTED)
+          ),
+          eq(jobs.workerId, workerId),
+          eq(jobs.leaseId, leaseId),
+          sql`${jobs.leaseExpiresAt} > clock_timestamp()`
+        )
       )
-    )
-    .returning();
+      .returning();
 
-  return job || null;
+    if (!job) {
+      return null;
+    }
+
+    await tx.insert(jobEvents).values({
+      jobId,
+      eventType: 'lease_renewed',
+      sequence: job.eventSequence,
+      fromStatus: job.status,
+      toStatus: job.status,
+      workerId,
+      userId: job.userId,
+      metadata: {
+        leaseId,
+        leaseExpiresAt: job.leaseExpiresAt?.toISOString(),
+        attemptNumber: job.attempts,
+      },
+    });
+
+    return job;
+  });
 }
 
 /**
@@ -490,6 +691,7 @@ export async function completeJobDelivery(
         leaseId: null,
         leaseExpiresAt: null,
         version: sql`${jobs.version} + 1`,
+        eventSequence: sql`${jobs.eventSequence} + 1`,
       })
       .where(
         and(
@@ -497,7 +699,8 @@ export async function completeJobDelivery(
           eq(jobs.status, JobStatus.PROCESSING),
           eq(jobs.workerId, workerId),
           eq(jobs.leaseId, leaseId),
-          eq(jobs.version, ownedJob.version)
+          eq(jobs.version, ownedJob.version),
+          sql`${jobs.leaseExpiresAt} > clock_timestamp()`
         )
       )
       .returning();
@@ -532,6 +735,7 @@ export async function completeJobDelivery(
     await tx.insert(jobEvents).values({
       jobId,
       eventType: 'completed',
+      sequence: completedJob.eventSequence,
       fromStatus: JobStatus.PROCESSING,
       toStatus: JobStatus.SUCCEEDED,
       workerId,
@@ -547,8 +751,8 @@ export async function completeJobDelivery(
 }
 
 /**
- * Atomically finish a failed attempt and either schedule its retry using
- * exponential backoff or persist terminal dead-letter state.
+ * Atomically finish a failed attempt and either persist terminal dead-letter
+ * state or schedule its retry with a unique successor delivery intent.
  */
 export async function failJobDelivery(
   jobId: string,
@@ -583,14 +787,21 @@ export async function failJobDelivery(
       throw new JobDeliveryLeaseLostError(jobId, 'fail');
     }
 
-    const terminal = ownedJob.attempts >= ownedJob.maxAttempts;
-    const retryDelayMs = terminal
-      ? undefined
-      : calculateRetryDelay(
-          ownedJob.attempts,
-          options.baseDelayMs,
-          options.maxDelayMs
-        );
+    const retryDecision = decideJobRetry({
+      currentAttempt: ownedJob.attempts,
+      maxAttempts: ownedJob.maxAttempts,
+      error,
+      jobCreatedAt: ownedJob.createdAt,
+      baseDelayMs: options.baseDelayMs,
+      maxDelayMs: options.maxDelayMs,
+    });
+    const terminal = !retryDecision.shouldRetry;
+    const retryDelayMs = retryDecision.shouldRetry
+      ? retryDecision.delayMs
+      : undefined;
+    const retryAvailableAt = retryDecision.shouldRetry
+      ? sql<Date>`transaction_timestamp() + (${retryDecision.delayMs} * INTERVAL '1 millisecond')`
+      : undefined;
     const nextStatus = terminal
       ? JobStatus.DEAD_LETTERED
       : JobStatus.RETRY_SCHEDULED;
@@ -601,12 +812,11 @@ export async function failJobDelivery(
         error: normalizedError.record,
         failedAt: sql`clock_timestamp()`,
         completedAt: terminal ? sql`clock_timestamp()` : null,
-        scheduledAt: terminal
-          ? ownedJob.scheduledAt
-          : sql`clock_timestamp() + (${retryDelayMs!} * INTERVAL '1 millisecond')`,
+        scheduledAt: terminal ? ownedJob.scheduledAt : retryAvailableAt!,
         leaseId: null,
         leaseExpiresAt: null,
         version: sql`${jobs.version} + 1`,
+        eventSequence: sql`${jobs.eventSequence} + 1`,
       })
       .where(
         and(
@@ -614,7 +824,8 @@ export async function failJobDelivery(
           eq(jobs.status, JobStatus.PROCESSING),
           eq(jobs.workerId, workerId),
           eq(jobs.leaseId, leaseId),
-          eq(jobs.version, ownedJob.version)
+          eq(jobs.version, ownedJob.version),
+          sql`${jobs.leaseExpiresAt} > clock_timestamp()`
         )
       )
       .returning();
@@ -636,6 +847,7 @@ export async function failJobDelivery(
           leaseId,
           terminal,
           retryDelayMs,
+          retryReason: retryDecision.reason,
         },
       })
       .where(
@@ -680,6 +892,7 @@ export async function failJobDelivery(
     await tx.insert(jobEvents).values({
       jobId,
       eventType: terminal ? 'dead_lettered' : 'failed',
+      sequence: failedJob.eventSequence,
       fromStatus: JobStatus.PROCESSING,
       toStatus: nextStatus,
       workerId,
@@ -689,17 +902,50 @@ export async function failJobDelivery(
         attemptNumber: ownedJob.attempts,
         terminal,
         retryDelayMs,
+        retryReason: retryDecision.reason,
       },
     });
 
-    if (terminal) {
+    if (!retryDecision.shouldRetry) {
       return { job: failedJob, terminal: true };
+    }
+
+    const [queue] = await tx
+      .select({ name: queues.name })
+      .from(queues)
+      .where(eq(queues.id, ownedJob.queueId))
+      .limit(1);
+
+    if (!queue) {
+      throw new Error(
+        `Queue ${ownedJob.queueId} not found while scheduling retry for job ${jobId}`
+      );
+    }
+
+    const successorDelivery = await insertPendingDelivery(
+      tx,
+      jobId,
+      queue.name,
+      retryDecision.nextAttempt,
+      retryAvailableAt
+    );
+
+    if (
+      successorDelivery.status !== 'PENDING' ||
+      successorDelivery.attempt !== retryDecision.nextAttempt ||
+      successorDelivery.availableAt.getTime() !==
+        failedJob.scheduledAt.getTime()
+    ) {
+      throw new Error(
+        `Retry successor for job ${jobId} does not match the durable retry state`
+      );
     }
 
     return {
       job: failedJob,
       terminal: false,
-      retryDelayMs: retryDelayMs!,
+      retryDelayMs: retryDecision.delayMs,
+      successorDelivery,
     };
   });
 }
@@ -722,8 +968,8 @@ export async function completeCancellation(
 ): Promise<Job> {
   return db.transaction(async (tx) => {
     // Re-validate ownership under a row lock. The lease may have been
-    // revoked concurrently (e.g., by a replacement worker that claimed
-    // a stale PROCESSING row after a crash).
+    // revoked concurrently (e.g., by a replacement worker that recovered
+    // an expired cancellation request).
     const [ownedJob] = await tx
       .select()
       .from(jobs)
@@ -732,10 +978,6 @@ export async function completeCancellation(
           eq(jobs.id, jobId),
           eq(jobs.workerId, workerId),
           eq(jobs.leaseId, leaseId),
-          // Accept both CANCEL_REQUESTED (cooperative) and PROCESSING
-          // (timeout-triggered cancellation path with CANCEL_REQUESTED
-          // detected before the lease check runs).
-          sql`${jobs.status} IN ('CANCEL_REQUESTED', 'PROCESSING')`,
           sql`${jobs.leaseExpiresAt} > clock_timestamp()`
         )
       )
@@ -746,6 +988,10 @@ export async function completeCancellation(
       throw new JobDeliveryLeaseLostError(jobId, 'complete cancellation for');
     }
 
+    if (ownedJob.status !== JobStatus.CANCEL_REQUESTED) {
+      throw new JobCancellationNotRequestedError(jobId, ownedJob.status);
+    }
+
     const [cancelledJob] = await tx
       .update(jobs)
       .set({
@@ -754,11 +1000,16 @@ export async function completeCancellation(
         leaseId: null,
         leaseExpiresAt: null,
         version: sql`${jobs.version} + 1`,
+        eventSequence: sql`${jobs.eventSequence} + 1`,
       })
       .where(
         and(
           eq(jobs.id, jobId),
-          eq(jobs.version, ownedJob.version)
+          eq(jobs.status, JobStatus.CANCEL_REQUESTED),
+          eq(jobs.workerId, workerId),
+          eq(jobs.leaseId, leaseId),
+          eq(jobs.version, ownedJob.version),
+          sql`${jobs.leaseExpiresAt} > clock_timestamp()`
         )
       )
       .returning();
@@ -767,38 +1018,44 @@ export async function completeCancellation(
       throw new JobDeliveryLeaseLostError(jobId, 'complete cancellation for');
     }
 
-    // Record the attempt as cancelled (mirrors the FAILED attempt pattern)
+    // Record the attempt as cancelled. Calculate duration from the current
+    // attempt row when it exists; jobs.startedAt can describe an earlier retry.
     if (ownedJob.attempts > 0) {
-      await tx
-        .insert(jobAttempts)
-        .values({
-          jobId,
-          attemptNumber: ownedJob.attempts,
-          workerId,
-          startedAt: ownedJob.startedAt
-            ? sql`${ownedJob.startedAt.toISOString()}::timestamptz`
-            : sql`clock_timestamp()`,
+      const cancellationError = {
+        code: 'CANCELLED',
+        message: 'Job was cancelled',
+      };
+      const [cancelledAttempt] = await tx
+        .update(jobAttempts)
+        .set({
           completedAt: sql`clock_timestamp()`,
           durationMs: sql<number>`GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (clock_timestamp() - ${jobAttempts.startedAt})) * 1000))::integer`,
           status: JobStatus.CANCELLED,
-          error: { code: 'CANCELLED', message: 'Job was cancelled' },
-          errorMessage: 'Job was cancelled',
+          error: cancellationError,
+          errorMessage: cancellationError.message,
           metadata: { leaseId, reason: 'cancellation_requested' },
         })
-        .onConflictDoUpdate({
-          target: [jobAttempts.jobId, jobAttempts.attemptNumber],
-          set: {
-            completedAt: sql`clock_timestamp()`,
-            status: JobStatus.CANCELLED,
-            error: { code: 'CANCELLED', message: 'Job was cancelled' },
-            errorMessage: 'Job was cancelled',
-          },
-        });
+        .where(
+          and(
+            eq(jobAttempts.jobId, jobId),
+            eq(jobAttempts.attemptNumber, ownedJob.attempts),
+            eq(jobAttempts.workerId, workerId),
+            eq(jobAttempts.status, JobStatus.PROCESSING)
+          )
+        )
+        .returning({ id: jobAttempts.id });
+
+      if (!cancelledAttempt) {
+        throw new Error(
+          `Cannot cancel job ${jobId}: attempt ${ownedJob.attempts} was not started`
+        );
+      }
     }
 
     await tx.insert(jobEvents).values({
       jobId,
       eventType: 'cancelled',
+      sequence: cancelledJob.eventSequence,
       fromStatus: ownedJob.status,
       toStatus: JobStatus.CANCELLED,
       workerId,
@@ -822,15 +1079,6 @@ function isTerminalStatus(status: Job['status']): boolean {
   );
 }
 
-function calculateRetryDelay(
-  attemptNumber: number,
-  baseDelayMs: number,
-  maxDelayMs: number
-): number {
-  const exponent = Math.max(0, Math.min(attemptNumber - 1, 30));
-  return Math.min(maxDelayMs, baseDelayMs * 2 ** exponent);
-}
-
 function normalizeDeliveryError(error: unknown): {
   record: Record<string, unknown>;
   message: string;
@@ -844,6 +1092,9 @@ function normalizeDeliveryError(error: unknown): {
 
     if (error.stack) {
       record.stack = error.stack;
+    }
+    if ('code' in error && typeof error.code === 'string') {
+      record.code = error.code;
     }
 
     return {
@@ -873,15 +1124,6 @@ function deadLetterMetadata(
     deadLetterReason: reason,
     deadLetteredAt: deadLetteredAt.toISOString(),
   };
-}
-
-function elapsedMilliseconds(
-  startedAt: Date | null,
-  completedAt: Date
-): number {
-  return startedAt
-    ? Math.max(0, completedAt.getTime() - startedAt.getTime())
-    : 0;
 }
 
 function assertPositiveDuration(value: number, name: string): void {

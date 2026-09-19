@@ -21,15 +21,15 @@ This package provides event publishing capabilities for TaskFlow using Kafka/Red
 
 ```typescript
 enum JobEventType {
-  CREATED = 'job.created',           // Job created
-  QUEUED = 'job.queued',             // Enqueued to Redis
-  STARTED = 'job.started',           // Worker starts processing
-  COMPLETED = 'job.completed',       // Job succeeded
-  FAILED = 'job.failed',             // Job failed
-  RETRIED = 'job.retried',           // Scheduled for retry
-  CANCELLED = 'job.cancelled',       // Job cancelled
+  CREATED = 'job.created', // Job created
+  QUEUED = 'job.queued', // Enqueued to Redis
+  STARTED = 'job.started', // Worker starts processing
+  COMPLETED = 'job.completed', // Job succeeded
+  FAILED = 'job.failed', // Job failed
+  RETRIED = 'job.retried', // Scheduled for retry
+  CANCELLED = 'job.cancelled', // Job cancelled
   DEAD_LETTERED = 'job.dead_lettered', // Moved to DLQ
-  TIMEOUT = 'job.timeout',           // Job timed out
+  TIMEOUT = 'job.timeout', // Job timed out
 }
 ```
 
@@ -95,10 +95,10 @@ await publishJobStarted({
 import { EventPublisher } from '@taskflow/events';
 
 const publisher = new EventPublisher({
-  enabled: true,              // Enable/disable publishing
-  batching: false,            // Batch events
-  batchSize: 100,             // Events per batch
-  batchTimeoutMs: 1000,       // Batch flush timeout
+  enabled: true, // Enable/disable publishing
+  batching: false, // Batch events
+  batchSize: 100, // Events per batch
+  batchTimeoutMs: 1000, // Batch flush timeout
   defaultTopic: 'taskflow.job.events',
   serviceName: 'taskflow',
   environment: 'production',
@@ -153,13 +153,13 @@ All events are wrapped in an envelope:
 
 ```typescript
 {
-  eventId: string;        // Unique event ID
-  version: string;        // Schema version
-  event: JobEvent;        // Actual event
+  eventId: string; // Unique event ID
+  version: string; // Schema version
+  event: JobEvent; // Actual event
   metadata: {
-    source: string;       // Service name
-    environment: string;  // Environment
-  };
+    source: string; // Service name
+    environment: string; // Environment
+  }
 }
 ```
 
@@ -282,12 +282,12 @@ spec:
   template:
     spec:
       containers:
-      - name: api
-        env:
-        - name: KAFKA_BROKERS
-          value: "redpanda-0.redpanda:9092"
-        - name: EVENT_PUBLISHING_ENABLED
-          value: "true"
+        - name: api
+          env:
+            - name: KAFKA_BROKERS
+              value: 'redpanda-0.redpanda:9092'
+            - name: EVENT_PUBLISHING_ENABLED
+              value: 'true'
 ```
 
 ## Monitoring
@@ -296,12 +296,12 @@ spec:
 
 ```typescript
 // Producer metrics (via KafkaJS)
-- connection_count
-- request_total
-- request_size
-- request_queue_size
-- response_total
-- broker_connection_errors
+-connection_count -
+  request_total -
+  request_size -
+  request_queue_size -
+  response_total -
+  broker_connection_errors;
 ```
 
 ### Logs
@@ -333,7 +333,7 @@ const publisher = new EventPublisher({
 describe('Event Publishing', () => {
   it('should publish job created event', async () => {
     const publisher = getEventPublisher();
-    
+
     await publisher.publish({
       eventType: JobEventType.CREATED,
       // ... event data
@@ -346,15 +346,15 @@ describe('Event Publishing', () => {
 
 ## Comparison: Redis Streams vs Kafka
 
-| Feature | Redis Streams | Kafka |
-|---------|---------------|-------|
-| **Purpose** | Job delivery | Event propagation |
-| **Guarantee** | At-least-once | At-least-once |
-| **Retention** | Short (hours) | Long (days/weeks) |
-| **Consumers** | Workers | Analytics, monitoring |
-| **Ordering** | Per queue | Per partition |
-| **Performance** | Very fast (ms) | Fast (ms) |
-| **Use Case** | Task execution | Event-driven architecture |
+| Feature         | Redis Streams  | Kafka                     |
+| --------------- | -------------- | ------------------------- |
+| **Purpose**     | Job delivery   | Event propagation         |
+| **Guarantee**   | At-least-once  | At-least-once             |
+| **Retention**   | Short (hours)  | Long (days/weeks)         |
+| **Consumers**   | Workers        | Analytics, monitoring     |
+| **Ordering**    | Per queue      | Per partition             |
+| **Performance** | Very fast (ms) | Fast (ms)                 |
+| **Use Case**    | Task execution | Event-driven architecture |
 
 **Key principle**: Redis Streams for jobs, Kafka for events.
 

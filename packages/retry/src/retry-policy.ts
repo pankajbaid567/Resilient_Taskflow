@@ -1,8 +1,23 @@
-import { BackoffConfig, calculateRetryTime } from './backoff';
+import { BackoffConfig, calculateBackoff, calculateRetryTime } from './backoff';
+
+/**
+ * Explicit signal from a handler that repeating the same input cannot succeed.
+ * The worker persists this as a terminal failure without consuming the rest of
+ * the attempt budget.
+ */
+export class PermanentJobError extends Error {
+  constructor(
+    message: string,
+    readonly code: string = 'PERMANENT_JOB_ERROR'
+  ) {
+    super(message);
+    this.name = 'PermanentJobError';
+  }
+}
 
 /**
  * Retry Policy
- * 
+ *
  * Defines when and how to retry failed jobs.
  */
 export interface RetryPolicy {
@@ -62,6 +77,28 @@ export interface RetryDecision {
   nextAttempt?: number;
 }
 
+export interface CanonicalRetryOptions {
+  currentAttempt: number;
+  maxAttempts: number;
+  error: unknown;
+  jobCreatedAt: Date;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  retryTimeoutMs?: number;
+}
+
+export type CanonicalRetryDecision =
+  | {
+      shouldRetry: true;
+      reason: 'RETRYABLE_ERROR';
+      delayMs: number;
+      nextAttempt: number;
+    }
+  | {
+      shouldRetry: false;
+      reason: 'ATTEMPTS_EXHAUSTED' | 'PERMANENT_ERROR' | 'RETRY_TIMEOUT';
+    };
+
 /**
  * Default retry policy
  */
@@ -78,7 +115,11 @@ export const DEFAULT_RETRY_POLICY: RetryPolicy = {
 };
 
 /**
- * Determine if job should be retried
+ * Generic compatibility helper retained for callers outside the TaskFlow
+ * worker. It does not control durable job delivery.
+ *
+ * @deprecated The authoritative worker path uses decideJobRetry so the retry
+ * decision and exact due time can be persisted transactionally.
  */
 export function shouldRetryJob(
   currentAttempt: number,
@@ -182,6 +223,88 @@ export const RETRYABLE_ERRORS = [
   '502',
   '429',
 ];
+
+/**
+ * The one retry decision used by the worker runtime.
+ *
+ * Jitter is deliberately disabled for the canonical persistence path. This
+ * makes the durable scheduled_at value reproducible and lets operators reason
+ * about strict upper/lower bounds. A future queue-policy migration may add a
+ * persisted bounded-jitter setting without changing this API.
+ */
+export function decideJobRetry(
+  options: CanonicalRetryOptions
+): CanonicalRetryDecision {
+  const {
+    currentAttempt,
+    maxAttempts,
+    error,
+    jobCreatedAt,
+    baseDelayMs,
+    maxDelayMs,
+    retryTimeoutMs,
+  } = options;
+
+  if (!Number.isInteger(currentAttempt) || currentAttempt < 1) {
+    throw new RangeError('currentAttempt must be a positive integer');
+  }
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    throw new RangeError('maxAttempts must be a positive integer');
+  }
+  if (!Number.isFinite(baseDelayMs) || baseDelayMs < 0) {
+    throw new RangeError('baseDelayMs must be non-negative');
+  }
+  if (!Number.isFinite(maxDelayMs) || maxDelayMs < baseDelayMs) {
+    throw new RangeError('maxDelayMs must be at least baseDelayMs');
+  }
+
+  if (currentAttempt >= maxAttempts) {
+    return { shouldRetry: false, reason: 'ATTEMPTS_EXHAUSTED' };
+  }
+
+  if (
+    retryTimeoutMs !== undefined &&
+    Date.now() - jobCreatedAt.getTime() >= retryTimeoutMs
+  ) {
+    return { shouldRetry: false, reason: 'RETRY_TIMEOUT' };
+  }
+
+  if (isPermanentJobError(error)) {
+    return { shouldRetry: false, reason: 'PERMANENT_ERROR' };
+  }
+
+  return {
+    shouldRetry: true,
+    reason: 'RETRYABLE_ERROR',
+    delayMs: calculateBackoff(currentAttempt - 1, {
+      strategy: 'exponential',
+      baseDelayMs,
+      maxDelayMs,
+      factor: 2,
+      enableJitter: false,
+    }),
+    nextAttempt: currentAttempt + 1,
+  };
+}
+
+export function isPermanentJobError(error: unknown): boolean {
+  if (error instanceof PermanentJobError) return true;
+
+  const description = describeError(error);
+  return NON_RETRYABLE_ERRORS.some((pattern) => description.includes(pattern));
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  if (typeof error === 'string') return error;
+  if (typeof error === 'object' && error !== null) {
+    const candidate = error as { name?: unknown; message?: unknown };
+    return [candidate.name, candidate.message]
+      .filter((value): value is string => typeof value === 'string')
+      .join(': ');
+  }
+  return String(error);
+}
 
 /**
  * Create retry policy with common defaults

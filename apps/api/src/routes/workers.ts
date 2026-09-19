@@ -1,56 +1,86 @@
-
-import { getActiveWorkers, getWorkerById } from '@taskflow/database';
+import { getWorkerById, listWorkers, type Worker } from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
-import { FastifyInstance } from 'fastify';
+import { WorkerStatus } from '@taskflow/types';
+import { FastifyInstance, FastifyReply } from 'fastify';
+import { z } from 'zod';
+
+import { requireAdmin } from '../middleware/auth';
 
 const logger = createLogger({ component: 'WorkerRoutes' });
 
-/**
- * Worker Routes
- *
- * Provides worker status and management.
- */
+const workerIdParamsSchema = z.object({ id: z.string().uuid() }).strict();
+const listWorkersQuerySchema = z
+  .object({
+    status: z.nativeEnum(WorkerStatus).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    offset: z.coerce.number().int().min(0).default(0),
+  })
+  .strict();
+
+type SerializedWorker = Omit<
+  Worker,
+  | 'workerName'
+  | 'currentJobCount'
+  | 'lastHeartbeatAt'
+  | 'startedAt'
+  | 'stoppedAt'
+> & {
+  name: string;
+  currentJobs: number;
+  lastHeartbeat: string;
+  startedAt: string;
+  stoppedAt: string | null;
+};
+
+function serializeWorker(worker: Worker): SerializedWorker {
+  return {
+    id: worker.id,
+    name: worker.workerName,
+    hostname: worker.hostname,
+    processId: worker.processId,
+    queues: worker.queues,
+    status: worker.status,
+    concurrency: worker.concurrency,
+    currentJobs: worker.currentJobCount,
+    totalJobsProcessed: worker.totalJobsProcessed,
+    totalJobsSucceeded: worker.totalJobsSucceeded,
+    totalJobsFailed: worker.totalJobsFailed,
+    lastHeartbeat: worker.lastHeartbeatAt.toISOString(),
+    startedAt: worker.startedAt.toISOString(),
+    stoppedAt: worker.stoppedAt?.toISOString() ?? null,
+    version: worker.version,
+    metadata: worker.metadata,
+  };
+}
+
+function sendMissingWorker(reply: FastifyReply, id: string): FastifyReply {
+  return reply.status(404).send({
+    error: 'Not Found',
+    message: `Worker ${id} not found`,
+    statusCode: 404,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+/** PostgreSQL-backed worker reads and explicitly unimplemented controls. */
 export function workerRoutes(app: FastifyInstance): Promise<void> {
-  /**
-   * List all workers
-   * GET /api/v1/workers
-   */
   app.get<{
     Querystring: {
-      status?: 'ACTIVE' | 'IDLE' | 'STOPPED';
-      limit?: number;
-      offset?: number;
+      status?: string;
+      limit?: string | number;
+      offset?: string | number;
     };
   }>('/', async (request, reply) => {
-    const { status, limit = 50, offset = 0 } = request.query;
+    const query = listWorkersQuerySchema.parse(request.query);
 
     try {
-      const activeWorkers = await getActiveWorkers();
-      const matchingWorkers =
-        status && status !== 'ACTIVE' ? [] : activeWorkers;
-      const workers = matchingWorkers.slice(
-        offset,
-        offset + Math.min(limit, 100)
-      );
-
-      const response = workers.map((worker) => ({
-        id: worker.id,
-        name: worker.workerName,
-        queues: worker.queues,
-        status: worker.status,
-        concurrency: worker.concurrency,
-        currentJobs: worker.currentJobCount,
-        lastHeartbeat: worker.lastHeartbeatAt.toISOString(),
-        createdAt: worker.startedAt.toISOString(),
-        metadata: worker.metadata,
-      }));
-
+      const result = await listWorkers(query);
       return reply.send({
-        data: response,
+        data: result.workers.map(serializeWorker),
         pagination: {
-          limit,
-          offset,
-          total: response.length, // TODO: Get actual count
+          limit: query.limit,
+          offset: query.offset,
+          total: result.total,
         },
       });
     } catch (error) {
@@ -59,82 +89,46 @@ export function workerRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  /**
-   * Get worker by ID
-   * GET /api/v1/workers/:id
-   */
   app.get<{ Params: { id: string } }>('/:id', async (request, reply) => {
-    const { id } = request.params;
-
+    const { id } = workerIdParamsSchema.parse(request.params);
     const worker = await getWorkerById(id);
+    if (!worker) return sendMissingWorker(reply, id);
+    return reply.send(serializeWorker(worker));
+  });
 
-    if (!worker) {
-      return reply.status(404).send({
-        error: 'Not Found',
-        message: `Worker ${id} not found`,
-        statusCode: 404,
+  app.get<{ Params: { id: string } }>('/:id/stats', async (request, reply) => {
+    const { id } = workerIdParamsSchema.parse(request.params);
+    const worker = await getWorkerById(id);
+    if (!worker) return sendMissingWorker(reply, id);
+
+    const successRate =
+      worker.totalJobsProcessed === 0
+        ? 0
+        : worker.totalJobsSucceeded / worker.totalJobsProcessed;
+
+    return reply.send({
+      ...serializeWorker(worker),
+      successRate,
+    });
+  });
+
+  app.post<{ Params: { id: string } }>(
+    '/:id/stop',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const { id } = workerIdParamsSchema.parse(request.params);
+      if (!(await getWorkerById(id))) return sendMissingWorker(reply, id);
+
+      logger.info('Worker stop requested', { workerId: id });
+      return reply.status(501).send({
+        error: 'Not Implemented',
+        message:
+          'Worker stop is unavailable because control signaling is not implemented',
+        statusCode: 501,
         timestamp: new Date().toISOString(),
       });
     }
-
-    const response = {
-      id: worker.id,
-      name: worker.workerName,
-      queues: worker.queues,
-      status: worker.status,
-      concurrency: worker.concurrency,
-      currentJobs: worker.currentJobCount,
-      lastHeartbeat: worker.lastHeartbeatAt.toISOString(),
-      createdAt: worker.startedAt.toISOString(),
-      metadata: worker.metadata,
-    };
-
-    return reply.send(response);
-  });
-
-  /**
-   * Get worker statistics
-   * GET /api/v1/workers/:id/stats
-   */
-  app.get<{ Params: { id: string } }>('/:id/stats', async (request, reply) => {
-    const { id } = request.params;
-
-    // TODO: Implement worker stats
-    // - Total jobs processed
-    // - Success/failure rates
-    // - Average processing time
-    // - Current load
-
-    logger.info('Worker stats requested', { workerId: id });
-
-    return reply.status(501).send({
-      error: 'Not Implemented',
-      message: 'Worker stats not yet implemented',
-      statusCode: 501,
-      timestamp: new Date().toISOString(),
-    });
-  });
-
-  /**
-   * Stop a worker
-   * POST /api/v1/workers/:id/stop
-   */
-  app.post<{ Params: { id: string } }>('/:id/stop', async (request, reply) => {
-    const { id } = request.params;
-
-    // TODO: Implement worker stopping
-    // - Send signal to worker to gracefully shut down
-    // - Worker should finish current jobs and stop accepting new ones
-
-    logger.info('Worker stop requested', { workerId: id });
-
-    return reply.status(501).send({
-      error: 'Not Implemented',
-      message: 'Worker stop not yet implemented',
-      statusCode: 501,
-      timestamp: new Date().toISOString(),
-    });
-  });
+  );
 
   return Promise.resolve();
 }

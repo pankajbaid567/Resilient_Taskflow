@@ -25,6 +25,19 @@ export interface ConsumedMessage {
   stream: string;
   queue: string;
   data: RedisJobMessage;
+  /** Redis PEL delivery count. New deliveries start at one. */
+  deliveryCount?: number;
+}
+
+export interface StaleClaimReport {
+  messages: ConsumedMessage[];
+  nextCursor: string;
+  /**
+   * IDs Redis removed from the PEL because their stream entries no longer
+   * exist. The payload cannot be recovered from Redis; callers can use these
+   * IDs for reconciliation and the consumer logs them as data-loss evidence.
+   */
+  deletedMessageIds: string[];
 }
 
 function getMessageDataField(fields: string[]): string {
@@ -150,7 +163,10 @@ export async function consumeJobs(
 
     for (const [streamKey, entries] of result) {
       for (const [messageId, fields] of entries) {
-        messages.push(parseConsumedMessage(streamKey, messageId, fields));
+        messages.push({
+          ...parseConsumedMessage(streamKey, messageId, fields),
+          deliveryCount: 1,
+        });
       }
     }
 
@@ -313,15 +329,106 @@ export async function getPendingMessages(
 
 const reclaimCursors = new Map<string, string>();
 
+function getReclaimCursorKey(streamKey: string, consumerName: string): string {
+  return `${streamKey}\u0000${consumerName}`;
+}
+
 /**
  * Reset in-memory reclaim cursor (e.g. on worker restart or for testing)
  */
-export function resetReclaimCursor(queueName?: string): void {
-  if (queueName) {
-    reclaimCursors.delete(getStreamKey(queueName));
-  } else {
+export function resetReclaimCursor(
+  queueName?: string,
+  workerId?: string
+): void {
+  if (!queueName) {
     reclaimCursors.clear();
+    return;
   }
+
+  const streamKey = getStreamKey(queueName);
+  if (workerId) {
+    reclaimCursors.delete(
+      getReclaimCursorKey(streamKey, getConsumerName(workerId))
+    );
+    return;
+  }
+
+  const prefix = `${streamKey}\u0000`;
+  for (const cursorKey of reclaimCursors.keys()) {
+    if (cursorKey.startsWith(prefix)) {
+      reclaimCursors.delete(cursorKey);
+    }
+  }
+}
+
+function parseAutoClaimResult(rawResult: unknown): {
+  nextCursor: string;
+  entries: unknown[];
+  deletedMessageIds: string[];
+} {
+  if (!isUnknownArray(rawResult) || rawResult.length < 2) {
+    throw new Error('Redis XAUTOCLAIM returned an invalid response');
+  }
+
+  const [nextCursor, entries, rawDeletedMessageIds = []] = rawResult;
+  if (
+    typeof nextCursor !== 'string' ||
+    !isUnknownArray(entries) ||
+    !isUnknownArray(rawDeletedMessageIds) ||
+    !rawDeletedMessageIds.every(
+      (messageId): messageId is string => typeof messageId === 'string'
+    )
+  ) {
+    throw new Error('Redis XAUTOCLAIM returned an invalid response');
+  }
+
+  return {
+    nextCursor,
+    entries,
+    deletedMessageIds: rawDeletedMessageIds,
+  };
+}
+
+async function getClaimedDeliveryCount(
+  streamKey: string,
+  consumerName: string,
+  messageId: string
+): Promise<number> {
+  const redis = getRedisClient();
+  const result = (await redis.xpending(
+    streamKey,
+    WORKER_CONSUMER_GROUP,
+    messageId,
+    messageId,
+    1,
+    consumerName
+  )) as unknown;
+
+  if (!isUnknownArray(result) || result.length !== 1) {
+    throw new Error(
+      `Claimed message ${streamKey}/${messageId} is no longer pending`
+    );
+  }
+
+  const entry = result[0];
+  if (
+    !isUnknownArray(entry) ||
+    entry[0] !== messageId ||
+    entry[1] !== consumerName
+  ) {
+    throw new Error(
+      `Redis XPENDING returned invalid ownership for ${streamKey}/${messageId}`
+    );
+  }
+
+  const deliveryCount = Number(entry[3]);
+  if (!Number.isSafeInteger(deliveryCount) || deliveryCount < 1) {
+    throw new Error(
+      `Redis XPENDING returned an invalid delivery count for ${streamKey}/${messageId}`
+    );
+  }
+
+  return deliveryCount;
 }
 
 /**
@@ -353,15 +460,37 @@ export async function claimStaleMessages(
   limit: number = 10,
   cursor?: string
 ): Promise<ConsumedMessage[]> {
+  const report = await claimStaleMessagesWithReport(
+    queueName,
+    workerId,
+    minIdleTimeMs,
+    limit,
+    cursor
+  );
+  return report.messages;
+}
+
+/**
+ * Detailed XAUTOCLAIM result for recovery controllers that must reconcile
+ * stream entries Redis reports as already deleted.
+ */
+export async function claimStaleMessagesWithReport(
+  queueName: string,
+  workerId: string,
+  minIdleTimeMs: number = 30_000,
+  limit: number = 10,
+  cursor?: string
+): Promise<StaleClaimReport> {
   const redis = getRedisClient();
   const streamKey = getStreamKey(queueName);
   const groupName = WORKER_CONSUMER_GROUP;
   const consumerName = getConsumerName(workerId);
-  const effectiveCursor = cursor ?? reclaimCursors.get(streamKey) ?? '0-0';
+  const cursorKey = getReclaimCursorKey(streamKey, consumerName);
+  const effectiveCursor = cursor ?? reclaimCursors.get(cursorKey) ?? '0-0';
 
   // XAUTOCLAIM <key> <group> <consumer> <min-idle-time> <start-id> [COUNT <n>]
   // Returns: [nextCursor, [[id, fields], ...], [deletedIds]]
-  const rawResult = (await redis.call(
+  const rawResult: unknown = await redis.call(
     'XAUTOCLAIM',
     streamKey,
     groupName,
@@ -370,22 +499,28 @@ export async function claimStaleMessages(
     effectiveCursor,
     'COUNT',
     limit
-  )) as [string, unknown[], unknown[]];
+  );
 
-  const nextCursor = rawResult[0];
-  const entries = rawResult[1];
-  reclaimCursors.set(streamKey, nextCursor);
+  const { nextCursor, entries, deletedMessageIds } =
+    parseAutoClaimResult(rawResult);
 
-  if (entries.length === 0) {
-    return [];
+  if (deletedMessageIds.length > 0) {
+    logger.warn('XAUTOCLAIM removed missing stream entries from the PEL', {
+      workerId,
+      queue: queueName,
+      stream: streamKey,
+      deletedMessageIds,
+      count: deletedMessageIds.length,
+    });
   }
 
   const messages: ConsumedMessage[] = [];
 
   for (const entry of entries) {
     // Parse each entry independently — a poison entry must not block the rest.
+    let message: ConsumedMessage;
     try {
-      messages.push(parseClaimedEntry(streamKey, entry));
+      message = parseClaimedEntry(streamKey, entry);
     } catch (parseError) {
       // Quarantine: the entry is malformed or uses an unsupported schema.
       // XACK it so it leaves the PEL and does not stall recovery of healthy
@@ -395,11 +530,27 @@ export async function claimStaleMessages(
           ? entry[0]
           : '<unknown>';
 
-      await quarantineEntry(streamKey, entryId, 'MALFORMED_STREAM_ENTRY', {
-        queue: queueName,
-        error: String(parseError),
-      });
+      await quarantineEntry(
+        streamKey,
+        entryId,
+        'MALFORMED_STREAM_ENTRY',
+        {
+          queue: queueName,
+          error: String(parseError),
+        },
+        entry
+      );
+      continue;
     }
+
+    messages.push({
+      ...message,
+      deliveryCount: await getClaimedDeliveryCount(
+        streamKey,
+        consumerName,
+        message.messageId
+      ),
+    });
   }
 
   if (messages.length > 0) {
@@ -411,7 +562,12 @@ export async function claimStaleMessages(
     });
   }
 
-  return messages;
+  // Advance only after every claimed entry was either parsed or durably
+  // quarantined. A quarantine persistence failure leaves the prior cursor in
+  // place so the poison entry is revisited after its idle threshold elapses.
+  reclaimCursors.set(cursorKey, nextCursor);
+
+  return { messages, nextCursor, deletedMessageIds };
 }
 
 /**

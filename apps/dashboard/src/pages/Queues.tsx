@@ -6,7 +6,12 @@ import type { QueueStats } from '@/types';
 import styles from './Queues.module.css';
 
 export default function Queues() {
-  const { data: queues, loading, error, refetch } = useQueues({
+  const {
+    data: queues,
+    loading,
+    error,
+    refetch,
+  } = useQueues({
     pollingInterval: 5000,
   });
 
@@ -114,7 +119,9 @@ function QueueCard({ queue }: { queue: QueueStats }) {
     <div className={styles.queueCard}>
       <div className={styles.queueHeader}>
         <h3 className={styles.queueName}>{queue.name}</h3>
-        <div className={styles.queueTotal}>{formatNumber(queue.total)} jobs</div>
+        <div className={styles.queueTotal}>
+          {formatNumber(queue.total)} jobs
+        </div>
       </div>
 
       {/* Status Breakdown */}
@@ -159,8 +166,8 @@ function QueueCard({ queue }: { queue: QueueStats }) {
                       Number(priority) >= 8
                         ? styles.priorityHigh
                         : Number(priority) >= 5
-                        ? styles.priorityMedium
-                        : styles.priorityLow
+                          ? styles.priorityMedium
+                          : styles.priorityLow
                     }`}
                   >
                     P{priority}
@@ -183,8 +190,8 @@ function QueueCard({ queue }: { queue: QueueStats }) {
               successRate >= 95
                 ? styles.success
                 : successRate >= 80
-                ? styles.warning
-                : styles.danger
+                  ? styles.warning
+                  : styles.danger
             }`}
           >
             {successRate.toFixed(1)}%

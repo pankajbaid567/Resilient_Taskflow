@@ -1,12 +1,15 @@
+import {
+  IdempotencyConflictError,
+  InvalidStateTransitionError,
+} from '@taskflow/database';
 import { logger } from '@taskflow/logger';
 import { ApiErrorResponse } from '@taskflow/types';
 import { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 
-
 /**
  * Global Error Handler
- * 
+ *
  * Catches all errors and returns consistent error responses.
  */
 export async function errorHandler(
@@ -37,6 +40,26 @@ export async function errorHandler(
     return reply.status(400).send(response);
   }
 
+  if (error instanceof IdempotencyConflictError) {
+    return reply.status(409).send({
+      error: 'Conflict',
+      message: error.message,
+      statusCode: 409,
+      timestamp: new Date().toISOString(),
+      path: request.url,
+    } satisfies ApiErrorResponse);
+  }
+
+  if (error instanceof InvalidStateTransitionError) {
+    return reply.status(409).send({
+      error: 'Conflict',
+      message: error.message,
+      statusCode: 409,
+      timestamp: new Date().toISOString(),
+      path: request.url,
+    } satisfies ApiErrorResponse);
+  }
+
   // Fastify validation errors
   if (error.validation) {
     const response: ApiErrorResponse = {
@@ -58,7 +81,9 @@ export async function errorHandler(
   }
 
   // Determine status code
-  const statusCode = error.statusCode || 500;
+  const databaseCode = (error as FastifyError & { code?: string }).code;
+  const statusCode =
+    error.statusCode ?? databaseStatusCode(databaseCode) ?? 500;
 
   // Create error response
   const response: ApiErrorResponse = {
@@ -92,4 +117,18 @@ export async function errorHandler(
   }
 
   return reply.status(statusCode).send(response);
+}
+
+function databaseStatusCode(code: string | undefined): number | undefined {
+  if (!code) return undefined;
+  if (code === '23505' || code === '23503') return 409;
+  if (code === '23514' || code === '22P02') return 400;
+  if (
+    code.startsWith('08') ||
+    code.startsWith('57P') ||
+    ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(code)
+  ) {
+    return 503;
+  }
+  return undefined;
 }

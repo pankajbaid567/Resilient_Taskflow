@@ -3,12 +3,20 @@ import path from 'path';
 import { config as dotenvConfig } from 'dotenv';
 import { z } from 'zod';
 
+const environmentBoolean = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return value;
+}, z.boolean());
+
 // Load environment variables from workspace root
 dotenvConfig({ path: path.resolve(__dirname, '../../../.env') });
 
 /**
  * Environment Configuration Schema
- * 
+ *
  * All environment variables are validated at startup.
  * Missing required variables will cause the application to fail fast.
  */
@@ -24,6 +32,8 @@ const envSchema = z.object({
   // API Server
   API_HOST: z.string().default('0.0.0.0'),
   API_PORT: z.coerce.number().int().positive().default(3000),
+  API_TRUSTED_PROXIES: z.string().default(''),
+  API_SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(2).default(10000),
 
   // PostgreSQL
   DATABASE_URL: z.string().url(),
@@ -48,11 +58,7 @@ const envSchema = z.object({
     .int()
     .positive()
     .default(10000),
-  WORKER_LEASE_DURATION_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(30000),
+  WORKER_LEASE_DURATION_MS: z.coerce.number().int().positive().default(30000),
 
   // Job Configuration
   JOB_DEFAULT_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
@@ -69,9 +75,9 @@ const envSchema = z.object({
   API_KEY_HASH_SALT: z.string().min(16),
 
   // Observability
-  ENABLE_METRICS: z.coerce.boolean().default(true),
+  ENABLE_METRICS: environmentBoolean.default(true),
   METRICS_PORT: z.coerce.number().int().positive().default(9090),
-  ENABLE_TRACING: z.coerce.boolean().default(false),
+  ENABLE_TRACING: environmentBoolean.default(false),
   OTEL_EXPORTER_OTLP_ENDPOINT: z
     .string()
     .url()
@@ -92,10 +98,7 @@ function parseEnv(): Env {
   } catch (error) {
     if (error instanceof z.ZodError) {
       const issues = error.issues
-        .map(
-          (issue) =>
-            `  - ${issue.path.join('.')}: ${issue.message}`
-        )
+        .map((issue) => `  - ${issue.path.join('.')}: ${issue.message}`)
         .join('\n');
 
       console.error('❌ Invalid environment configuration:\n' + issues);
@@ -128,6 +131,20 @@ export const redisConfig = {
   url: env.REDIS_URL,
   maxRetries: env.REDIS_MAX_RETRIES,
   retryDelayMs: env.REDIS_RETRY_DELAY_MS,
+} as const;
+
+/**
+ * API Configuration
+ *
+ * An empty trusted-proxy list is the secure default: forwarded client IP
+ * headers are ignored. Deployments behind a proxy must name its IP/CIDR
+ * explicitly (comma-separated) before Fastify will trust forwarded addresses.
+ */
+export const apiConfig = {
+  trustedProxies: env.API_TRUSTED_PROXIES.split(',')
+    .map((proxy) => proxy.trim())
+    .filter((proxy) => proxy.length > 0),
+  shutdownTimeoutMs: env.API_SHUTDOWN_TIMEOUT_MS,
 } as const;
 
 /**

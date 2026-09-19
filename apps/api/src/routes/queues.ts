@@ -1,119 +1,119 @@
-
-import { getQueueByName, getQueueStats } from '@taskflow/database';
+import {
+  countActiveWorkersForQueue,
+  getQueueByName,
+  getQueueStats,
+  listQueues,
+  type Queue,
+} from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
 import { getQueueDepth } from '@taskflow/queue';
-import { FastifyInstance } from 'fastify';
+import { queueNameSchema } from '@taskflow/types';
+import { FastifyInstance, FastifyReply } from 'fastify';
+import { z } from 'zod';
+
+import { requireAdmin } from '../middleware/auth';
 
 const logger = createLogger({ component: 'QueueRoutes' });
 
-/**
- * Queue Routes
- *
- * Provides queue statistics and management.
- */
-export function queueRoutes(app: FastifyInstance): Promise<void> {
-  /**
-   * List all queues
-   * GET /api/v1/queues
-   */
-  app.get('/', async (_request, reply) => {
-    try {
-      // TODO: Get queues from database
-      // For now, return hardcoded queues
-      const queues = [
-        {
-          id: 'default-queue-id',
-          name: 'default',
-          description: 'Default queue for general jobs',
-          maxConcurrency: 10,
-          isActive: true,
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'email-queue-id',
-          name: 'email',
-          description: 'Queue for email jobs',
-          maxConcurrency: 5,
-          isActive: true,
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'critical-queue-id',
-          name: 'critical',
-          description: 'Queue for critical priority jobs',
-          maxConcurrency: 20,
-          isActive: true,
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'low-queue-id',
-          name: 'low',
-          description: 'Queue for low priority jobs',
-          maxConcurrency: 3,
-          isActive: true,
-          createdAt: new Date().toISOString(),
-        },
-      ];
+const queueNameParamsSchema = z.object({ name: queueNameSchema }).strict();
+const listQueuesQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    offset: z.coerce.number().int().min(0).default(0),
+  })
+  .strict();
 
-      return reply.send({ data: queues });
+type SerializedQueue = Omit<Queue, 'createdAt' | 'updatedAt'> & {
+  createdAt: string;
+  updatedAt: string;
+};
+
+function serializeQueue(queue: Queue): SerializedQueue {
+  return {
+    id: queue.id,
+    name: queue.name,
+    displayName: queue.displayName,
+    description: queue.description,
+    priority: queue.priority,
+    concurrencyLimit: queue.concurrencyLimit,
+    maxRetryAttempts: queue.maxRetryAttempts,
+    defaultTimeoutMs: queue.defaultTimeoutMs,
+    rateLimitPerMinute: queue.rateLimitPerMinute,
+    isActive: queue.isActive,
+    createdAt: queue.createdAt.toISOString(),
+    updatedAt: queue.updatedAt.toISOString(),
+  };
+}
+
+function sendMissingQueue(reply: FastifyReply, name: string): FastifyReply {
+  return reply.status(404).send({
+    error: 'Not Found',
+    message: `Queue ${name} not found`,
+    statusCode: 404,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+/** PostgreSQL-backed queue reads and explicitly unimplemented controls. */
+export function queueRoutes(app: FastifyInstance): Promise<void> {
+  app.get<{
+    Querystring: {
+      limit?: string | number;
+      offset?: string | number;
+    };
+  }>('/', async (request, reply) => {
+    const query = listQueuesQuerySchema.parse(request.query);
+
+    try {
+      const result = await listQueues(query);
+      return reply.send({
+        data: result.queues.map(serializeQueue),
+        pagination: {
+          limit: query.limit,
+          offset: query.offset,
+          total: result.total,
+        },
+      });
     } catch (error) {
       logger.error('Failed to list queues', { error });
       throw error;
     }
   });
 
-  /**
-   * Get queue statistics
-   * GET /api/v1/queues/:name/stats
-   */
   app.get<{ Params: { name: string } }>(
     '/:name/stats',
     async (request, reply) => {
-      const { name } = request.params;
+      const { name } = queueNameParamsSchema.parse(request.params);
 
       try {
         const queue = await getQueueByName(name);
-        if (!queue) {
-          return reply.status(404).send({
-            error: 'Not Found',
-            message: `Queue ${name} not found`,
-            statusCode: 404,
-            timestamp: new Date().toISOString(),
-          });
-        }
+        if (!queue) return sendMissingQueue(reply, name);
 
-        // Get job counts from database using the queue's UUID foreign key.
-        const dbStats = await getQueueStats(queue.id);
+        const [dbStats, redisDepth, activeWorkers] = await Promise.all([
+          getQueueStats(queue.id),
+          getQueueDepth(name),
+          countActiveWorkersForQueue(name),
+        ]);
 
-        // Get Redis queue depth
-        const redisDepth = await getQueueDepth(name);
-
-        const stats = {
+        return reply.send({
           queue: name,
           timestamp: new Date().toISOString(),
           jobs: {
-            queued: dbStats?.queued ?? 0,
-            processing: dbStats?.processing ?? 0,
-            succeeded: dbStats?.succeeded ?? 0,
-            failed: dbStats?.failed ?? 0,
+            queued: Number(dbStats?.queued ?? 0),
+            processing: Number(dbStats?.processing ?? 0),
+            succeeded: Number(dbStats?.succeeded ?? 0),
+            failed: Number(dbStats?.failed ?? 0),
           },
           redis: {
             depth: redisDepth,
           },
           workers: {
-            active: 0, // TODO: Get from worker registry
-            idle: 0,
+            active: activeWorkers,
           },
           performance: {
-            avgDurationMs: dbStats?.avgDurationMs ?? 0,
-            p50DurationMs: 0,
-            p95DurationMs: 0,
-            p99DurationMs: 0,
-            throughputPerMin: 0,
+            avgDurationMs: Number(dbStats?.avgDurationMs ?? 0),
           },
-        };
-
-        return reply.send(stats);
+        });
       } catch (error) {
         logger.error('Failed to get queue stats', { queue: name, error });
         throw error;
@@ -121,48 +121,36 @@ export function queueRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  /**
-   * Pause a queue
-   * POST /api/v1/queues/:name/pause
-   */
   app.post<{ Params: { name: string } }>(
     '/:name/pause',
+    { preHandler: requireAdmin },
     async (request, reply) => {
-      const { name } = request.params;
-
-      // TODO: Implement queue pausing
-      // - Update queue.isActive = false in database
-      // - Workers should stop pulling from this queue
+      const { name } = queueNameParamsSchema.parse(request.params);
+      if (!(await getQueueByName(name))) return sendMissingQueue(reply, name);
 
       logger.info('Queue pause requested', { queue: name });
-
       return reply.status(501).send({
         error: 'Not Implemented',
-        message: 'Queue pause not yet implemented',
+        message:
+          'Queue pause is unavailable because control signaling is not implemented',
         statusCode: 501,
         timestamp: new Date().toISOString(),
       });
     }
   );
 
-  /**
-   * Resume a queue
-   * POST /api/v1/queues/:name/resume
-   */
   app.post<{ Params: { name: string } }>(
     '/:name/resume',
+    { preHandler: requireAdmin },
     async (request, reply) => {
-      const { name } = request.params;
-
-      // TODO: Implement queue resuming
-      // - Update queue.isActive = true in database
-      // - Workers can resume pulling from this queue
+      const { name } = queueNameParamsSchema.parse(request.params);
+      if (!(await getQueueByName(name))) return sendMissingQueue(reply, name);
 
       logger.info('Queue resume requested', { queue: name });
-
       return reply.status(501).send({
         error: 'Not Implemented',
-        message: 'Queue resume not yet implemented',
+        message:
+          'Queue resume is unavailable because control signaling is not implemented',
         statusCode: 501,
         timestamp: new Date().toISOString(),
       });

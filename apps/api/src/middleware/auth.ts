@@ -1,17 +1,13 @@
 import { securityConfig } from '@taskflow/config';
+import { findActiveUserByApiKey, findActiveUserById } from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
-import { FastifyReply, FastifyRequest } from 'fastify';
+import { FastifyReply, FastifyRequest, HookHandlerDoneFunction } from 'fastify';
 import * as jose from 'jose';
-
+import { z } from 'zod';
 
 const logger = createLogger({ component: 'AuthMiddleware' });
 
-/**
- * Stable development identities. Local/test database fixtures must create
- * users with these IDs so authenticated job rows satisfy the users FK.
- */
-export const TEST_USER_ID = '00000000-0000-4000-8000-000000000001';
-export const TEST_ADMIN_USER_ID = '00000000-0000-4000-8000-000000000002';
+const userIdSchema = z.string().uuid();
 
 /**
  * User context attached to request after authentication
@@ -44,13 +40,14 @@ export async function authenticate(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
-  const apiKey = request.headers['x-api-key'] as string | undefined;
+  const rawApiKey = request.headers['x-api-key'];
+  const apiKey = typeof rawApiKey === 'string' ? rawApiKey : undefined;
   const authHeader = request.headers.authorization;
 
   try {
     // Method 1: API Key authentication
     if (apiKey) {
-      const user = validateApiKey(apiKey);
+      const user = await validateApiKey(apiKey);
       if (user) {
         request.user = user;
         return;
@@ -68,85 +65,53 @@ export async function authenticate(
     }
 
     // No valid authentication provided
-    logger.warn('Authentication failed', {
-      requestId: request.id,
-      url: request.url,
-      hasApiKey: !!apiKey,
-      hasBearer: !!authHeader,
-    });
+    logger.warn(
+      {
+        requestId: request.id,
+        url: request.url,
+        hasApiKey: !!apiKey,
+        hasBearer: !!authHeader,
+      },
+      'Authentication failed'
+    );
 
-    return reply.status(401).send({
+    void reply.status(401).send({
       error: 'Unauthorized',
       message: 'Authentication required',
       statusCode: 401,
       timestamp: new Date().toISOString(),
     });
+    return;
   } catch (error) {
-    logger.error('Authentication error', {
-      requestId: request.id,
-      error,
-    });
+    logger.error(
+      {
+        requestId: request.id,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      'Authentication backend unavailable'
+    );
 
-    return reply.status(401).send({
-      error: 'Unauthorized',
-      message: 'Invalid authentication credentials',
-      statusCode: 401,
+    void reply.status(503).send({
+      error: 'Service Unavailable',
+      message: 'Authentication service unavailable',
+      statusCode: 503,
       timestamp: new Date().toISOString(),
     });
+    return;
   }
 }
 
 /**
  * Validate API key
  *
- * In development, accepts test keys.
- * In production, validates against database (to be implemented).
+ * Every environment uses the same database-backed credential path. Tests and
+ * local development must explicitly seed a hashed api_keys row.
  */
-function validateApiKey(apiKey: string): AuthenticatedUser | null {
-  // Development mode: Accept test keys
-  if (process.env.NODE_ENV !== 'production') {
-    if (apiKey === 'test-api-key') {
-      logger.debug('Using development test API key');
-      return {
-        id: TEST_USER_ID,
-        email: 'test@example.com',
-        role: 'user',
-      };
-    }
-
-    if (apiKey === 'admin-api-key') {
-      logger.debug('Using development admin API key');
-      return {
-        id: TEST_ADMIN_USER_ID,
-        email: 'admin@example.com',
-        role: 'admin',
-      };
-    }
-  }
-
-  // Production mode: Validate against database
-  // TODO: Implement database lookup
-  // const hashedKey = await hashApiKey(apiKey, securityConfig.apiKeyHashSalt);
-  // const keyRecord = await db.query.apiKeys.findFirst({
-  //   where: eq(apiKeys.keyHash, hashedKey),
-  //   with: { user: true },
-  // });
-  //
-  // if (!keyRecord || keyRecord.expiresAt < new Date()) {
-  //   return null;
-  // }
-  //
-  // return {
-  //   id: keyRecord.userId,
-  //   email: keyRecord.user.email,
-  //   role: keyRecord.user.role,
-  // };
-
-  logger.warn('API key validation not implemented for production', {
-    hint: 'Use JWT tokens or implement database-backed API keys',
-  });
-
-  return null;
+async function validateApiKey(
+  apiKey: string
+): Promise<AuthenticatedUser | null> {
+  if (apiKey.length < 1 || apiKey.length > 512) return null;
+  return (await findActiveUserByApiKey(apiKey)) ?? null;
 }
 
 /**
@@ -157,37 +122,15 @@ function validateApiKey(apiKey: string): AuthenticatedUser | null {
 async function validateJwtToken(
   token: string
 ): Promise<AuthenticatedUser | null> {
+  let payload: jose.JWTPayload;
   try {
-    // Create secret key from environment
     const secret = new TextEncoder().encode(securityConfig.jwtSecret);
-
-    // Verify and decode JWT
-    const { payload } = await jose.jwtVerify(token, secret, {
+    ({ payload } = await jose.jwtVerify(token, secret, {
       issuer: 'taskflow-api',
       audience: 'taskflow-clients',
-    });
-
-    // Extract user claims
-    if (
-      !payload.sub ||
-      typeof payload.email !== 'string' ||
-      (payload.role !== 'admin' && payload.role !== 'user')
-    ) {
-      logger.warn('Invalid JWT payload structure', {
-        hasSubject: !!payload.sub,
-        hasEmail: !!payload.email,
-        role: payload.role,
-      });
-      return null;
-    }
-
-    return {
-      id: payload.sub,
-      email: payload.email,
-      role: payload.role,
-    };
+      algorithms: ['HS256'],
+    }));
   } catch (error) {
-    // Log specific JWT errors
     if (error instanceof jose.errors.JWTExpired) {
       logger.debug('JWT token expired');
     } else if (error instanceof jose.errors.JWTInvalid) {
@@ -195,11 +138,26 @@ async function validateJwtToken(
     } else if (error instanceof jose.errors.JWSSignatureVerificationFailed) {
       logger.warn('JWT signature verification failed');
     } else {
-      logger.error('JWT validation error', { error });
+      logger.debug(
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'JWT validation failed'
+      );
     }
 
     return null;
   }
+
+  const subject = userIdSchema.safeParse(payload.sub);
+  if (!subject.success) {
+    logger.warn('JWT subject is not a UUID');
+    return null;
+  }
+
+  // Role, email, revocation, and activation are current database state. Token
+  // copies of those mutable claims are deliberately ignored.
+  return (await findActiveUserById(subject.data)) ?? null;
 }
 
 /**
@@ -239,12 +197,13 @@ export async function optionalAuth(
   request: FastifyRequest,
   _reply: FastifyReply
 ): Promise<void> {
-  const apiKey = request.headers['x-api-key'] as string | undefined;
+  const rawApiKey = request.headers['x-api-key'];
+  const apiKey = typeof rawApiKey === 'string' ? rawApiKey : undefined;
   const authHeader = request.headers.authorization;
 
   try {
     if (apiKey) {
-      const user = validateApiKey(apiKey);
+      const user = await validateApiKey(apiKey);
       if (user) {
         request.user = user;
       }
@@ -264,25 +223,32 @@ export async function optionalAuth(
 /**
  * Require admin role
  */
-export async function requireAdmin(
+export function requireAdmin(
   request: FastifyRequest,
-  reply: FastifyReply
-): Promise<void> {
+  reply: FastifyReply,
+  done: HookHandlerDoneFunction
+): void {
   if (!request.user) {
-    return reply.status(401).send({
+    void reply.status(401).send({
       error: 'Unauthorized',
       message: 'Authentication required',
       statusCode: 401,
       timestamp: new Date().toISOString(),
     });
+    done();
+    return;
   }
 
   if (request.user.role !== 'admin') {
-    return reply.status(403).send({
+    void reply.status(403).send({
       error: 'Forbidden',
       message: 'Admin access required',
       statusCode: 403,
       timestamp: new Date().toISOString(),
     });
+    done();
+    return;
   }
+
+  done();
 }

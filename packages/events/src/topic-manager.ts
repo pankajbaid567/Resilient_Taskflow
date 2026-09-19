@@ -42,7 +42,7 @@ export interface TopicConfig {
 
 /**
  * Topic Manager
- * 
+ *
  * Manages Kafka topic lifecycle (create, delete, list).
  */
 export class TopicManager {

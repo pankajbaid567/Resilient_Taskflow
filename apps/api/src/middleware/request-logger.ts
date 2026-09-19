@@ -1,7 +1,6 @@
 import { createRequestLogger } from '@taskflow/logger';
 import { FastifyReply, FastifyRequest } from 'fastify';
 
-
 /**
  * Request Logger Middleware
  *

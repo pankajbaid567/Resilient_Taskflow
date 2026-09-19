@@ -1,13 +1,13 @@
 /**
  * Cancellation Token
- * 
+ *
  * Provides cooperative cancellation mechanism for job handlers.
  * Handlers can check if cancellation is requested and abort gracefully.
  */
 
 /**
  * CancellationToken
- * 
+ *
  * Allows job handlers to check if cancellation has been requested.
  * Handlers should periodically check `isCancellationRequested` and
  * throw `CancellationError` to abort gracefully.
@@ -89,7 +89,7 @@ export class CancellationToken {
 
 /**
  * Cancellation Error
- * 
+ *
  * Thrown when a job is cancelled.
  * Handlers should throw this error to indicate graceful cancellation.
  */
@@ -110,7 +110,7 @@ export function createCancellationToken(): CancellationToken {
 
 /**
  * Helper to check cancellation in async loops
- * 
+ *
  * Example:
  * for (const item of items) {
  *   await checkCancellation(token);

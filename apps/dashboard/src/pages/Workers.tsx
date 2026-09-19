@@ -6,7 +6,12 @@ import type { Worker } from '@/types';
 import styles from './Workers.module.css';
 
 export default function Workers() {
-  const { data: workers, loading, error, refetch } = useWorkers({
+  const {
+    data: workers,
+    loading,
+    error,
+    refetch,
+  } = useWorkers({
     pollingInterval: 3000, // Poll every 3 seconds for real-time status
   });
 
@@ -114,13 +119,15 @@ function WorkerCard({ worker }: { worker: Worker }) {
   const isHealthy = () => {
     const lastHeartbeat = new Date(worker.lastHeartbeat);
     const now = new Date();
-    const secondsSinceHeartbeat = (now.getTime() - lastHeartbeat.getTime()) / 1000;
+    const secondsSinceHeartbeat =
+      (now.getTime() - lastHeartbeat.getTime()) / 1000;
     return secondsSinceHeartbeat < 30; // Consider unhealthy if no heartbeat for 30s
   };
 
   const successRate =
     worker.processedJobs > 0
-      ? ((worker.processedJobs - worker.failedJobs) / worker.processedJobs) * 100
+      ? ((worker.processedJobs - worker.failedJobs) / worker.processedJobs) *
+        100
       : 100;
 
   return (
@@ -130,7 +137,9 @@ function WorkerCard({ worker }: { worker: Worker }) {
           <div className={styles.workerId}>
             <code>{worker.id}</code>
           </div>
-          <div className={`${styles.workerStatus} ${getStatusColor(worker.status)}`}>
+          <div
+            className={`${styles.workerStatus} ${getStatusColor(worker.status)}`}
+          >
             <span className={styles.statusDot} />
             {worker.status}
           </div>

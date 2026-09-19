@@ -9,9 +9,13 @@ import {
 } from '@taskflow/queue';
 import {
   JobStatus,
+  MAX_JOB_ATTEMPTS,
+  MAX_JOB_TIMEOUT_MS,
   parseRedisJobMessage,
+  queueNameSchema,
   REDIS_JOB_MESSAGE_FIELD,
   REDIS_JOB_MESSAGE_VERSION,
+  submitJobSchema,
 } from '@taskflow/types';
 
 describe('shared queue and lifecycle contract', () => {
@@ -57,5 +61,24 @@ describe('shared queue and lifecycle contract', () => {
       'CANCELLED',
       'DEAD_LETTERED',
     ]);
+  });
+
+  it('enforces shared queue and submission limits before persistence', () => {
+    expect(queueNameSchema.parse('high-priority.v2')).toBe('high-priority.v2');
+    expect(() => queueNameSchema.parse('Invalid Queue')).toThrow();
+    expect(() =>
+      submitJobSchema.parse({
+        type: 'bounded',
+        payload: {},
+        maxAttempts: MAX_JOB_ATTEMPTS + 1,
+      })
+    ).toThrow();
+    expect(() =>
+      submitJobSchema.parse({
+        type: 'bounded',
+        payload: {},
+        timeoutMs: MAX_JOB_TIMEOUT_MS + 1,
+      })
+    ).toThrow();
   });
 });

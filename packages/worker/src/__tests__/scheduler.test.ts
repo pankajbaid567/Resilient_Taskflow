@@ -96,6 +96,41 @@ describe('Scheduler', () => {
       // Should not throw
       expect(scheduler).toBeDefined();
     });
+
+    it('waits for the active database promotion before resolving', async () => {
+      let resolvePromotion!: (value: unknown) => void;
+      vi.mocked(getJobsReadyToQueue).mockResolvedValue([
+        {
+          id: 'job-1',
+          type: 'test',
+          priority: 'NORMAL',
+          scheduledAt: new Date(),
+        },
+      ] as any);
+      vi.mocked(promoteJobToQueued).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolvePromotion = resolve;
+          }) as any
+      );
+
+      const scheduler = new Scheduler({ intervalMs: 5000 });
+      scheduler.start();
+      await vi.waitFor(() => {
+        expect(promoteJobToQueued).toHaveBeenCalledWith('job-1');
+      });
+
+      let stopped = false;
+      const stopping = scheduler.stop().then(() => {
+        stopped = true;
+      });
+      await Promise.resolve();
+      expect(stopped).toBe(false);
+
+      resolvePromotion({ id: 'job-1' });
+      await stopping;
+      expect(stopped).toBe(true);
+    });
   });
 
   describe('runSchedulingCycle', () => {
@@ -133,8 +168,8 @@ describe('Scheduler', () => {
       expect(getJobsReadyToQueue).toHaveBeenCalledWith(100);
       // promoteJobToQueued called once per job, with correct queue names
       expect(promoteJobToQueued).toHaveBeenCalledTimes(2);
-      expect(promoteJobToQueued).toHaveBeenCalledWith('job-1', 'default');
-      expect(promoteJobToQueued).toHaveBeenCalledWith('job-2', 'email');
+      expect(promoteJobToQueued).toHaveBeenCalledWith('job-1');
+      expect(promoteJobToQueued).toHaveBeenCalledWith('job-2');
 
       const stats = scheduler.getStats();
       expect(stats.totalRuns).toBeGreaterThan(0);
@@ -162,7 +197,7 @@ describe('Scheduler', () => {
 
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      expect(promoteJobToQueued).toHaveBeenCalledWith('job-1', 'default');
+      expect(promoteJobToQueued).toHaveBeenCalledWith('job-1');
 
       scheduler.stop();
     });

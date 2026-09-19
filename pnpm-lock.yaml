@@ -226,6 +226,9 @@ importers:
       '@taskflow/logger':
         specifier: workspace:*
         version: link:../logger
+      '@taskflow/retry':
+        specifier: workspace:*
+        version: link:../retry
       '@taskflow/types':
         specifier: workspace:*
         version: link:../types
@@ -451,9 +454,6 @@ importers:
       '@types/node':
         specifier: ^20.11.0
         version: 20.19.43
-      tsx:
-        specifier: ^4.7.0
-        version: 4.23.12
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
@@ -4092,6 +4092,7 @@ packages:
         optional: true
     dependencies:
       pg: 8.23.0
+    dev: true
 
   /drizzle-orm@0.29.5(postgres@3.4.9):
     resolution: {integrity: sha512-jS3+uyzTz4P0Y2CICx8FmRQ1eplURPaIMWDn/yq6k4ShRFj9V7vlJk67lSf2kyYPzQ60GkkNGXcJcwrxZ6QCRw==}
@@ -6096,10 +6097,12 @@ packages:
   /pg-cloudflare@1.4.0:
     resolution: {integrity: sha512-Vo7z/6rrQYxpNRylp4Tlob2elzbh+N/MOQbxFVWCxS7oEx6jF53GTJFxK2WWpKuBRkmiin4Mt+xofFDjx09R0A==}
     requiresBuild: true
+    dev: true
     optional: true
 
   /pg-connection-string@2.14.0:
     resolution: {integrity: sha512-XwWDGcLRGCXAR8F/AM5bG7Q+A3Wm2s6QeEjlOKZLlH3UYcguiqCWKyWXVag5TLTIjR7oOJUY8kcADaZgWPyLeg==}
+    dev: true
 
   /pg-int8@1.0.1:
     resolution: {integrity: sha512-WCtabS6t3c8SkpDBUlb1kjOs7l66xsGdKpIPZsg4wR+B3+u9UAum2odSsF9tnvxg80h4ZxLWMy4pRjOsFIqQpw==}
@@ -6111,6 +6114,7 @@ packages:
       pg: '>=8.0'
     dependencies:
       pg: 8.23.0
+    dev: true
 
   /pg-protocol@1.16.0:
     resolution: {integrity: sha512-sILXutLVjCLjcDuOmvhX5e2Z4cS5qG/6Bu3VkpFwdf/633ElGLpEh9bgmuI5I4sqKqkifQiGyiCcx1HdtrK7tg==}
@@ -6141,11 +6145,13 @@ packages:
       pgpass: 1.0.5
     optionalDependencies:
       pg-cloudflare: 1.4.0
+    dev: true
 
   /pgpass@1.0.5:
     resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
     dependencies:
       split2: 4.2.0
+    dev: true
 
   /picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}

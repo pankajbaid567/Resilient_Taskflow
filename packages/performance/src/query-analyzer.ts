@@ -1,6 +1,6 @@
 /**
  * Database Query Analyzer
- * 
+ *
  * Analyzes slow queries and provides optimization recommendations
  */
 
@@ -50,7 +50,11 @@ export class QueryAnalyzer {
   /**
    * Record a query execution
    */
-  record(query: string, duration: number, metadata?: Partial<QueryMetrics>): void {
+  record(
+    query: string,
+    duration: number,
+    metadata?: Partial<QueryMetrics>
+  ): void {
     if (!this.enabled) return;
 
     const normalizedQuery = this.normalizeQuery(query);
@@ -179,7 +183,9 @@ export class QueryAnalyzer {
 
     // Check for OR in WHERE
     if (query.match(/WHERE.*OR/i)) {
-      recommendations.push('OR conditions may prevent index usage, consider UNION');
+      recommendations.push(
+        'OR conditions may prevent index usage, consider UNION'
+      );
     }
 
     // Check for LIKE with leading wildcard
@@ -203,8 +209,12 @@ export class QueryAnalyzer {
     }
 
     // Check for missing indexes (heuristic)
-    if (query.match(/WHERE.*(?:name|email|status|type|created_at|updated_at)/i)) {
-      recommendations.push('Ensure indexes exist on frequently queried columns');
+    if (
+      query.match(/WHERE.*(?:name|email|status|type|created_at|updated_at)/i)
+    ) {
+      recommendations.push(
+        'Ensure indexes exist on frequently queried columns'
+      );
     }
 
     return recommendations.join('; ') || 'No specific recommendations';
@@ -269,14 +279,18 @@ export class QueryAnalyzer {
     }
 
     // N+1 Query Detection
-    const n1Candidates = stats.filter((s) => s.count > 50 && s.avgDuration < 10);
+    const n1Candidates = stats.filter(
+      (s) => s.count > 50 && s.avgDuration < 10
+    );
     if (n1Candidates.length > 0) {
       lines.push('Possible N+1 Query Patterns (high frequency, low duration):');
       lines.push('-'.repeat(120));
 
       n1Candidates.slice(0, 5).forEach((stat) => {
         lines.push(`• ${this.truncateQuery(stat.query, 100)}`);
-        lines.push(`  Executed ${stat.count} times, avg ${this.formatMs(stat.avgDuration)}`);
+        lines.push(
+          `  Executed ${stat.count} times, avg ${this.formatMs(stat.avgDuration)}`
+        );
         lines.push('');
       });
     }

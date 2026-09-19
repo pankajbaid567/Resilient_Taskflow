@@ -1,5 +1,5 @@
 import { sql } from '@taskflow/database';
-import type { JobHandler } from '@taskflow/types';
+import type { JobHandler, JobHandlerContext } from '@taskflow/types';
 
 interface TestIdempotentPayload {
   effectKey?: string;
@@ -7,16 +7,53 @@ interface TestIdempotentPayload {
   delayFirstAttemptMs?: number;
   effectBeforeDelay?: boolean;
   alwaysFail?: boolean;
+  ignoreCancellation?: boolean;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function sleepWithCancellation(
+  ms: number,
+  cancellationToken: JobHandlerContext['cancellationToken'],
+  ignoreCancellation: boolean
+): Promise<void> {
+  if (ignoreCancellation) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    return;
+  }
+
+  cancellationToken.throwIfCancellationRequested();
+
+  let timer: NodeJS.Timeout | undefined;
+  let unsubscribe: (() => void) | undefined;
+  try {
+    await Promise.race([
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
+      }),
+      new Promise<never>((_, reject) => {
+        unsubscribe = cancellationToken.onCancellationRequested(() => {
+          try {
+            cancellationToken.throwIfCancellationRequested();
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    unsubscribe?.();
+  }
 }
 
 async function persistEffect(
   jobId: string,
   effectKey: string
 ): Promise<boolean> {
+  await sql`
+    INSERT INTO test_effect_attempts (job_id, effect_key)
+    VALUES (${jobId}, ${effectKey})
+  `;
+
   const inserted = await sql`
     INSERT INTO test_effects (job_id, effect_key)
     VALUES (${jobId}, ${effectKey})
@@ -45,9 +82,14 @@ export const testIdempotentHandler: JobHandler = async (payload, context) => {
       ? options.delayFirstAttemptMs
       : (options.delayMs ?? 0);
   const effectKey = options.effectKey ?? 'default';
+  const ignoreCancellation = options.ignoreCancellation === true;
 
   if (!Number.isInteger(delayMs) || delayMs < 0 || delayMs > 60_000) {
     throw new Error('delayMs must be an integer between 0 and 60000');
+  }
+
+  if (!ignoreCancellation) {
+    context.cancellationToken.throwIfCancellationRequested();
   }
 
   await sql`
@@ -55,13 +97,25 @@ export const testIdempotentHandler: JobHandler = async (payload, context) => {
     VALUES (${context.job.id})
   `;
 
+  if (!ignoreCancellation) {
+    context.cancellationToken.throwIfCancellationRequested();
+  }
+
   let effectInserted = false;
   if (options.effectBeforeDelay) {
     effectInserted = await persistEffect(context.job.id, effectKey);
   }
 
   if (delayMs > 0) {
-    await sleep(delayMs);
+    await sleepWithCancellation(
+      delayMs,
+      context.cancellationToken,
+      ignoreCancellation
+    );
+  }
+
+  if (!ignoreCancellation) {
+    context.cancellationToken.throwIfCancellationRequested();
   }
 
   if (options.alwaysFail) {

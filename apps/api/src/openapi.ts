@@ -36,16 +36,15 @@ export async function registerSwagger(app: FastifyInstance): Promise<void> {
         description: `
 # Resilient TaskFlow API
 
-Production-grade distributed task queue and asynchronous job-processing platform.
+HTTP API for the TaskFlow PostgreSQL/Redis job-processing lifecycle.
 
 ## Features
 
 - **Reliable Job Processing**: At-least-once delivery with automatic retries
 - **Priority Queues**: CRITICAL, HIGH, NORMAL, LOW priority levels
 - **Scheduled Jobs**: Execute jobs at specific times
-- **Idempotency**: Prevent duplicate job submissions
-- **Worker Management**: Track worker health and performance
-- **Real-time Monitoring**: Queue statistics and worker status
+- **Idempotency**: Optional keys for job submissions
+- **Operational Views**: Queue statistics and worker status
 
 ## Authentication
 
@@ -55,20 +54,20 @@ This API supports two authentication methods:
 Include your API key in the \`X-API-Key\` header:
 
 \`\`\`
-curl -H "X-API-Key: your-api-key" https://api.taskflow.example.com/api/jobs
+curl -H "X-API-Key: your-api-key" http://localhost:3000/api/v1/jobs
 \`\`\`
 
 ### 2. JWT Bearer Token
 Include a JWT token in the \`Authorization\` header:
 
 \`\`\`
-curl -H "Authorization: Bearer your-jwt-token" https://api.taskflow.example.com/api/jobs
+curl -H "Authorization: Bearer your-jwt-token" http://localhost:3000/api/v1/jobs
 \`\`\`
 
 ## Rate Limiting
 
-- **Standard endpoints**: 100 requests per minute
-- **Authentication endpoints**: 5 requests per 5 minutes
+- **Job submission and mutations**: 50 requests per minute
+- **Read endpoints**: 200 requests per minute
 - Rate limit headers are included in responses:
   - \`X-RateLimit-Limit\`: Maximum requests allowed
   - \`X-RateLimit-Remaining\`: Requests remaining
@@ -109,54 +108,23 @@ curl -X POST \\
   -H "Idempotency-Key: unique-request-id-123" \\
   -H "Content-Type: application/json" \\
   -d '{"type": "email-send", "payload": {...}}' \\
-  https://api.taskflow.example.com/api/jobs
+  http://localhost:3000/api/v1/jobs
 \`\`\`
-
-Duplicate requests with the same key return the original response (24-hour window).
 
 ## Pagination
 
 List endpoints support pagination:
 
-- \`limit\`: Number of results (default: 20, max: 100)
+- \`limit\`: Number of results (default: 50, max: 100)
 - \`offset\`: Skip N results (default: 0)
-- \`cursor\`: Cursor-based pagination (alternative to offset)
 
 Example:
 \`\`\`
-GET /api/jobs?limit=50&offset=100
+GET /api/v1/jobs?limit=50&offset=100
 \`\`\`
 
-## Webhooks
-
-Configure webhooks to receive job lifecycle events:
-
-- \`job.created\`
-- \`job.started\`
-- \`job.completed\`
-- \`job.failed\`
-- \`job.retried\`
-- \`job.cancelled\`
-
-## SDKs
-
-Official SDKs available:
-- Node.js/TypeScript: \`npm install @taskflow/client\`
-- Python: \`pip install taskflow-client\`
-- Go: \`go get github.com/taskflow/client-go\`
-
-## Support
-
-- Documentation: https://docs.taskflow.example.com
-- GitHub: https://github.com/taskflow/resilient-taskflow
-- Email: support@taskflow.example.com
         `.trim(),
         version: '1.0.0',
-        contact: {
-          name: 'TaskFlow Support',
-          email: 'support@taskflow.example.com',
-          url: 'https://taskflow.example.com/support',
-        },
         license: {
           name: 'MIT',
           url: 'https://opensource.org/licenses/MIT',
@@ -166,14 +134,6 @@ Official SDKs available:
         {
           url: 'http://localhost:3000',
           description: 'Development server',
-        },
-        {
-          url: 'https://staging-api.taskflow.example.com',
-          description: 'Staging server',
-        },
-        {
-          url: 'https://api.taskflow.example.com',
-          description: 'Production server',
         },
       ],
       tags: [

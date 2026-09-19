@@ -1,6 +1,6 @@
 /**
  * Multi-Layer Cache System
- * 
+ *
  * Implements a hierarchical cache with:
  * - L1: In-memory LRU cache (fastest, smallest)
  * - L2: Redis cache (fast, shared across instances)
@@ -37,10 +37,11 @@ export interface CacheStats {
 export class MultiLayerCache<T> {
   private l1Cache: LRUCache<string, T> | null = null;
   private l2Get: ((key: string) => Promise<string | null>) | null = null;
-  private l2Set: ((key: string, value: string, ttl: number) => Promise<void>) | null = null;
+  private l2Set:
+    ((key: string, value: string, ttl: number) => Promise<void>) | null = null;
   private namespace: string;
   private options: Required<CacheOptions>;
-  
+
   // Statistics
   private stats = {
     l1Hits: 0,
@@ -106,14 +107,14 @@ export class MultiLayerCache<T> {
         if (l2Value) {
           this.stats.l2Hits++;
           const parsed = JSON.parse(l2Value) as T;
-          
+
           // Backfill L1
           if (this.l1Cache) {
             this.l1Cache.set(fullKey, parsed, {
               ttl: ttlOverride?.l1 || this.options.l1TTL,
             });
           }
-          
+
           return parsed;
         }
       } catch (error: unknown) {
@@ -203,13 +204,13 @@ export class MultiLayerCache<T> {
     if (this.l1Cache) {
       const regex = new RegExp(pattern);
       const keysToDelete: string[] = [];
-      
+
       for (const key of this.l1Cache.keys()) {
         if (regex.test(key)) {
           keysToDelete.push(key);
         }
       }
-      
+
       for (const key of keysToDelete) {
         this.l1Cache.delete(key);
       }
@@ -314,7 +315,7 @@ export async function writeThrough<T>(
 ): Promise<void> {
   // Write to database first
   await persister(value);
-  
+
   // Then update cache
   await cache.set(key, value, ttl);
 }
@@ -331,7 +332,7 @@ export async function writeBehind<T>(
 ): Promise<void> {
   // Update cache first
   await cache.set(key, value, ttl);
-  
+
   // Write to database asynchronously (fire and forget)
   void persister(value).catch((error: unknown) => {
     logger.error('Write-behind persister failed', { key, error });
@@ -387,7 +388,7 @@ export class RefreshAheadCache<T> extends MultiLayerCache<T> {
     // In production, you'd want to track TTL more precisely
     if (Math.random() > this.refreshThreshold) {
       this.refreshing.add(key);
-      
+
       fetcher()
         .then((value) => this.set(key, value, ttl))
         .catch((error: unknown) =>

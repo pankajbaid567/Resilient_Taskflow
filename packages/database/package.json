@@ -17,13 +17,12 @@
     "db:generate": "drizzle-kit generate:pg",
     "db:migrate": "tsx src/migrate.ts",
     "db:seed": "tsx src/seed.ts",
-    "db:studio": "drizzle-kit studio",
-    "db:push": "drizzle-kit push:pg",
-    "db:drop": "drizzle-kit drop"
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@taskflow/config": "workspace:*",
     "@taskflow/logger": "workspace:*",
+    "@taskflow/retry": "workspace:*",
     "@taskflow/types": "workspace:*",
     "drizzle-orm": "^0.29.3",
     "postgres": "^3.4.3"

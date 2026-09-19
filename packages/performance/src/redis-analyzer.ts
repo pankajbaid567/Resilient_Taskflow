@@ -1,6 +1,6 @@
 /**
  * Redis Operations Analyzer
- * 
+ *
  * Analyzes Redis command patterns and identifies optimization opportunities
  */
 
@@ -47,7 +47,11 @@ export class RedisAnalyzer {
   /**
    * Record a Redis operation
    */
-  record(command: string, duration: number, metadata?: Partial<RedisMetrics>): void {
+  record(
+    command: string,
+    duration: number,
+    metadata?: Partial<RedisMetrics>
+  ): void {
     if (!this.enabled) return;
 
     const normalizedCommand = command.toUpperCase();
@@ -177,7 +181,8 @@ export class RedisAnalyzer {
 
     // Check for missing pipelining
     const totalCommands = stats.reduce((sum, s) => sum + s.count, 0);
-    const pipelineCount = stats.find((s) => s.command === 'PIPELINE')?.count || 0;
+    const pipelineCount =
+      stats.find((s) => s.command === 'PIPELINE')?.count || 0;
     if (totalCommands > 1000 && pipelineCount === 0) {
       recommendations.push({
         issue: 'No pipelining detected',
@@ -290,8 +295,12 @@ export class RedisAnalyzer {
     lines.push(`Total Commands Executed: ${totalCommands.toLocaleString()}`);
     lines.push(`Unique Command Types: ${stats.length}`);
     lines.push(`Total Execution Time: ${(totalTime / 1000).toFixed(2)}s`);
-    lines.push(`Slow Commands (>${this.slowCommandThreshold}ms): ${slowCommands}`);
-    lines.push(`Avg Command Duration: ${(totalTime / totalCommands).toFixed(2)}ms`);
+    lines.push(
+      `Slow Commands (>${this.slowCommandThreshold}ms): ${slowCommands}`
+    );
+    lines.push(
+      `Avg Command Duration: ${(totalTime / totalCommands).toFixed(2)}ms`
+    );
     lines.push('');
 
     // Top commands by frequency
@@ -333,8 +342,15 @@ export class RedisAnalyzer {
       lines.push('-'.repeat(120));
 
       recommendations.forEach((rec, index) => {
-        const severityIcon = rec.severity === 'high' ? '🔴' : rec.severity === 'medium' ? '🟡' : '🟢';
-        lines.push(`${index + 1}. ${severityIcon} ${rec.issue} (${rec.severity.toUpperCase()})`);
+        const severityIcon =
+          rec.severity === 'high'
+            ? '🔴'
+            : rec.severity === 'medium'
+              ? '🟡'
+              : '🟢';
+        lines.push(
+          `${index + 1}. ${severityIcon} ${rec.issue} (${rec.severity.toUpperCase()})`
+        );
         lines.push(`   ${rec.recommendation}`);
         if (rec.affectedCommands) {
           lines.push(`   Affected: ${rec.affectedCommands.join(', ')}`);

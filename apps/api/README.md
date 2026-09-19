@@ -63,9 +63,10 @@ Two methods supported:
 1. **API Key**: `X-API-Key: your-api-key`
 2. **JWT**: `Authorization: Bearer your-jwt-token`
 
-Development API keys:
-- User: `test-api-key`
-- Admin: `admin-api-key`
+There are no implicit development credentials. API keys must have a salted HMAC
+digest in `api_keys`, must be unexpired and unrevoked, and must belong to an
+active user. JWT subjects must be UUIDs; current user activity and role are
+resolved from PostgreSQL.
 
 ## Getting Started
 
@@ -132,7 +133,7 @@ pnpm start
 ```bash
 curl -X POST http://localhost:3000/api/v1/jobs \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: test-api-key" \
+  -H "X-API-Key: $API_KEY" \
   -d '{
     "type": "send-email",
     "payload": {
@@ -149,28 +150,28 @@ curl -X POST http://localhost:3000/api/v1/jobs \
 
 ```bash
 curl http://localhost:3000/api/v1/jobs/{jobId} \
-  -H "X-API-Key: test-api-key"
+  -H "X-API-Key: $API_KEY"
 ```
 
 ### List Jobs
 
 ```bash
 curl "http://localhost:3000/api/v1/jobs?status=QUEUED&limit=20" \
-  -H "X-API-Key: test-api-key"
+  -H "X-API-Key: $API_KEY"
 ```
 
 ### Cancel Job
 
 ```bash
 curl -X DELETE http://localhost:3000/api/v1/jobs/{jobId} \
-  -H "X-API-Key: test-api-key"
+  -H "X-API-Key: $API_KEY"
 ```
 
 ### Queue Statistics
 
 ```bash
 curl http://localhost:3000/api/v1/queues/default/stats \
-  -H "X-API-Key: test-api-key"
+  -H "X-API-Key: $API_KEY"
 ```
 
 ### Health Checks
@@ -344,7 +345,7 @@ readinessProbe:
 
 ### Authentication Best Practices
 
-- Store API keys hashed (bcrypt/argon2)
+- Store only the salted HMAC digest of each API key
 - Use short-lived JWTs (15min - 1hour)
 - Implement refresh tokens
 - Log all authentication failures
@@ -354,16 +355,9 @@ readinessProbe:
 
 Phase 4 completions needed:
 
-- [ ] Implement proper API key validation (database lookup)
-- [ ] Implement JWT token validation with signature verification
-- [ ] Implement idempotency key handling in job submission
-- [ ] Add queue lookup from database (currently hardcoded)
 - [ ] Implement job retry endpoint
-- [ ] Add pagination total count queries
 - [ ] Implement queue pause/resume
 - [ ] Implement worker stop endpoint
-- [ ] Add worker statistics endpoint
-- [ ] Add OpenAPI/Swagger documentation
 - [ ] Add request body size limits
 - [ ] Add CORS configuration per environment
 - [ ] Add circuit breaker for database/Redis failures

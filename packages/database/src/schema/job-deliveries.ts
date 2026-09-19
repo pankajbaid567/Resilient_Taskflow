@@ -1,4 +1,13 @@
-import { integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import {
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 import { jobs } from './jobs';
 
@@ -12,40 +21,62 @@ import { jobs } from './jobs';
  *
  * Status lifecycle: PENDING → PUBLISHED | FAILED
  */
-export const jobDeliveries = pgTable('job_deliveries', {
-  id: uuid('id').defaultRandom().primaryKey(),
+export const jobDeliveries = pgTable(
+  'job_deliveries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
 
-  // FK to the job being delivered
-  jobId: uuid('job_id')
-    .notNull()
-    .references(() => jobs.id, { onDelete: 'cascade' }),
+    // FK to the job being delivered
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
 
-  // Queue name resolved from the queues table at creation time,
-  // so the dispatcher never reads queue from JSON metadata.
-  queueName: text('queue_name').notNull(),
+    // Queue name resolved from the queues table at creation time,
+    // so the dispatcher never reads queue from JSON metadata.
+    queueName: text('queue_name').notNull(),
 
-  // Attempt number encoded in the Redis envelope
-  attempt: integer('attempt').notNull().default(1),
+    // Producer-supplied delivery hint encoded in the Redis envelope. The
+    // authoritative execution count is jobs.attempts. Each retry gets a unique
+    // successor row with attempt = jobs.attempts + 1.
+    attempt: integer('attempt').notNull().default(1),
 
-  // PENDING | PUBLISHED | FAILED
-  status: text('status').notNull().default('PENDING'),
+    // The dispatcher must not claim this row before its durable due time.
+    availableAt: timestamp('available_at', { withTimezone: true })
+      .notNull()
+      .default(sql`clock_timestamp()`),
 
-  // Set after successful XADD
-  redisMessageId: text('redis_message_id'),
-  publishedAt: timestamp('published_at', { withTimezone: true }),
+    // PENDING | PUBLISHED | FAILED
+    status: text('status').notNull().default('PENDING'),
 
-  // Concurrency fence: which dispatcher instance has claimed this row
-  claimedBy: text('claimed_by'),
-  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    // Set after successful XADD
+    redisMessageId: text('redis_message_id'),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
 
-  // Failure details
-  error: text('error'),
-  retryCount: integer('retry_count').notNull().default(0),
+    // Concurrency fence: which dispatcher instance has claimed this row
+    claimedBy: text('claimed_by'),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
 
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+    // Failure details
+    error: text('error'),
+    retryCount: integer('retry_count').notNull().default(0),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    jobAttemptUnique: unique('job_deliveries_job_id_attempt_key').on(
+      table.jobId,
+      table.attempt
+    ),
+    pendingIdx: index('idx_job_deliveries_pending')
+      .on(table.availableAt, table.createdAt)
+      .where(sql`${table.status} = 'PENDING'`),
+    publishedJobIdx: index('idx_job_deliveries_published_job')
+      .on(table.jobId)
+      .where(sql`${table.status} = 'PUBLISHED'`),
+  })
+);
 
 export type JobDelivery = typeof jobDeliveries.$inferSelect;
 export type NewJobDelivery = typeof jobDeliveries.$inferInsert;

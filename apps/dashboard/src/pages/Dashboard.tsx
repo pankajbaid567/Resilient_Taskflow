@@ -23,12 +23,7 @@ export default function Dashboard() {
   }
 
   if (metricsError) {
-    return (
-      <ErrorMessage
-        message={metricsError}
-        onRetry={refetchMetrics}
-      />
-    );
+    return <ErrorMessage message={metricsError} onRetry={refetchMetrics} />;
   }
 
   if (!metrics) {

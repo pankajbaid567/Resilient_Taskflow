@@ -16,12 +16,14 @@ const logger = createLogger({ component: 'QueueQuarantine' });
  * @param messageId - The Redis stream entry ID
  * @param reason    - Explanation for quarantining (e.g. malformed envelope, persistent not-found)
  * @param metadata  - Optional contextual details (e.g. error, payload)
+ * @param rawEntry  - Exact Redis entry returned by the consumer, when available
  */
 export async function quarantineEntry(
   streamKey: string,
   messageId: string,
   reason: string,
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>,
+  rawEntry?: unknown
 ): Promise<void> {
   const redis = getRedisClient();
   const groupName = WORKER_CONSUMER_GROUP;
@@ -35,7 +37,7 @@ export async function quarantineEntry(
   });
 
   try {
-    await redis.xadd(
+    const quarantineMessageId = await redis.xadd(
       quarantineStreamKey,
       '*',
       'messageId',
@@ -47,14 +49,23 @@ export async function quarantineEntry(
       'quarantinedAt',
       new Date().toISOString(),
       'metadata',
-      JSON.stringify(metadata ?? {})
+      JSON.stringify(metadata ?? {}),
+      'rawEntry',
+      JSON.stringify(rawEntry ?? null)
     );
+
+    if (quarantineMessageId === null) {
+      throw new Error('Redis quarantine XADD did not return a message ID');
+    }
   } catch (error) {
     logger.error('Failed to log quarantined entry to quarantine stream', {
       stream: streamKey,
       messageId,
       error,
     });
+    // The source entry must remain pending when its audit copy is not durable.
+    // Re-throw before XACK so a later reclaim can retry quarantine persistence.
+    throw error;
   }
 
   if (messageId !== '<unknown>') {

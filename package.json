@@ -32,6 +32,8 @@
     "test:unit": "pnpm --filter @taskflow/tests test:unit",
     "test:simulated": "pnpm --filter @taskflow/tests test:simulated",
     "test:integration": "pnpm --filter @taskflow/tests test:integration",
+    "test:migrations": "pnpm --filter @taskflow/tests test:migrations",
+    "test:api-runtime": "pnpm --filter @taskflow/tests test:api-runtime",
     "test:docker-process": "pnpm --filter @taskflow/tests test:docker-process",
     "test:chaos": "pnpm --filter @taskflow/tests test:chaos",
     "test:worker-integration": "pnpm --filter @taskflow/tests test:worker-runtime",

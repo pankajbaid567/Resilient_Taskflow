@@ -14,6 +14,9 @@
       "path": "../logger"
     },
     {
+      "path": "../retry"
+    },
+    {
       "path": "../types"
     }
   ]

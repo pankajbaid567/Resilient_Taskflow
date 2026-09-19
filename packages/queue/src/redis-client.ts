@@ -4,7 +4,7 @@ import Redis, { ChainableCommander } from 'ioredis';
 
 /**
  * Redis Client for Queue Operations
- * 
+ *
  * Singleton Redis client with connection pooling and retry logic.
  */
 
@@ -22,9 +22,12 @@ export function getRedisClient(): Redis {
           logger.error('Redis max retries exceeded', { times });
           return null; // Stop retrying
         }
-        
+
         const delay = Math.min(times * redisConfig.retryDelayMs, 5000);
-        logger.warn('Redis connection retry', { attempt: times, delayMs: delay });
+        logger.warn('Redis connection retry', {
+          attempt: times,
+          delayMs: delay,
+        });
         return delay;
       },
       reconnectOnError: (err) => {
@@ -37,29 +40,29 @@ export function getRedisClient(): Redis {
       enableOfflineQueue: true,
       lazyConnect: false,
     });
-    
+
     // Event handlers
     redisClient.on('connect', () => {
       logger.info('✓ Redis client connected');
     });
-    
+
     redisClient.on('ready', () => {
       logger.info('✓ Redis client ready');
     });
-    
+
     redisClient.on('error', (error) => {
       logger.error('Redis client error', { error });
     });
-    
+
     redisClient.on('close', () => {
       logger.warn('Redis client connection closed');
     });
-    
+
     redisClient.on('reconnecting', (timeToReconnect?: number) => {
       logger.info('Redis client reconnecting', { timeToReconnect });
     });
   }
-  
+
   return redisClient;
 }
 

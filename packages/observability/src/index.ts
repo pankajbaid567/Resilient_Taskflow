@@ -1,6 +1,6 @@
 /**
  * @taskflow/observability
- * 
+ *
  * Comprehensive observability for distributed task queue:
  * - Prometheus metrics (prom-client)
  * - OpenTelemetry distributed tracing

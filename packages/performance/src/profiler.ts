@@ -1,6 +1,6 @@
 /**
  * Performance Profiler
- * 
+ *
  * Measures execution time and tracks performance metrics for operations
  */
 

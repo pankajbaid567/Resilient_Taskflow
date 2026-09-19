@@ -20,7 +20,12 @@ export default function JobDetailModal({
   jobId,
   onJobUpdated,
 }: JobDetailModalProps) {
-  const { data: job, loading, error, refetch } = useJob(jobId, { skip: !isOpen });
+  const {
+    data: job,
+    loading,
+    error,
+    refetch,
+  } = useJob(jobId, { skip: !isOpen });
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -35,7 +40,9 @@ export default function JobDetailModal({
       await refetch();
       onJobUpdated?.();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to cancel job');
+      setActionError(
+        err instanceof Error ? err.message : 'Failed to cancel job'
+      );
     } finally {
       setActionLoading(null);
     }
@@ -52,7 +59,9 @@ export default function JobDetailModal({
       await refetch();
       onJobUpdated?.();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to retry job');
+      setActionError(
+        err instanceof Error ? err.message : 'Failed to retry job'
+      );
     } finally {
       setActionLoading(null);
     }
@@ -112,20 +121,21 @@ export default function JobDetailModal({
             <InfoItem label="Type" value={job.type} />
             <InfoItem label="Queue" value={job.queue} />
             <InfoItem label="Priority" value={job.priority} />
-            <InfoItem label="Attempts" value={`${job.attempts} / ${job.maxAttempts}`} />
+            <InfoItem
+              label="Attempts"
+              value={`${job.attempts} / ${job.maxAttempts}`}
+            />
             <InfoItem label="Timeout" value={`${job.timeout}ms`} />
-            {job.workerId && <InfoItem label="Worker ID" value={job.workerId} />}
+            {job.workerId && (
+              <InfoItem label="Worker ID" value={job.workerId} />
+            )}
           </div>
 
           {/* Timestamps */}
           <div className={styles.section}>
             <h4 className={styles.sectionTitle}>Timeline</h4>
             <div className={styles.timeline}>
-              <TimelineItem
-                label="Created"
-                date={job.createdAt}
-                icon="📝"
-              />
+              <TimelineItem label="Created" date={job.createdAt} icon="📝" />
               {job.scheduledAt && (
                 <TimelineItem
                   label="Scheduled"
@@ -134,11 +144,7 @@ export default function JobDetailModal({
                 />
               )}
               {job.startedAt && (
-                <TimelineItem
-                  label="Started"
-                  date={job.startedAt}
-                  icon="▶️"
-                />
+                <TimelineItem label="Started" date={job.startedAt} icon="▶️" />
               )}
               {job.completedAt && (
                 <TimelineItem
@@ -148,11 +154,7 @@ export default function JobDetailModal({
                 />
               )}
               {job.failedAt && (
-                <TimelineItem
-                  label="Failed"
-                  date={job.failedAt}
-                  icon="❌"
-                />
+                <TimelineItem label="Failed" date={job.failedAt} icon="❌" />
               )}
             </div>
           </div>

@@ -9,6 +9,7 @@ This directory contains GitHub Actions workflows for CI/CD, security scanning, a
 **Triggers:** Push and PR to `main` or `develop`
 
 Runs comprehensive checks on every commit:
+
 - **Lint**: ESLint and Prettier checks
 - **Type Check**: TypeScript compilation
 - **Test**: Unit and integration tests with PostgreSQL and Redis services
@@ -22,6 +23,7 @@ Runs comprehensive checks on every commit:
 **Triggers:** Push to `main`, version tags (`v*`), PRs
 
 Builds and publishes Docker images:
+
 - Multi-platform builds (amd64, arm64)
 - Push to GitHub Container Registry (GHCR)
 - Generate SBOM (Software Bill of Materials)
@@ -29,6 +31,7 @@ Builds and publishes Docker images:
 - Docker Compose integration test
 
 **Images:**
+
 - `ghcr.io/YOUR_USERNAME/taskflow-api`
 - `ghcr.io/YOUR_USERNAME/taskflow-worker`
 - `ghcr.io/YOUR_USERNAME/taskflow-dashboard`
@@ -40,6 +43,7 @@ Builds and publishes Docker images:
 **Triggers:** Push/PR to `main`/`develop`, weekly schedule (Mondays 9:00 UTC), manual
 
 Comprehensive security scanning:
+
 - **NPM Audit**: Package vulnerabilities
 - **CodeQL**: Static code analysis
 - **TruffleHog**: Secret scanning
@@ -56,6 +60,7 @@ Results uploaded to GitHub Security tab.
 **Trigger:** Manual workflow dispatch
 
 Environment-based deployment with rollback:
+
 - Deploy to staging or production
 - Update AWS ECS task definitions
 - Deploy API and Worker services
@@ -72,6 +77,7 @@ Environment-based deployment with rollback:
 **Triggers:** Version tags (`v*`), manual workflow dispatch
 
 Automated release process:
+
 - Version validation (semver)
 - Build release artifacts with checksums
 - Build and push versioned Docker images
@@ -81,6 +87,7 @@ Automated release process:
 - Create deployment tracking issue
 
 **Artifacts:**
+
 - `taskflow-api-{version}.tar.gz`
 - `taskflow-worker-{version}.tar.gz`
 - `taskflow-dashboard-{version}.tar.gz`
@@ -106,6 +113,7 @@ ci.yml (always runs first)
 Configure in GitHub repository settings → Secrets and variables → Actions
 
 ### AWS Deployment
+
 - `AWS_ROLE_ARN` - IAM role for ECS deployment
 - `AWS_REGION` - AWS region (e.g., us-east-1)
 - `API_URL` - API endpoint for health checks
@@ -115,28 +123,35 @@ Configure in GitHub repository settings → Secrets and variables → Actions
 - `CLOUDFRONT_DISTRIBUTION_ID` - CloudFront distribution
 
 ### Notifications
+
 - `SLACK_WEBHOOK_URL` - Slack webhook for notifications
 
 ### Optional
+
 - `CODECOV_TOKEN` - Codecov upload token
 
 ## Workflow Features
 
 ### Parallel Execution
+
 Jobs run in parallel where possible to minimize total runtime.
 
 ### Caching
+
 - pnpm store caching
 - Docker layer caching
 - Build artifact caching
 
 ### Matrix Builds
+
 Build jobs use matrix strategy for multiple apps/platforms in parallel.
 
 ### Concurrency Control
+
 Workflows cancel in-progress runs when new commits are pushed to the same branch.
 
 ### Artifact Retention
+
 - Build artifacts: 7 days
 - Release artifacts: 30 days
 - SBOM: 90 days
@@ -158,12 +173,14 @@ git push origin feature/new-feature
 ### Creating a Release
 
 **Option 1: Git tag**
+
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
 **Option 2: Workflow dispatch**
+
 1. Go to Actions → Release
 2. Click "Run workflow"
 3. Enter version: `1.0.0`
@@ -196,16 +213,19 @@ git push origin v1.0.0
 ## Monitoring Workflows
 
 ### View All Workflows
+
 ```
 https://github.com/YOUR_USERNAME/Resilient_TaskFlow/actions
 ```
 
 ### View Specific Workflow
+
 ```
 https://github.com/YOUR_USERNAME/Resilient_TaskFlow/actions/workflows/ci.yml
 ```
 
 ### Check Status
+
 - ✅ Green: All checks passed
 - ❌ Red: Some checks failed
 - 🟡 Yellow: In progress
@@ -214,6 +234,7 @@ https://github.com/YOUR_USERNAME/Resilient_TaskFlow/actions/workflows/ci.yml
 ## Workflow Logs
 
 Click on any workflow run to see:
+
 - Summary of all jobs
 - Detailed logs for each step
 - Artifacts produced
@@ -224,12 +245,14 @@ Click on any workflow run to see:
 ### CI Failures
 
 **Check the logs:**
+
 1. Go to Actions tab
 2. Click on failed workflow run
 3. Click on failed job
 4. Expand failed step to see error
 
 **Common issues:**
+
 - Test failures → Run tests locally
 - Lint errors → Run `pnpm lint:fix`
 - Type errors → Run `pnpm typecheck`
@@ -238,6 +261,7 @@ Click on any workflow run to see:
 ### Docker Build Failures
 
 **Common issues:**
+
 - Platform compatibility → Check Dockerfile
 - Cache issues → Clear cache and rebuild
 - Registry authentication → Check GITHUB_TOKEN
@@ -245,6 +269,7 @@ Click on any workflow run to see:
 ### Deployment Failures
 
 **Common issues:**
+
 - Health check timeout → Check ECS logs
 - Migration failures → Check database connectivity
 - Rollback triggered → Check deployment logs
@@ -252,6 +277,7 @@ Click on any workflow run to see:
 ### Security Scan Failures
 
 **Common issues:**
+
 - Vulnerabilities → Run `pnpm audit fix`
 - False positives → Review and document
 - License issues → Check dependency licenses
@@ -303,6 +329,7 @@ Add status badges to README.md:
 ## Support
 
 For workflow issues:
+
 1. Check workflow logs
 2. Review this documentation
 3. Check [CI/CD Documentation](../../docs/ci-cd.md)

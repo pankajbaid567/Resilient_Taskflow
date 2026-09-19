@@ -1,4 +1,6 @@
+import { sql } from 'drizzle-orm';
 import {
+  check,
   index,
   integer,
   jsonb,
@@ -50,13 +52,19 @@ export const jobAttempts = pgTable(
       table.jobId,
       table.attemptNumber
     ),
-    jobIdIdx: index('idx_job_attempts_job_id').on(
-      table.jobId,
-      table.attemptNumber
-    ),
     workerIdIdx: index('idx_job_attempts_worker_id').on(table.workerId),
     startedAtIdx: index('idx_job_attempts_started_at').on(table.startedAt),
     statusIdx: index('idx_job_attempts_status').on(table.status),
+    // The partial/per-column ordered performance indexes are migration-owned
+    // because drizzle-kit 0.20 cannot preserve their Drizzle 0.29 attributes.
+    attemptPositiveCheck: check(
+      'job_attempts_attempt_number_positive',
+      sql`${table.attemptNumber} > 0`
+    ),
+    durationNonNegativeCheck: check(
+      'job_attempts_duration_non_negative',
+      sql`${table.durationMs} IS NULL OR ${table.durationMs} >= 0`
+    ),
   })
 );
 

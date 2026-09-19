@@ -1,10 +1,11 @@
 /**
  * Database Schema
- * 
+ *
  * All Drizzle ORM table definitions.
  */
 
 export * from './users';
+export * from './api-keys';
 export * from './queues';
 export * from './workers';
 export * from './jobs';

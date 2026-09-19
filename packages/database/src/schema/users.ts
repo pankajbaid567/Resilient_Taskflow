@@ -1,8 +1,14 @@
-import { boolean, pgTable, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  pgTable,
+  timestamp,
+  uuid,
+  varchar,
+} from 'drizzle-orm/pg-core';
 
 /**
  * Users Table
- * 
+ *
  * Stores user accounts with authentication and authorization information.
  */
 export const users = pgTable('users', {

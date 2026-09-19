@@ -2,7 +2,7 @@ import { JobPriority } from '@taskflow/types';
 
 /**
  * Job Event Types
- * 
+ *
  * Lifecycle events emitted when job state changes.
  */
 export enum JobEventType {
@@ -19,7 +19,7 @@ export enum JobEventType {
 
 /**
  * Base Job Event
- * 
+ *
  * Common fields for all job events.
  */
 export interface BaseJobEvent {
@@ -66,7 +66,7 @@ export interface BaseJobEvent {
 
 /**
  * Job Created Event
- * 
+ *
  * Emitted when a job is first created.
  */
 export interface JobCreatedEvent extends BaseJobEvent {
@@ -95,7 +95,7 @@ export interface JobCreatedEvent extends BaseJobEvent {
 
 /**
  * Job Queued Event
- * 
+ *
  * Emitted when a job is enqueued to Redis Streams.
  */
 export interface JobQueuedEvent extends BaseJobEvent {
@@ -109,7 +109,7 @@ export interface JobQueuedEvent extends BaseJobEvent {
 
 /**
  * Job Started Event
- * 
+ *
  * Emitted when a worker starts processing a job.
  */
 export interface JobStartedEvent extends BaseJobEvent {
@@ -138,7 +138,7 @@ export interface JobStartedEvent extends BaseJobEvent {
 
 /**
  * Job Completed Event
- * 
+ *
  * Emitted when a job completes successfully.
  */
 export interface JobCompletedEvent extends BaseJobEvent {
@@ -167,7 +167,7 @@ export interface JobCompletedEvent extends BaseJobEvent {
 
 /**
  * Job Failed Event
- * 
+ *
  * Emitted when a job fails.
  */
 export interface JobFailedEvent extends BaseJobEvent {
@@ -206,7 +206,7 @@ export interface JobFailedEvent extends BaseJobEvent {
 
 /**
  * Job Retried Event
- * 
+ *
  * Emitted when a job is scheduled for retry.
  */
 export interface JobRetriedEvent extends BaseJobEvent {
@@ -240,7 +240,7 @@ export interface JobRetriedEvent extends BaseJobEvent {
 
 /**
  * Job Cancelled Event
- * 
+ *
  * Emitted when a job is cancelled.
  */
 export interface JobCancelledEvent extends BaseJobEvent {
@@ -264,7 +264,7 @@ export interface JobCancelledEvent extends BaseJobEvent {
 
 /**
  * Job Dead Lettered Event
- * 
+ *
  * Emitted when a job is moved to dead letter queue.
  */
 export interface JobDeadLetteredEvent extends BaseJobEvent {
@@ -288,7 +288,7 @@ export interface JobDeadLetteredEvent extends BaseJobEvent {
 
 /**
  * Job Timeout Event
- * 
+ *
  * Emitted when a job times out during execution.
  */
 export interface JobTimeoutEvent extends BaseJobEvent {

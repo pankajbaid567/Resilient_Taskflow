@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 
 import { createLogger } from '@taskflow/logger';
 import { createRedisClient } from '@taskflow/queue';
@@ -6,200 +7,252 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 const logger = createLogger({ component: 'RateLimiter' });
 
 /**
- * Rate Limiter Configuration
+ * The whole sliding-window decision is made in one Redis command. In
+ * particular, concurrent callers cannot both observe the same count and then
+ * add themselves after the limit check.
  */
-export interface RateLimitConfig {
-  /**
-   * Maximum number of requests allowed in the window
-   */
-  maxRequests: number;
+export const SLIDING_WINDOW_LUA = `
+local key = KEYS[1]
+local redis_time = redis.call('TIME')
+local now = (tonumber(redis_time[1]) * 1000) + math.floor(tonumber(redis_time[2]) / 1000)
+local window_ms = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+local member = ARGV[3]
+local window_start = now - window_ms
 
-  /**
-   * Time window in seconds
-   */
+redis.call('ZREMRANGEBYSCORE', key, '-inf', window_start)
+
+local count = redis.call('ZCARD', key)
+if count >= limit then
+  local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+  redis.call('PEXPIRE', key, window_ms * 2)
+  return { 0, count, tonumber(oldest[2]) or now, now }
+end
+
+redis.call('ZADD', key, now, member)
+redis.call('PEXPIRE', key, window_ms * 2)
+
+local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+return { 1, count + 1, tonumber(oldest[2]) or now, now }
+`;
+
+export type RateLimitFailureMode = 'open' | 'closed';
+
+export interface RateLimitConfig {
+  /** Stable namespace so independent endpoint policies never share quota. */
+  scope: string;
+  maxRequests: number;
   windowSeconds: number;
 
   /**
-   * Custom key extractor
-   * Default: IP address
+   * Reads use fail-open availability; state-changing operations use
+   * fail-closed safety when Redis cannot make an admission decision.
    */
+  failureMode: RateLimitFailureMode;
   keyExtractor?: (request: FastifyRequest) => string;
-
-  /**
-   * Skip rate limiting for certain requests
-   */
   skip?: (request: FastifyRequest) => boolean;
 }
 
-/**
- * Default configuration
- */
-const DEFAULT_CONFIG: RateLimitConfig = {
-  maxRequests: 100,
-  windowSeconds: 60,
-};
+interface RateLimitRedisClient {
+  eval(
+    script: string,
+    numberOfKeys: number,
+    ...args: Array<string | number>
+  ): Promise<unknown>;
+}
 
-/**
- * Create rate limiter middleware using Redis
- *
- * Uses sliding window algorithm with Redis sorted sets for accuracy.
- */
-export function createRateLimiter(config: Partial<RateLimitConfig> = {}) {
-  const finalConfig: RateLimitConfig = {
-    ...DEFAULT_CONFIG,
-    ...config,
+export interface RateLimiterDependencies {
+  getRedisClient?: () => RateLimitRedisClient;
+  now?: () => number;
+  memberId?: () => string;
+}
+
+interface RateLimitDecision {
+  allowed: boolean;
+  count: number;
+  oldestTimestamp: number;
+  nowTimestamp: number;
+}
+
+function parseDecision(result: unknown): RateLimitDecision {
+  if (!Array.isArray(result) || result.length !== 4) {
+    throw new Error('Redis returned an invalid rate-limit decision');
+  }
+
+  const allowed = Number(result[0]);
+  const count = Number(result[1]);
+  const oldestTimestamp = Number(result[2]);
+  const nowTimestamp = Number(result[3]);
+
+  if (
+    (allowed !== 0 && allowed !== 1) ||
+    !Number.isFinite(count) ||
+    !Number.isFinite(oldestTimestamp) ||
+    !Number.isFinite(nowTimestamp)
+  ) {
+    throw new Error('Redis returned an invalid rate-limit decision');
+  }
+
+  return {
+    allowed: allowed === 1,
+    count,
+    oldestTimestamp,
+    nowTimestamp,
   };
+}
 
-  const redis = createRedisClient();
+function buildRateLimitKey(scope: string, identity: string): string {
+  return `taskflow:rate-limit:${scope}:${encodeURIComponent(identity)}`;
+}
+
+/** Create a rate limiter backed by one atomic Redis Lua decision. */
+export function createRateLimiter(
+  config: RateLimitConfig,
+  dependencies: RateLimiterDependencies = {}
+) {
+  if (!/^[a-z0-9_-]+$/i.test(config.scope)) {
+    throw new Error(
+      'Rate-limit scope must contain only letters, numbers, _ or -'
+    );
+  }
+
+  if (!Number.isInteger(config.maxRequests) || config.maxRequests < 1) {
+    throw new Error('Rate-limit maxRequests must be a positive integer');
+  }
+
+  if (!Number.isInteger(config.windowSeconds) || config.windowSeconds < 1) {
+    throw new Error('Rate-limit windowSeconds must be a positive integer');
+  }
+
+  const getRedisClient =
+    dependencies.getRedisClient ?? (() => createRedisClient());
+  const now = dependencies.now ?? Date.now;
+  const memberId = dependencies.memberId ?? randomUUID;
 
   return async (
     request: FastifyRequest,
     reply: FastifyReply
   ): Promise<void> => {
-    // Skip if configured
-    if (finalConfig.skip?.(request)) {
+    if (config.skip?.(request)) {
       return;
     }
 
-    // Extract key (IP or custom)
-    const key = finalConfig.keyExtractor
-      ? finalConfig.keyExtractor(request)
+    const identity = config.keyExtractor
+      ? config.keyExtractor(request)
       : extractIpAddress(request);
-
-    const rateLimitKey = `rate-limit:${key}`;
-    const now = Date.now();
-    const windowStart = now - finalConfig.windowSeconds * 1000;
+    const rateLimitKey = buildRateLimitKey(config.scope, identity);
+    const timestamp = now();
+    const windowMs = config.windowSeconds * 1000;
 
     try {
-      // Remove old entries outside the window
-      await redis.zremrangebyscore(rateLimitKey, 0, windowStart);
+      const result = await getRedisClient().eval(
+        SLIDING_WINDOW_LUA,
+        1,
+        rateLimitKey,
+        windowMs,
+        config.maxRequests,
+        memberId()
+      );
+      const decision = parseDecision(result);
+      const resetAt = decision.oldestTimestamp + windowMs;
 
-      // Count requests in current window
-      const count = await redis.zcount(rateLimitKey, windowStart, now);
+      void reply.header('X-RateLimit-Limit', config.maxRequests);
+      void reply.header(
+        'X-RateLimit-Remaining',
+        Math.max(0, config.maxRequests - decision.count)
+      );
+      void reply.header('X-RateLimit-Reset', resetAt);
 
-      // Check if limit exceeded
-      if (count >= finalConfig.maxRequests) {
-        // Get oldest request timestamp for retry-after calculation
-        const oldestRequests = await redis.zrange(
-          rateLimitKey,
-          0,
-          0,
-          'WITHSCORES'
-        );
-        const oldestTimestamp = oldestRequests[1]
-          ? parseInt(oldestRequests[1], 10)
-          : now;
-        const retryAfter = Math.ceil(
-          (oldestTimestamp + finalConfig.windowSeconds * 1000 - now) / 1000
+      if (!decision.allowed) {
+        const retryAfter = Math.max(
+          1,
+          Math.ceil((resetAt - decision.nowTimestamp) / 1000)
         );
 
         logger.warn('Rate limit exceeded', {
-          key,
-          count,
-          limit: finalConfig.maxRequests,
-          window: finalConfig.windowSeconds,
+          scope: config.scope,
+          count: decision.count,
+          limit: config.maxRequests,
+          windowSeconds: config.windowSeconds,
           retryAfter,
         });
 
-        void reply.header('X-RateLimit-Limit', finalConfig.maxRequests);
-        void reply.header('X-RateLimit-Remaining', 0);
-        void reply.header(
-          'X-RateLimit-Reset',
-          oldestTimestamp + finalConfig.windowSeconds * 1000
-        );
         void reply.header('Retry-After', retryAfter);
-
-        return reply.status(429).send({
+        await reply.status(429).send({
           error: 'Too Many Requests',
           message: `Rate limit exceeded. Try again in ${retryAfter} seconds.`,
           statusCode: 429,
-          timestamp: new Date().toISOString(),
+          timestamp: new Date(timestamp).toISOString(),
           retryAfter,
         });
+        return;
       }
 
-      // Add current request to sliding window
-      await redis.zadd(rateLimitKey, now, `${now}-${Math.random()}`);
-
-      // Set expiration on key to clean up automatically
-      await redis.expire(rateLimitKey, finalConfig.windowSeconds * 2);
-
-      // Add rate limit headers
-      const remaining = Math.max(0, finalConfig.maxRequests - count - 1);
-      void reply.header('X-RateLimit-Limit', finalConfig.maxRequests);
-      void reply.header('X-RateLimit-Remaining', remaining);
-      void reply.header(
-        'X-RateLimit-Reset',
-        now + finalConfig.windowSeconds * 1000
-      );
-
       logger.debug('Rate limit check passed', {
-        key,
-        count: count + 1,
-        limit: finalConfig.maxRequests,
-        remaining,
+        scope: config.scope,
+        count: decision.count,
+        limit: config.maxRequests,
+        remaining: Math.max(0, config.maxRequests - decision.count),
       });
     } catch (error) {
-      // Log error but don't block request on rate limiter failure
-      logger.error('Rate limiter error', { key, error });
-      // Fail open - allow request through
+      logger.error('Rate limiter unavailable', {
+        scope: config.scope,
+        failureMode: config.failureMode,
+        error,
+      });
+
+      if (config.failureMode === 'closed') {
+        await reply.status(503).send({
+          error: 'Service Unavailable',
+          message: 'Request admission is temporarily unavailable',
+          statusCode: 503,
+          timestamp: new Date(timestamp).toISOString(),
+        });
+      }
     }
   };
 }
 
-/**
- * Extract IP address from request
- *
- * Respects X-Forwarded-For header for proxies
- */
+/** Fastify derives this value according to the configured trustProxy policy. */
 function extractIpAddress(request: FastifyRequest): string {
-  const forwardedFor = request.headers['x-forwarded-for'];
-
-  if (typeof forwardedFor === 'string') {
-    // Take the first IP if multiple are present
-    return forwardedFor.split(',')[0]?.trim() || request.ip || 'unknown';
-  }
-
   return request.ip || 'unknown';
 }
 
-/**
- * Extract user ID from authenticated request
- */
+/** Extract user ID after authentication, otherwise use the trusted IP. */
 export function extractUserId(request: FastifyRequest): string {
   return request.user?.id || extractIpAddress(request);
 }
 
-/**
- * Preset rate limiters
- */
+/** Preset policies. Mutations fail closed; observability/read traffic fails open. */
 export const rateLimiters = {
-  /**
-   * Strict rate limiter for job submission
-   * 50 requests per minute per user
-   */
   jobSubmission: createRateLimiter({
+    scope: 'job-submission',
     maxRequests: 50,
     windowSeconds: 60,
+    failureMode: 'closed',
     keyExtractor: extractUserId,
   }),
 
-  /**
-   * Moderate rate limiter for read operations
-   * 200 requests per minute per user
-   */
+  mutation: createRateLimiter({
+    scope: 'mutation',
+    maxRequests: 50,
+    windowSeconds: 60,
+    failureMode: 'closed',
+    keyExtractor: extractUserId,
+  }),
+
   read: createRateLimiter({
+    scope: 'read',
     maxRequests: 200,
     windowSeconds: 60,
+    failureMode: 'open',
     keyExtractor: extractUserId,
   }),
 
-  /**
-   * Lenient rate limiter for health checks
-   * 1000 requests per minute per IP
-   */
   health: createRateLimiter({
+    scope: 'observability',
     maxRequests: 1000,
     windowSeconds: 60,
+    failureMode: 'open',
   }),
 };

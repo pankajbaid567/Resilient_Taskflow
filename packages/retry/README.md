@@ -1,6 +1,28 @@
 # @taskflow/retry
 
-Intelligent retry logic and backoff strategies for failed jobs.
+Retry decisions and standalone backoff utilities for failed jobs.
+
+The TaskFlow worker has one authoritative entry point: `decideJobRetry`. It
+uses bounded exponential backoff without jitter so the exact due time can be
+persisted with the failed attempt, event, and successor delivery in one
+PostgreSQL transaction. `PermanentJobError` terminates immediately; exhausted
+attempts become dead-lettered without a successor.
+
+`shouldRetryJob` and the configurable jitter helpers below are compatibility
+utilities. They do not drive the TaskFlow worker runtime.
+
+```typescript
+import { decideJobRetry, PermanentJobError } from '@taskflow/retry';
+
+const decision = decideJobRetry({
+  currentAttempt,
+  maxAttempts,
+  error,
+  jobCreatedAt,
+  baseDelayMs: 1000,
+  maxDelayMs: 60000,
+});
+```
 
 ## Features
 
@@ -10,7 +32,7 @@ Intelligent retry logic and backoff strategies for failed jobs.
 - **Dead Letter Queue**: Handle permanently failed jobs
 - **Statistics**: Track DLQ metrics and alerting
 
-## Quick Start
+## Compatibility utilities
 
 ```typescript
 import {
@@ -134,6 +156,7 @@ const delay = calculateBackoff(attempt, {
 ```
 
 Why jitter?
+
 - Prevents many jobs from retrying simultaneously
 - Spreads load over time
 - Reduces resource contention
@@ -164,15 +187,8 @@ const policy = createRetryPolicy({
     maxDelayMs: 120000,
     factor: 3,
   },
-  retryableErrors: [
-    'TimeoutError',
-    'NetworkError',
-    'ECONNREFUSED',
-  ],
-  nonRetryableErrors: [
-    'ValidationError',
-    'AuthenticationError',
-  ],
+  retryableErrors: ['TimeoutError', 'NetworkError', 'ECONNREFUSED'],
+  nonRetryableErrors: ['ValidationError', 'AuthenticationError'],
 });
 ```
 
@@ -241,18 +257,10 @@ import { RETRYABLE_ERRORS } from '@taskflow/retry';
 ```typescript
 const policy = createRetryPolicy({
   // Only retry these errors
-  retryableErrors: [
-    'DatabaseTimeout',
-    'ConnectionPool',
-    'TemporaryFailure',
-  ],
+  retryableErrors: ['DatabaseTimeout', 'ConnectionPool', 'TemporaryFailure'],
 
   // Never retry these errors
-  nonRetryableErrors: [
-    'InvalidAPIKey',
-    'QuotaExceeded',
-    'DataCorruption',
-  ],
+  nonRetryableErrors: ['InvalidAPIKey', 'QuotaExceeded', 'DataCorruption'],
 });
 ```
 
@@ -332,11 +340,13 @@ console.log({
 });
 
 // Check if alerting needed
-if (isDLQAlerting(stats, {
-  maxJobs: 1000,
-  maxNonRetryablePercent: 0.5,
-  maxJobTypePercent: 0.8,
-})) {
+if (
+  isDLQAlerting(stats, {
+    maxJobs: 1000,
+    maxNonRetryablePercent: 0.5,
+    maxJobTypePercent: 0.8,
+  })
+) {
   console.log('⚠️ DLQ requires attention!');
 }
 ```
@@ -417,22 +427,26 @@ class WorkerWithRetry extends Worker {
 ### Choose the Right Strategy
 
 **Exponential Backoff** (default)
+
 - ✅ Best for most cases
 - ✅ Backs off quickly
 - ✅ Prevents overwhelming downstream services
 - ❌ May wait too long for later attempts
 
 **Linear Backoff**
+
 - ✅ Predictable delays
 - ✅ Good for consistent failures
 - ❌ Doesn't back off aggressively
 
 **Fixed Backoff**
+
 - ✅ Simple and predictable
 - ✅ Good when you know the failure pattern
 - ❌ No adaptation to failure severity
 
 **Fibonacci Backoff**
+
 - ✅ Balanced growth
 - ✅ Not as aggressive as exponential
 - ❌ More complex
@@ -518,15 +532,10 @@ describe('Retry Logic', () => {
   });
 
   it('should retry on retryable error', () => {
-    const decision = shouldRetryJob(
-      1,
-      'TimeoutError',
-      new Date(),
-      {
-        maxAttempts: 3,
-        retryableErrors: ['TimeoutError'],
-      }
-    );
+    const decision = shouldRetryJob(1, 'TimeoutError', new Date(), {
+      maxAttempts: 3,
+      retryableErrors: ['TimeoutError'],
+    });
 
     expect(decision.shouldRetry).toBe(true);
   });
