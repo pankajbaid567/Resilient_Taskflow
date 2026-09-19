@@ -1,5 +1,7 @@
 import {
   cleanupExpiredIdempotencyKeys,
+  findActiveUserByApiKey,
+  getJobCounts,
   getQueueByName,
   getWorkerById,
 } from '@taskflow/database';
@@ -8,6 +10,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@taskflow/database', () => ({
   cleanupExpiredIdempotencyKeys: vi.fn().mockResolvedValue(0),
+  findActiveUserByApiKey: vi.fn(),
+  findActiveUserById: vi.fn(),
   countActiveWorkersForQueue: vi.fn(),
   cancelJob: vi.fn(),
   createJob: vi.fn(),
@@ -22,7 +26,16 @@ vi.mock('@taskflow/database', () => ({
   getWorkerById: vi.fn(),
   listQueues: vi.fn(),
   listWorkers: vi.fn(),
+  requestWorkerStop: vi.fn(),
+  setQueueActive: vi.fn(),
   testConnection: vi.fn(),
+}));
+
+vi.mock('@taskflow/queue', () => ({
+  createRedisClient: vi.fn(() => ({
+    eval: vi.fn().mockResolvedValue([1, 1, Date.now(), Date.now()]),
+  })),
+  testRedisConnection: vi.fn().mockResolvedValue(true),
 }));
 
 import {
@@ -42,6 +55,62 @@ afterEach(async () => {
 });
 
 describe('API route infrastructure policy', () => {
+  it('keeps probe payloads minimal and admin-gates operational metrics', async () => {
+    vi.mocked(findActiveUserByApiKey).mockImplementation((apiKey) => {
+      if (apiKey === 'admin-key') {
+        return Promise.resolve({
+          id: '00000000-0000-4000-8000-000000000001',
+          email: 'operator@example.com',
+          role: 'admin',
+        });
+      }
+      if (apiKey === 'user-key') {
+        return Promise.resolve({
+          id: '00000000-0000-4000-8000-000000000002',
+          email: 'user@example.com',
+          role: 'user',
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    vi.mocked(getJobCounts).mockResolvedValue({
+      CREATED: 0,
+      QUEUED: 0,
+      PROCESSING: 0,
+      SUCCEEDED: 0,
+      FAILED: 0,
+      RETRY_SCHEDULED: 0,
+      DEAD_LETTERED: 0,
+      CANCEL_REQUESTED: 0,
+      CANCELLED: 0,
+    });
+    const app = await createApp({ enableSwagger: false });
+    openApps.push(app);
+
+    const live = await app.inject({ method: 'GET', url: '/health/live' });
+    const anonymousMetrics = await app.inject({
+      method: 'GET',
+      url: '/metrics',
+    });
+    const userMetrics = await app.inject({
+      method: 'GET',
+      url: '/metrics',
+      headers: { 'x-api-key': 'user-key' },
+    });
+    const adminMetrics = await app.inject({
+      method: 'GET',
+      url: '/metrics',
+      headers: { 'x-api-key': 'admin-key' },
+    });
+
+    expect(live.statusCode).toBe(200);
+    expect(live.json()).toEqual({ status: 'alive' });
+    expect(anonymousMetrics.statusCode).toBe(401);
+    expect(userMetrics.statusCode).toBe(403);
+    expect(adminMetrics.statusCode).toBe(200);
+    expect(adminMetrics.headers['content-type']).toContain('text/plain');
+  });
+
   it('scopes submission/idempotency, read, and mutation policy by method and path', () => {
     expect(getJobRequestPolicy({ method: 'POST', url: '/api/v1/jobs' })).toBe(
       'job-submission'
@@ -106,10 +175,10 @@ describe('API route infrastructure policy', () => {
     expect(userResponses.map(({ statusCode }) => statusCode)).toEqual([
       403, 403, 403,
     ]);
-    // The operation is deliberately still unimplemented; 501 proves the
-    // authorized request passed the role boundary and reached its handler.
+    // Authorized requests reach the persistence boundary; these mocks return
+    // no record, so the resource handlers report not found.
     expect(adminResponses.map(({ statusCode }) => statusCode)).toEqual([
-      501, 501, 501,
+      404, 404, 404,
     ]);
   });
 

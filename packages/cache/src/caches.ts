@@ -285,7 +285,7 @@ export class CacheFactory {
   /**
    * Create a custom cache
    */
-  createCustomCache<T>(
+  createCustomCache<T extends object>(
     namespace: string,
     options: {
       l1MaxSize?: number;

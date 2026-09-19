@@ -1,4 +1,9 @@
-import { getWorkerById, listWorkers, type Worker } from '@taskflow/database';
+import {
+  getWorkerById,
+  listWorkers,
+  requestWorkerStop,
+  type Worker,
+} from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
 import { WorkerStatus } from '@taskflow/types';
 import { FastifyInstance, FastifyReply } from 'fastify';
@@ -62,7 +67,7 @@ function sendMissingWorker(reply: FastifyReply, id: string): FastifyReply {
   });
 }
 
-/** PostgreSQL-backed worker reads and explicitly unimplemented controls. */
+/** PostgreSQL-backed worker reads and durable cooperative stop control. */
 export function workerRoutes(app: FastifyInstance): Promise<void> {
   app.get<{
     Querystring: {
@@ -117,16 +122,23 @@ export function workerRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAdmin },
     async (request, reply) => {
       const { id } = workerIdParamsSchema.parse(request.params);
-      if (!(await getWorkerById(id))) return sendMissingWorker(reply, id);
+      const worker = await requestWorkerStop(id);
+      if (!worker) return sendMissingWorker(reply, id);
+      if (
+        worker.status !== WorkerStatus.STOPPING &&
+        worker.status !== WorkerStatus.ACTIVE &&
+        worker.status !== WorkerStatus.STARTING
+      ) {
+        return reply.status(409).send({
+          error: 'Conflict',
+          message: `Worker ${id} cannot be stopped from ${worker.status}`,
+          statusCode: 409,
+          timestamp: new Date().toISOString(),
+        });
+      }
 
       logger.info('Worker stop requested', { workerId: id });
-      return reply.status(501).send({
-        error: 'Not Implemented',
-        message:
-          'Worker stop is unavailable because control signaling is not implemented',
-        statusCode: 501,
-        timestamp: new Date().toISOString(),
-      });
+      return reply.status(202).send(serializeWorker(worker));
     }
   );
 

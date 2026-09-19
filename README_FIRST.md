@@ -1,3 +1,5 @@
+> Historical snapshot only. Claims and numbers below are not current acceptance evidence; use the root README and executable gates.
+
 # 🎯 START HERE - TaskFlow Is Ready!
 
 ## What I've Built For You
@@ -8,7 +10,7 @@ A **complete, production-grade distributed task queue system** with:
 ✅ **Worker Implemented** - Full job processing with lease management  
 ✅ **Fault Tolerant** - Stale recovery, retry logic, graceful shutdown  
 ✅ **Demo Ready** - End-to-end script to prove it works  
-✅ **Well Documented** - Multiple guides for different needs  
+✅ **Well Documented** - Multiple guides for different needs
 
 ## 📁 Important Files (Read These)
 
@@ -25,6 +27,7 @@ I can't run these automatically (they need separate terminals), but you can!
 ### Copy & Paste Into Your Terminal:
 
 **Terminal 1 - Infrastructure:**
+
 ```bash
 cd /Users/pankajbaid/projects/Resilient_TaskFlow
 docker run -d --name taskflow-postgres -p 5432:5432 \
@@ -35,16 +38,19 @@ sleep 5 && pnpm db:migrate
 ```
 
 **Terminal 2 - API:**
+
 ```bash
 cd /Users/pankajbaid/projects/Resilient_TaskFlow && pnpm dev:api
 ```
 
 **Terminal 3 - Worker:**
+
 ```bash
 cd /Users/pankajbaid/projects/Resilient_TaskFlow && pnpm dev:worker
 ```
 
 **Terminal 4 - Dashboard UI:** ⭐ NEW!
+
 ```bash
 cd /Users/pankajbaid/projects/Resilient_TaskFlow && pnpm dev:dashboard
 ```
@@ -52,6 +58,7 @@ cd /Users/pankajbaid/projects/Resilient_TaskFlow && pnpm dev:dashboard
 Then open: **http://localhost:5173** (React Dashboard with real-time monitoring!)
 
 **Terminal 5 - Demo:**
+
 ```bash
 cd /Users/pankajbaid/projects/Resilient_TaskFlow && pnpm demo
 ```
@@ -61,39 +68,43 @@ cd /Users/pankajbaid/projects/Resilient_TaskFlow && pnpm demo
 ```
 Terminal 4 (Demo)                    Terminal 2 (API)                     Terminal 3 (Worker)
 ─────────────────                    ────────────────                     ───────────────────
-                                                                          
-POST /api/v1/jobs                                                         
+
+POST /api/v1/jobs
   type: send-email         ──────►   Validate request
-  priority: HIGH                     Save to PostgreSQL                   
+  priority: HIGH                     Save to PostgreSQL
                                      Add to Redis Stream      ──────►     XREADGROUP
                                      Return job ID                         Acquire lease
                                                                           Process job
 GET /api/v1/jobs/{id}      ──────►   Query PostgreSQL        ◄──────     Update status
                                      Return status                         XACK message
-                                                                          
-✓ Job succeeded!                     
-                                     
+
+✓ Job succeeded!
+
 ```
 
 ## ✨ What Makes This Special
 
 ### 1. Race Condition Prevention
+
 - PostgreSQL optimistic locking with `version` field
 - Multiple workers can run without conflicts
 - Exactly-once processing guarantee
 
 ### 2. Fault Tolerance
+
 - **Stale Recovery**: Reclaims jobs from crashed workers
 - **Retry Logic**: Exponential backoff for failed jobs
 - **Graceful Shutdown**: No job loss during deployment
 
 ### 3. Production Ready
+
 - JWT authentication (secure by default)
 - Structured logging (JSON format)
 - Health checks and metrics
 - Error classification (permanent vs retryable)
 
 ### 4. Observable
+
 - Every step logs what it's doing
 - Watch jobs flow through the system in real-time
 - Clear error messages
@@ -123,11 +134,13 @@ Production Ready: NO (needs tests) ❌
 After running the 4 commands, you should see:
 
 ### Terminal 1 (Infrastructure)
+
 ```
 ✓ Migrations applied successfully
 ```
 
 ### Terminal 2 (API)
+
 ```
 ✓ Database connected
 ✓ Redis connected
@@ -135,6 +148,7 @@ After running the 4 commands, you should see:
 ```
 
 ### Terminal 3 (Worker)
+
 ```
 ✓ Database connected
 ✓ Redis connected
@@ -144,6 +158,7 @@ After running the 4 commands, you should see:
 ```
 
 ### Terminal 4 (Demo)
+
 ```
 ╔════════════════════════════════════════════╗
 ║       TaskFlow End-to-End Demo            ║
@@ -215,6 +230,7 @@ After the demo works:
 ## 💡 Why I Can't Run It For You
 
 The Kiro IDE prevents me from starting:
+
 - Long-running Docker containers
 - Background server processes (API, Worker)
 
@@ -231,6 +247,6 @@ The system is **fully implemented** and **waiting for you** to see it in action!
 **Files Created**: 20+  
 **Lines of Code**: 2,500+  
 **Time Invested**: 2+ hours  
-**Your Time to Demo**: 2 minutes  
+**Your Time to Demo**: 2 minutes
 
 **Let's see it work!** 🎉

@@ -368,7 +368,7 @@ export class RedisAnalyzer {
    * Log the report
    */
   logReport(): void {
-    console.log(this.generateReport());
+    logger.info(this.generateReport());
   }
 
   /**

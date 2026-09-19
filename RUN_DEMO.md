@@ -1,9 +1,12 @@
+> Historical snapshot only. Claims and numbers below are not current acceptance evidence; use the root README and executable gates.
+
 # Run TaskFlow Demo - Step by Step
 
 ## Current Status
+
 ✅ Docker Desktop is running  
 ✅ All code is implemented  
-✅ Dependencies are installed  
+✅ Dependencies are installed
 
 ## Run These Commands
 
@@ -17,6 +20,7 @@ cd /Users/pankajbaid/projects/Resilient_TaskFlow
 ```
 
 This will:
+
 1. Check Docker is running
 2. Start all infrastructure (PostgreSQL, Redis, Redpanda, Prometheus, Grafana)
 3. Run database migrations
@@ -27,6 +31,7 @@ This will:
 If the automated script has issues, run these commands:
 
 #### Terminal 1 - Start Infrastructure
+
 ```bash
 cd /Users/pankajbaid/projects/Resilient_TaskFlow
 
@@ -44,12 +49,14 @@ pnpm db:migrate
 ```
 
 #### Terminal 2 - Start API Server
+
 ```bash
 cd /Users/pankajbaid/projects/Resilient_TaskFlow
 pnpm dev:api
 ```
 
 You should see:
+
 ```
 ✓ Database connected
 ✓ Redis connected
@@ -57,12 +64,14 @@ You should see:
 ```
 
 #### Terminal 3 - Start Worker
+
 ```bash
 cd /Users/pankajbaid/projects/Resilient_TaskFlow
 pnpm dev:worker
 ```
 
 You should see:
+
 ```
 ✓ Database connected
 ✓ Redis connected
@@ -72,12 +81,14 @@ You should see:
 ```
 
 #### Terminal 4 - Run Demo
+
 ```bash
 cd /Users/pankajbaid/projects/Resilient_TaskFlow
 pnpm demo
 ```
 
 Expected output:
+
 ```
 ╔════════════════════════════════════════════════════════════════╗
 ║             TaskFlow End-to-End Demo                          ║
@@ -96,7 +107,7 @@ Expected output:
 
 3. Waiting for jobs to be processed by workers...
    ✓ Job abc-123 succeeded
-   
+
 Demo completed successfully! 🎉
 ```
 
@@ -133,6 +144,7 @@ curl http://localhost:3000/health
 ## Troubleshooting
 
 ### "Cannot connect to Docker daemon"
+
 ```bash
 # Start Docker Desktop
 open -a Docker
@@ -141,6 +153,7 @@ open -a Docker
 ```
 
 ### "Port already in use"
+
 ```bash
 # Find what's using the port (example: 5432)
 lsof -i :5432
@@ -150,6 +163,7 @@ docker stop taskflow-postgres
 ```
 
 ### "Database connection failed"
+
 ```bash
 # Restart PostgreSQL
 docker restart taskflow-postgres
@@ -159,6 +173,7 @@ docker logs taskflow-postgres
 ```
 
 ### "Worker can't find handlers"
+
 ```bash
 # Reinstall dependencies
 cd /Users/pankajbaid/projects/Resilient_TaskFlow
@@ -170,6 +185,7 @@ pnpm build
 ```
 
 ### "Demo times out"
+
 ```bash
 # Check API is running (Terminal 2)
 curl http://localhost:3000/health
@@ -202,7 +218,7 @@ pnpm db:migrate
 ✅ All 5 Docker containers running  
 ✅ `pnpm dev:api` shows "API server listening"  
 ✅ `pnpm dev:worker` shows "Worker started successfully"  
-✅ `pnpm demo` completes with "Demo completed successfully! 🎉"  
+✅ `pnpm demo` completes with "Demo completed successfully! 🎉"
 
 ## What You're Demonstrating
 

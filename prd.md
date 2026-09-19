@@ -1,3 +1,5 @@
+> Historical planning input only. It is not current implementation status or acceptance evidence.
+
 🚀 PRD — Resilient TaskFlow
 Distributed Task Queue & Event-Driven Job Processing Platform
 
@@ -50,30 +52,30 @@ Current Indian backend hiring signals support this direction: Node.js/TypeScript
 Your hiring intelligence documents also explicitly identify working rate limiters, distributed caches and message queues as underrated SDE projects.
 
 3. Recommended Tech Stack
-🥇 My exact recommendation for you
-Layer	Technology	Why
-Language	TypeScript	You already know it
-Runtime	Node.js 22+	Strong Indian backend relevance
-HTTP	Express.js	You already know it + broad hiring recognition
-Database	PostgreSQL	Essential backend/SDE skill
-DB driver	pg	Gives you SQL/control for distributed systems
-Queue	Redis Streams	Core queue implementation
-Event bus	Kafka / Redpanda	Event-driven architecture
-Cache	Redis	You already know it
-ORM	Drizzle ORM	Lightweight; lets you retain SQL control
-Validation	Zod	Type-safe API validation
-Testing	Vitest/Jest + Supertest	Backend testing
-Load testing	k6	Performance benchmarking
-Containers	Docker + Docker Compose	Production deployment
-CI/CD	GitHub Actions	Industry-standard workflow
-Metrics	Prometheus	Production observability
-Dashboard	Grafana	Metrics visualization
-Logging	Pino	Fast structured logging
-Tracing	OpenTelemetry	Distributed tracing
-Cloud	AWS	Strong India hiring signal
-Deployment	AWS ECS/Fargate	Better than simply deploying to EC2
-Reverse proxy	Nginx / AWS ALB	Load balancing
-Documentation	OpenAPI/Swagger	API quality
+   🥇 My exact recommendation for you
+   Layer Technology Why
+   Language TypeScript You already know it
+   Runtime Node.js 22+ Strong Indian backend relevance
+   HTTP Express.js You already know it + broad hiring recognition
+   Database PostgreSQL Essential backend/SDE skill
+   DB driver pg Gives you SQL/control for distributed systems
+   Queue Redis Streams Core queue implementation
+   Event bus Kafka / Redpanda Event-driven architecture
+   Cache Redis You already know it
+   ORM Drizzle ORM Lightweight; lets you retain SQL control
+   Validation Zod Type-safe API validation
+   Testing Vitest/Jest + Supertest Backend testing
+   Load testing k6 Performance benchmarking
+   Containers Docker + Docker Compose Production deployment
+   CI/CD GitHub Actions Industry-standard workflow
+   Metrics Prometheus Production observability
+   Dashboard Grafana Metrics visualization
+   Logging Pino Fast structured logging
+   Tracing OpenTelemetry Distributed tracing
+   Cloud AWS Strong India hiring signal
+   Deployment AWS ECS/Fargate Better than simply deploying to EC2
+   Reverse proxy Nginx / AWS ALB Load balancing
+   Documentation OpenAPI/Swagger API quality
 
 Current Indian hiring data also shows PostgreSQL, Redis, Docker, Kubernetes, AWS, Node.js and CI/CD among frequently requested technologies, while backend listings emphasize Node/TypeScript/Postgres/Redis and Kafka.
 
@@ -119,11 +121,11 @@ Rewrite the worker engine in Go.
 Then your GitHub can demonstrate:
 
 TypeScript API
-       ↓
+↓
 Redis/Kafka
-       ↓
+↓
 Go Worker Pool
-       ↓
+↓
 PostgreSQL
 
 That becomes an extremely interesting systems project.
@@ -139,75 +141,73 @@ POST /api/v1/jobs
 Request:
 
 {
-  "type": "send_email",
-  "payload": {
-    "to": "user@example.com",
-    "template": "welcome"
-  },
-  "priority": 5
+"type": "send_email",
+"payload": {
+"to": "user@example.com",
+"template": "welcome"
+},
+"priority": 5
 }
 
 Response:
 
 {
-  "jobId": "job_8f92...",
-  "status": "queued"
+"jobId": "job_8f92...",
+"status": "queued"
 }
 
 Then:
 
 API
- ↓
+↓
 Redis Stream
- ↓
+↓
 Worker
- ↓
+↓
 Execute Job
- ↓
+↓
 PostgreSQL
- ↓
+↓
 Event
- ↓
-Kafka
-6. System Architecture
-                    ┌──────────────────┐
-                    │      Client      │
-                    └────────┬─────────┘
-                             │
-                             ▼
-                    ┌──────────────────┐
-                    │    Load Balancer │
-                    └────────┬─────────┘
-                             │
-                             ▼
-                    ┌──────────────────┐
-                    │    API Server    │
-                    │ Node + TypeScript│
-                    └────────┬─────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              │              │              │
-              ▼              ▼              ▼
-        PostgreSQL         Redis          Kafka
-              │              │              │
-              │              ▼              │
-              │        Task Queue           │
-              │              │              │
-              │              ▼              │
-              │      ┌──────────────┐       │
-              │      │ Worker Pool  │       │
-              │      │              │       │
-              │      │ Worker 1     │       │
-              │      │ Worker 2     │       │
-              │      │ Worker 3     │       │
-              │      │ Worker N     │       │
-              │      └──────┬───────┘       │
-              │             │               │
-              └─────────────┴───────────────┘
-                            │
-                            ▼
-                     Job Result Store
-7. Core Components
+↓
+Kafka 6. System Architecture
+┌──────────────────┐
+│ Client │
+└────────┬─────────┘
+│
+▼
+┌──────────────────┐
+│ Load Balancer │
+└────────┬─────────┘
+│
+▼
+┌──────────────────┐
+│ API Server │
+│ Node + TypeScript│
+└────────┬─────────┘
+│
+┌──────────────┼──────────────┐
+│ │ │
+▼ ▼ ▼
+PostgreSQL Redis Kafka
+│ │ │
+│ ▼ │
+│ Task Queue │
+│ │ │
+│ ▼ │
+│ ┌──────────────┐ │
+│ │ Worker Pool │ │
+│ │ │ │
+│ │ Worker 1 │ │
+│ │ Worker 2 │ │
+│ │ Worker 3 │ │
+│ │ Worker N │ │
+│ └──────┬───────┘ │
+│ │ │
+└─────────────┴───────────────┘
+│
+▼
+Job Result Store 7. Core Components
 7.1 API Service
 
 Responsible for:
@@ -223,23 +223,19 @@ API rate limiting
 
 Endpoints:
 
-POST   /api/v1/jobs
-GET    /api/v1/jobs/:id
+POST /api/v1/jobs
+GET /api/v1/jobs/:id
 DELETE /api/v1/jobs/:id
 
+POST /api/v1/jobs/:id/retry
+POST /api/v1/jobs/:id/cancel
 
-POST   /api/v1/jobs/:id/retry
-POST   /api/v1/jobs/:id/cancel
+GET /api/v1/queues
+GET /api/v1/queues/:name/stats
 
-
-GET    /api/v1/queues
-GET    /api/v1/queues/:name/stats
-
-
-GET    /api/v1/workers
-GET    /api/v1/health
-GET    /api/v1/metrics
-8. Job Model
+GET /api/v1/workers
+GET /api/v1/health
+GET /api/v1/metrics 8. Job Model
 
 Each job should contain:
 
@@ -262,21 +258,20 @@ error
 result
 Status lifecycle
 CREATED
-   ↓
+↓
 QUEUED
-   ↓
+↓
 PROCESSING
-   ↓
- ┌─┴──────────┐
- ↓            ↓
-SUCCESS      FAILED
-              ↓
-           RETRY?
-          /      \
-        YES       NO
-         ↓         ↓
-      QUEUED    DEAD_LETTER
-9. Priority Queue
+↓
+┌─┴──────────┐
+↓ ↓
+SUCCESS FAILED
+↓
+RETRY?
+/ \
+YES NO
+↓ ↓
+QUEUED DEAD_LETTER 9. Priority Queue
 
 Support:
 
@@ -288,9 +283,9 @@ LOW
 Example:
 
 Priority 10 → Payment
-Priority 7  → Email
-Priority 5  → Data processing
-Priority 1  → Analytics
+Priority 7 → Email
+Priority 5 → Data processing
+Priority 1 → Analytics
 
 Workers should preferentially process high-priority tasks.
 
@@ -301,21 +296,21 @@ This is one of the most important features.
 If a job fails:
 
 Attempt 1
-   ↓
+↓
 Failure
-   ↓
+↓
 Wait 1 sec
-   ↓
+↓
 Attempt 2
-   ↓
+↓
 Failure
-   ↓
+↓
 Wait 2 sec
-   ↓
+↓
 Attempt 3
-   ↓
+↓
 Failure
-   ↓
+↓
 Dead Letter Queue
 
 Use:
@@ -382,10 +377,10 @@ with PostgreSQL/Redis enforcement.
 Workers should be independent processes.
 
 Worker Manager
-      │
- ┌────┼────┬────┐
- ↓    ↓    ↓    ↓
- W1   W2   W3   W4
+│
+┌────┼────┬────┐
+↓ ↓ ↓ ↓
+W1 W2 W3 W4
 
 Each worker:
 
@@ -394,8 +389,7 @@ acquires processing ownership
 executes job
 records result
 acknowledges job
-emits event
-14. Worker Heartbeat
+emits event 14. Worker Heartbeat
 
 Workers periodically send:
 
@@ -424,12 +418,12 @@ Its unfinished job should become eligible for recovery.
 Use a lease mechanism:
 
 job
- ↓
+↓
 worker acquires lease
- ↓
+↓
 lease expires?
- ├── NO → continue
- └── YES → recover
+├── NO → continue
+└── YES → recover
 
 Example:
 
@@ -448,11 +442,11 @@ concurrency = 10
 Meaning:
 
 Worker 1
- ├── Job 1
- ├── Job 2
- ├── Job 3
- ...
- └── Job 10
+├── Job 1
+├── Job 2
+├── Job 3
+...
+└── Job 10
 
 But don't simply create unlimited promises.
 
@@ -482,24 +476,22 @@ Return:
 
 with:
 
-Retry-After
-18. Scheduling
+Retry-After 18. Scheduling
 
 Support delayed jobs.
 
 Example:
 
 {
-  "type": "send_reminder",
-  "scheduledAt": "2026-08-24T10:00:00Z"
+"type": "send_reminder",
+"scheduledAt": "2026-08-24T10:00:00Z"
 }
 
 Worker should process only when the scheduled time arrives.
 
 Also support:
 
-delay: 10 seconds
-19. Job Cancellation
+delay: 10 seconds 19. Job Cancellation
 
 Users should be able to:
 
@@ -536,11 +528,11 @@ Job Dead Lettered
 Kafka event:
 
 {
-  "event": "job.completed",
-  "jobId": "job_123",
-  "workerId": "worker_4",
-  "durationMs": 843,
-  "timestamp": "..."
+"event": "job.completed",
+"jobId": "job_123",
+"workerId": "worker_4",
+"durationMs": 843,
+"timestamp": "..."
 }
 
 This gives you event-driven architecture without making the core queue unnecessarily complicated.
@@ -618,51 +610,49 @@ Prometheus:
 Grafana dashboard:
 
 ┌─────────────────────────────┐
-│ Jobs / sec                  │
+│ Jobs / sec │
 ├─────────────────────────────┤
-│ Queue Depth                 │
+│ Queue Depth │
 ├─────────────────────────────┤
-│ Success Rate                │
+│ Success Rate │
 ├─────────────────────────────┤
-│ Failure Rate                │
+│ Failure Rate │
 ├─────────────────────────────┤
-│ P50/P95/P99 Latency         │
+│ P50/P95/P99 Latency │
 ├─────────────────────────────┤
-│ Active Workers              │
-└─────────────────────────────┘
-24. Logging
+│ Active Workers │
+└─────────────────────────────┘ 24. Logging
 
 Use structured JSON logs.
 
 Example:
 
 {
-  "level": "info",
-  "event": "job.completed",
-  "jobId": "job_123",
-  "workerId": "worker_4",
-  "duration": 842
+"level": "info",
+"event": "job.completed",
+"jobId": "job_123",
+"workerId": "worker_4",
+"duration": 842
 }
 
 Never rely on:
 
-console.log("job done")
-25. Distributed Tracing
+console.log("job done") 25. Distributed Tracing
 
 Add OpenTelemetry.
 
 Trace:
 
 API Request
-   ↓
+↓
 Create Job
-   ↓
+↓
 Redis
-   ↓
+↓
 Worker
-   ↓
+↓
 Postgres
-   ↓
+↓
 Kafka
 
 This lets you show recruiters:
@@ -683,8 +673,7 @@ CORS
 security headers
 secret management
 SQL injection protection
-audit logs
-27. Docker Architecture
+audit logs 27. Docker Architecture
 
 Your docker-compose.yml should run:
 
@@ -706,7 +695,7 @@ docker compose up
 should start the entire system.
 
 28. Testing Strategy
-Unit tests
+    Unit tests
 
 Test:
 
@@ -771,13 +760,13 @@ Your README should eventually contain something like:
 
 Benchmark
 
-
-Workers       Jobs/sec       P95 latency
+Workers Jobs/sec P95 latency
 -----------------------------------------
-1             XXX            XX ms
-3             XXX            XX ms
-5             XXX            XX ms
-10            XXX            XX ms
+
+1 XXX XX ms
+3 XXX XX ms
+5 XXX XX ms
+10 XXX XX ms
 
 This is much stronger than:
 
@@ -818,72 +807,68 @@ Metrics
 For example:
 
 ACTIVE WORKERS
-     12
-
+12
 
 QUEUED JOBS
-    1,284
-
+1,284
 
 PROCESSING
-      73
-
+73
 
 SUCCESS RATE
-    98.7%
-
+98.7%
 
 P95 LATENCY
-    412ms
+412ms
 
 Don't spend weeks on the frontend.
 
 The backend is the product.
 
 33. Suggested Repository
-resilient-taskflow/
-│
-├── apps/
-│   ├── api/
-│   ├── worker/
-│   └── dashboard/
-│
-├── packages/
-│   ├── config/
-│   ├── types/
-│   ├── queue/
-│   ├── database/
-│   ├── logger/
-│   └── observability/
-│
-├── infrastructure/
-│   ├── docker/
-│   ├── prometheus/
-│   ├── grafana/
-│   └── kafka/
-│
-├── tests/
-│   ├── unit/
-│   ├── integration/
-│   ├── load/
-│   └── chaos/
-│
-├── docs/
-│   ├── architecture.md
-│   ├── api.md
-│   ├── failure-model.md
-│   └── benchmarks.md
-│
-├── docker-compose.yml
-├── Dockerfile
-├── package.json
-├── turbo.json
-└── README.md
+    resilient-taskflow/
+    │
+    ├── apps/
+    │ ├── api/
+    │ ├── worker/
+    │ └── dashboard/
+    │
+    ├── packages/
+    │ ├── config/
+    │ ├── types/
+    │ ├── queue/
+    │ ├── database/
+    │ ├── logger/
+    │ └── observability/
+    │
+    ├── infrastructure/
+    │ ├── docker/
+    │ ├── prometheus/
+    │ ├── grafana/
+    │ └── kafka/
+    │
+    ├── tests/
+    │ ├── unit/
+    │ ├── integration/
+    │ ├── load/
+    │ └── chaos/
+    │
+    ├── docs/
+    │ ├── architecture.md
+    │ ├── api.md
+    │ ├── failure-model.md
+    │ └── benchmarks.md
+    │
+    ├── docker-compose.yml
+    ├── Dockerfile
+    ├── package.json
+    ├── turbo.json
+    └── README.md
 
 Use a monorepo with pnpm + Turborepo if you're comfortable with it.
 
 34. Development Phases
-Phase 1 — Foundation
+    Phase 1 — Foundation
 
 2–3 days
 
@@ -973,13 +958,13 @@ Phase 8 — Cloud
 Deploy:
 
 AWS
- ↓
+↓
 ALB
- ↓
+↓
 API
- ↓
+↓
 Workers
- ↓
+↓
 Redis
 Postgres
 Kafka
@@ -1016,17 +1001,17 @@ using BullMQ and call it a distributed queue.
 Instead:
 
 Redis Streams
-     ↓
+↓
 Consumer Groups
-     ↓
+↓
 Worker
-     ↓
+↓
 Acknowledgement
-     ↓
+↓
 Retry
-     ↓
+↓
 DLQ
-     ↓
+↓
 Recovery
 
 Then, after your implementation works, create a benchmark:
@@ -1063,46 +1048,46 @@ The numbers must come from your actual benchmark.
 Your hiring reports specifically recommend quantified project outcomes and working GitHub repositories rather than vague project descriptions.
 
 38. Final Tech Stack I Want YOU to Use
-Core
-TypeScript
-Node.js
-Express
-PostgreSQL
-Redis
-Distributed Systems
-Redis Streams
-Kafka
-Redpanda
-Distributed Locks
-Consumer Groups
-Worker Pools
-Backend
-REST
-Zod
-Drizzle
-JWT
-OpenAPI
-Testing
-Vitest
-Supertest
-k6
-DevOps
-Docker
-Docker Compose
-GitHub Actions
-AWS ECS/Fargate
-AWS ALB
-Observability
-Pino
-Prometheus
-Grafana
-OpenTelemetry
-Optional V2
-Go
-Kubernetes
-Terraform
-gRPC
-⭐ My recommendation for your career strategy
+    Core
+    TypeScript
+    Node.js
+    Express
+    PostgreSQL
+    Redis
+    Distributed Systems
+    Redis Streams
+    Kafka
+    Redpanda
+    Distributed Locks
+    Consumer Groups
+    Worker Pools
+    Backend
+    REST
+    Zod
+    Drizzle
+    JWT
+    OpenAPI
+    Testing
+    Vitest
+    Supertest
+    k6
+    DevOps
+    Docker
+    Docker Compose
+    GitHub Actions
+    AWS ECS/Fargate
+    AWS ALB
+    Observability
+    Pino
+    Prometheus
+    Grafana
+    OpenTelemetry
+    Optional V2
+    Go
+    Kubernetes
+    Terraform
+    gRPC
+    ⭐ My recommendation for your career strategy
 
 Don't learn Java + Spring Boot + Go + Node simultaneously just to make this project.
 
@@ -1113,25 +1098,25 @@ Exploit that advantage.
 Your progression should be:
 
 MERN knowledge
-      ↓
+↓
 Node + TypeScript backend
-      ↓
+↓
 PostgreSQL
-      ↓
+↓
 Redis
-      ↓
+↓
 Redis Streams
-      ↓
+↓
 Kafka
-      ↓
+↓
 Distributed systems
-      ↓
+↓
 Docker
-      ↓
+↓
 AWS
-      ↓
+↓
 Observability
-      ↓
+↓
 System Design
 
 That converts your current skillset into a serious backend/SDE profile.

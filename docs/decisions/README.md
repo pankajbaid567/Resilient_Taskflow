@@ -7,6 +7,7 @@ This directory contains Architecture Decision Records documenting significant ar
 ## Format
 
 Each ADR follows this structure:
+
 - **Status**: Proposed, Accepted, Deprecated, Superseded
 - **Context**: What is the issue we're seeing that is motivating this decision?
 - **Decision**: What is the change that we're proposing?

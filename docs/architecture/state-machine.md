@@ -67,49 +67,49 @@ DEAD_LETTERED    - Job exhausted all retries
 
 ### From CREATED
 
-| To State | Condition | Action |
-|----------|-----------|--------|
-| QUEUED | Job enqueued to Redis | Update status, record event |
+| To State  | Condition                 | Action                      |
+| --------- | ------------------------- | --------------------------- |
+| QUEUED    | Job enqueued to Redis     | Update status, record event |
 | CANCELLED | User cancels before queue | Update status, record event |
 
 ### From QUEUED
 
-| To State | Condition | Action |
-|----------|-----------|--------|
-| PROCESSING | Worker acquires lease | Update status, set worker_id, lease_id, started_at |
-| CANCELLED | User cancels queued job | Update status, remove from Redis, record event |
+| To State   | Condition               | Action                                             |
+| ---------- | ----------------------- | -------------------------------------------------- |
+| PROCESSING | Worker acquires lease   | Update status, set worker_id, lease_id, started_at |
+| CANCELLED  | User cancels queued job | Update status, remove from Redis, record event     |
 
 ### From PROCESSING
 
-| To State | Condition | Action |
-|----------|-----------|--------|
-| SUCCEEDED | Handler completes successfully | Update status, set completed_at, result |
-| FAILED | Handler throws error, attempts < max_attempts | Update status, set failed_at, error |
-| RETRY_SCHEDULED | Handler throws retriable error, attempts < max_attempts | Update status, calculate next retry time |
-| DEAD_LETTERED | Handler throws error, attempts >= max_attempts | Update status, move to DLQ |
-| CANCEL_REQUESTED | User requests cancellation | Update status, set cancellation flag |
+| To State         | Condition                                               | Action                                   |
+| ---------------- | ------------------------------------------------------- | ---------------------------------------- |
+| SUCCEEDED        | Handler completes successfully                          | Update status, set completed_at, result  |
+| FAILED           | Handler throws error, attempts < max_attempts           | Update status, set failed_at, error      |
+| RETRY_SCHEDULED  | Handler throws retriable error, attempts < max_attempts | Update status, calculate next retry time |
+| DEAD_LETTERED    | Handler throws error, attempts >= max_attempts          | Update status, move to DLQ               |
+| CANCEL_REQUESTED | User requests cancellation                              | Update status, set cancellation flag     |
 
 ### From FAILED
 
-| To State | Condition | Action |
-|----------|-----------|--------|
+| To State        | Condition                               | Action                           |
+| --------------- | --------------------------------------- | -------------------------------- |
 | RETRY_SCHEDULED | Retry logic determines job should retry | Update status, calculate backoff |
-| DEAD_LETTERED | Max attempts reached | Update status, move to DLQ |
+| DEAD_LETTERED   | Max attempts reached                    | Update status, move to DLQ       |
 
 ### From RETRY_SCHEDULED
 
-| To State | Condition | Action |
-|----------|-----------|--------|
-| QUEUED | Scheduled time reached | Update status, re-enqueue to Redis |
-| CANCELLED | User cancels before retry | Update status, record event |
+| To State  | Condition                 | Action                             |
+| --------- | ------------------------- | ---------------------------------- |
+| QUEUED    | Scheduled time reached    | Update status, re-enqueue to Redis |
+| CANCELLED | User cancels before retry | Update status, record event        |
 
 ### From CANCEL_REQUESTED
 
-| To State | Condition | Action |
-|----------|-----------|--------|
-| CANCELLED | Worker detects cancellation and exits gracefully | Update status, set completed_at |
-| SUCCEEDED | Job completes before cancellation check | Update status (cancellation ignored) |
-| FAILED | Job fails before cancellation check | Update status, apply retry logic |
+| To State  | Condition                                        | Action                               |
+| --------- | ------------------------------------------------ | ------------------------------------ |
+| CANCELLED | Worker detects cancellation and exits gracefully | Update status, set completed_at      |
+| SUCCEEDED | Job completes before cancellation check          | Update status (cancellation ignored) |
+| FAILED    | Job fails before cancellation check              | Update status, apply retry logic     |
 
 ### From SUCCEEDED
 
@@ -121,9 +121,9 @@ DEAD_LETTERED    - Job exhausted all retries
 
 ### From DEAD_LETTERED
 
-| To State | Condition | Action |
-|----------|-----------|--------|
-| None | Manual requeue creates **new job** | Insert new job record, reference original |
+| To State | Condition                          | Action                                    |
+| -------- | ---------------------------------- | ----------------------------------------- |
+| None     | Manual requeue creates **new job** | Insert new job record, reference original |
 
 ## Invalid Transitions (Explicitly Rejected)
 
@@ -141,11 +141,11 @@ The following transitions should be rejected by the application:
 ### Application Layer
 
 ```typescript
-type JobStatus = 
-  | 'CREATED' 
-  | 'QUEUED' 
-  | 'PROCESSING' 
-  | 'SUCCEEDED' 
+type JobStatus =
+  | 'CREATED'
+  | 'QUEUED'
+  | 'PROCESSING'
+  | 'SUCCEEDED'
   | 'FAILED'
   | 'RETRY_SCHEDULED'
   | 'CANCEL_REQUESTED'
@@ -155,13 +155,19 @@ type JobStatus =
 const VALID_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
   CREATED: ['QUEUED', 'CANCELLED'],
   QUEUED: ['PROCESSING', 'CANCELLED'],
-  PROCESSING: ['SUCCEEDED', 'FAILED', 'RETRY_SCHEDULED', 'DEAD_LETTERED', 'CANCEL_REQUESTED'],
+  PROCESSING: [
+    'SUCCEEDED',
+    'FAILED',
+    'RETRY_SCHEDULED',
+    'DEAD_LETTERED',
+    'CANCEL_REQUESTED',
+  ],
   FAILED: ['RETRY_SCHEDULED', 'DEAD_LETTERED'],
   RETRY_SCHEDULED: ['QUEUED', 'CANCELLED'],
   CANCEL_REQUESTED: ['CANCELLED', 'SUCCEEDED', 'FAILED'],
   SUCCEEDED: [],
   CANCELLED: [],
-  DEAD_LETTERED: []
+  DEAD_LETTERED: [],
 };
 
 function isValidTransition(from: JobStatus, to: JobStatus): boolean {
@@ -183,7 +189,7 @@ function validateTransition(from: JobStatus, to: JobStatus): void {
 -- This can be added but may be overly restrictive during development
 -- Better to enforce in application layer with clear error messages
 
-CREATE OR REPLACE FUNCTION validate_job_status_transition() 
+CREATE OR REPLACE FUNCTION validate_job_status_transition()
 RETURNS TRIGGER AS $$
 BEGIN
   -- Only validate on UPDATE
@@ -200,7 +206,7 @@ BEGIN
       RAISE EXCEPTION 'Invalid status transition from % to %', OLD.status, NEW.status;
     END IF;
   END IF;
-  
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -218,6 +224,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 **Trigger:** API receives `POST /api/v1/jobs`
 
 **Steps:**
+
 1. Validate request (Zod schema)
 2. Check authentication
 3. Check idempotency key
@@ -231,6 +238,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 11. If Redis fails: Background sweeper will retry
 
 **Race Conditions:**
+
 - Duplicate idempotency key → Return existing job
 - Redis unavailable → Job stays CREATED, sweeper recovers
 
@@ -239,6 +247,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 **Trigger:** Worker calls XREADGROUP
 
 **Steps:**
+
 1. Worker receives job ID from Redis
 2. BEGIN TRANSACTION
 3. SELECT * FROM jobs WHERE id = ? FOR UPDATE
@@ -251,6 +260,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 10. Execute job handler
 
 **Race Conditions:**
+
 - Multiple workers try to acquire same job → FOR UPDATE lock ensures only one succeeds
 - Lease expires during processing → Another worker can reclaim
 - Worker crashes after UPDATE → Lease expiry enables recovery
@@ -260,6 +270,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 **Trigger:** Handler returns successfully
 
 **Steps:**
+
 1. BEGIN TRANSACTION
 2. UPDATE jobs SET status = 'SUCCEEDED', completed_at = NOW(), result = ?, lease_id = NULL
 3. INSERT INTO job_events (event_type = 'completed')
@@ -270,6 +281,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 8. Update worker metrics
 
 **Race Conditions:**
+
 - Lease expires before update → Optimistic lock (check worker_id, lease_id in WHERE clause)
 - Worker crashes before XACK → Redis message becomes pending, eventually reclaimed
 
@@ -278,6 +290,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 **Trigger:** Handler throws retriable error, attempts < max_attempts
 
 **Steps:**
+
 1. Classify error as retriable
 2. Calculate backoff: delay = baseDelay * (2 ^ attempts) + jitter
 3. Calculate next_scheduled_at = NOW() + delay
@@ -290,11 +303,13 @@ CREATE TRIGGER validate_job_status_transition_trigger
 10. Publish job.retried event to Kafka
 
 **Background Process:**
+
 - Scheduler finds RETRY_SCHEDULED jobs where scheduled_at <= NOW()
 - Transitions to QUEUED
 - Enqueues to Redis
 
 **Race Conditions:**
+
 - Multiple workers see expired lease → Optimistic locking prevents duplicate processing
 - Retry scheduled before lease expires → Lease check prevents
 
@@ -303,6 +318,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 **Trigger:** Handler throws error, attempts >= max_attempts
 
 **Steps:**
+
 1. BEGIN TRANSACTION
 2. UPDATE jobs SET status = 'DEAD_LETTERED', failed_at = NOW(), error = ?
 3. INSERT INTO dead_letter_jobs (snapshot of job)
@@ -314,6 +330,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 9. Alert monitoring systems
 
 **Race Conditions:**
+
 - None significant (terminal state)
 
 ### 6. Processing → Cancellation
@@ -321,6 +338,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 **Trigger:** User calls `DELETE /api/v1/jobs/:id` while job is processing
 
 **Steps:**
+
 1. API UPDATE jobs SET status = 'CANCEL_REQUESTED' WHERE id = ? AND status = 'PROCESSING'
 2. Worker periodically checks cancellation flag
 3. If cancelled, worker:
@@ -333,6 +351,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
    - XACK Redis message
 
 **Race Conditions:**
+
 - Job completes before cancellation check → Keep SUCCEEDED status (cancellation too late)
 - Job fails before cancellation check → Apply normal failure logic
 - Worker crashes before CANCELLED update → Lease expiry + another worker sees CANCEL_REQUESTED
@@ -342,6 +361,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 **Trigger:** User calls `DELETE /api/v1/jobs/:id` while job is queued
 
 **Steps:**
+
 1. BEGIN TRANSACTION
 2. UPDATE jobs SET status = 'CANCELLED' WHERE id = ? AND status = 'QUEUED'
 3. INSERT INTO job_events (event_type = 'cancelled')
@@ -349,6 +369,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 5. If job in Redis, mark as processed (or let it fail when worker tries to acquire)
 
 **Race Conditions:**
+
 - Worker acquires job between status check and cancellation → Worker sees status mismatch, drops job
 
 ## Concurrency Control
@@ -358,7 +379,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 Use `version` column for concurrent updates:
 
 ```sql
-UPDATE jobs 
+UPDATE jobs
 SET status = $1, version = version + 1
 WHERE id = $2 AND version = $3
 RETURNING *;
@@ -385,7 +406,7 @@ Workers hold a time-based lease:
 ```sql
 UPDATE jobs
 SET worker_id = $1, lease_id = $2, lease_expires_at = NOW() + INTERVAL '30 seconds'
-WHERE id = $3 
+WHERE id = $3
   AND status = 'QUEUED'
   AND (lease_expires_at IS NULL OR lease_expires_at < NOW());
 ```
@@ -434,6 +455,7 @@ LIMIT 100;
 ### Retriable Errors
 
 Jobs should retry for:
+
 - Temporary network failures
 - Transient database errors
 - External API rate limits
@@ -443,6 +465,7 @@ Jobs should retry for:
 ### Non-Retriable Errors
 
 Jobs should NOT retry for:
+
 - Invalid payload format
 - Missing required data
 - Authorization failures (permanent)
@@ -470,16 +493,17 @@ throw new JobError('Invalid email format', false);
 ### Unit Tests
 
 Test all valid transitions:
+
 ```typescript
 describe('JobStateMachine', () => {
   it('allows CREATED → QUEUED', () => {
     expect(isValidTransition('CREATED', 'QUEUED')).toBe(true);
   });
-  
+
   it('rejects SUCCEEDED → PROCESSING', () => {
     expect(isValidTransition('SUCCEEDED', 'PROCESSING')).toBe(false);
   });
-  
+
   // Test all transitions...
 });
 ```
@@ -487,12 +511,13 @@ describe('JobStateMachine', () => {
 ### Integration Tests
 
 Test transitions with database:
+
 ```typescript
 it('transitions job from QUEUED to PROCESSING', async () => {
   const job = await createJob({ status: 'QUEUED' });
-  
+
   await transitionToProcessing(job.id, workerId);
-  
+
   const updated = await getJob(job.id);
   expect(updated.status).toBe('PROCESSING');
   expect(updated.worker_id).toBe(workerId);
@@ -503,18 +528,19 @@ it('transitions job from QUEUED to PROCESSING', async () => {
 ### Race Condition Tests
 
 Test concurrent state updates:
+
 ```typescript
 it('prevents duplicate lease acquisition', async () => {
   const job = await createJob({ status: 'QUEUED' });
-  
+
   // Two workers try to acquire simultaneously
   const [result1, result2] = await Promise.allSettled([
     acquireLease(job.id, 'worker-1'),
-    acquireLease(job.id, 'worker-2')
+    acquireLease(job.id, 'worker-2'),
   ]);
-  
+
   // Only one should succeed
-  const successes = [result1, result2].filter(r => r.status === 'fulfilled');
+  const successes = [result1, result2].filter((r) => r.status === 'fulfilled');
   expect(successes).toHaveLength(1);
 });
 ```

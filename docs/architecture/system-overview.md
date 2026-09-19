@@ -121,6 +121,7 @@ Domain and system events are published to Kafka for analytics, auditing, and not
 ### 1. API Service (Fastify)
 
 **Responsibilities:**
+
 - Accept job submission requests
 - Validate payloads using Zod schemas
 - Authenticate and authorize requests
@@ -133,6 +134,7 @@ Domain and system events are published to Kafka for analytics, auditing, and not
 - Health checks and readiness probes
 
 **Key Operations:**
+
 - `POST /api/v1/jobs` - Submit new job
 - `GET /api/v1/jobs/:id` - Get job status
 - `DELETE /api/v1/jobs/:id` - Cancel job
@@ -145,6 +147,7 @@ Domain and system events are published to Kafka for analytics, auditing, and not
 - `GET /metrics` - Prometheus metrics
 
 **Technology:**
+
 - Fastify (HTTP framework)
 - Zod (validation)
 - Pino (logging)
@@ -153,6 +156,7 @@ Domain and system events are published to Kafka for analytics, auditing, and not
 ### 2. PostgreSQL (Durable State)
 
 **Responsibilities:**
+
 - Store all job records
 - Track job state transitions
 - Record job attempts and errors
@@ -163,6 +167,7 @@ Domain and system events are published to Kafka for analytics, auditing, and not
 - Enforce data integrity constraints
 
 **Key Tables:**
+
 - `users` - User accounts
 - `queues` - Queue definitions
 - `jobs` - Primary job records
@@ -173,6 +178,7 @@ Domain and system events are published to Kafka for analytics, auditing, and not
 - `dead_letter_jobs` - Failed jobs after max retries
 
 **Guarantees:**
+
 - ACID transactions for state transitions
 - Row-level locking for concurrency control
 - Foreign key constraints
@@ -184,6 +190,7 @@ Domain and system events are published to Kafka for analytics, auditing, and not
 **Responsibilities:**
 
 **Redis Streams (Job Delivery):**
+
 - Distribute jobs to worker pool
 - Support consumer groups
 - Track pending messages
@@ -191,6 +198,7 @@ Domain and system events are published to Kafka for analytics, auditing, and not
 - Support message reclaim for stale consumers
 
 **Redis Data Structures:**
+
 - Rate limiting counters (sliding window)
 - Distributed locks (SET NX EX)
 - Worker heartbeats (TTL-based)
@@ -198,6 +206,7 @@ Domain and system events are published to Kafka for analytics, auditing, and not
 - Temporary worker state
 
 **Key Operations:**
+
 - `XADD` - Enqueue job
 - `XREADGROUP` - Consume job
 - `XACK` - Acknowledge completion
@@ -205,6 +214,7 @@ Domain and system events are published to Kafka for analytics, auditing, and not
 - `XCLAIM` - Reclaim stale messages
 
 **Important Constraints:**
+
 - Redis is NOT the source of truth
 - All durable state must be in PostgreSQL
 - System must recover if Redis is restarted
@@ -213,6 +223,7 @@ Domain and system events are published to Kafka for analytics, auditing, and not
 ### 4. Worker Pool (Job Execution)
 
 **Responsibilities:**
+
 - Consume jobs from Redis Streams
 - Acquire lease before processing
 - Update job state in PostgreSQL
@@ -224,6 +235,7 @@ Domain and system events are published to Kafka for analytics, auditing, and not
 - Record attempt metadata
 
 **Worker Lifecycle:**
+
 ```
 Start
   ↓
@@ -262,26 +274,29 @@ Unregister from PostgreSQL
 ```
 
 **Concurrency Model:**
+
 - Each worker supports N concurrent jobs
 - Use bounded queue/pool to prevent memory exhaustion
 - Backpressure when queue is full
 
 **Handler Registry:**
+
 ```typescript
 handlers = {
-  'send_email': sendEmailHandler,
-  'process_webhook': webhookHandler,
-  'resize_image': resizeImageHandler,
-  'generate_report': reportHandler,
-  'simulate_failure': failureHandler,
-  'cpu_task': cpuTaskHandler,
-  'sleep': sleepHandler
-}
+  send_email: sendEmailHandler,
+  process_webhook: webhookHandler,
+  resize_image: resizeImageHandler,
+  generate_report: reportHandler,
+  simulate_failure: failureHandler,
+  cpu_task: cpuTaskHandler,
+  sleep: sleepHandler,
+};
 ```
 
 ### 5. Kafka/Redpanda (Event Bus)
 
 **Responsibilities:**
+
 - Publish job lifecycle events
 - Enable event-driven consumers
 - Support event replay
@@ -289,6 +304,7 @@ handlers = {
 - Provide event ordering guarantees
 
 **Topics:**
+
 - `taskflow.job.created`
 - `taskflow.job.started`
 - `taskflow.job.completed`
@@ -298,6 +314,7 @@ handlers = {
 - `taskflow.job.dead_lettered`
 
 **Event Schema (versioned):**
+
 ```typescript
 {
   schemaVersion: 1,
@@ -315,6 +332,7 @@ handlers = {
 ```
 
 **Consumers:**
+
 - Analytics consumer (aggregate metrics)
 - Audit consumer (compliance logging)
 - Notification consumer (webhooks, alerts)
@@ -323,6 +341,7 @@ handlers = {
 ### 6. Observability Stack
 
 **Structured Logging (Pino):**
+
 - JSON logs with correlation IDs
 - Request/response logging
 - Job lifecycle logging
@@ -330,17 +349,20 @@ handlers = {
 - Never log sensitive payloads
 
 **Metrics (Prometheus):**
+
 - Counters: jobs_submitted_total, jobs_completed_total, jobs_failed_total
 - Gauges: jobs_processing, queue_depth, worker_count
 - Histograms: job_duration_seconds, job_wait_duration_seconds
 - Labels: queue, type, status, worker_id
 
 **Tracing (OpenTelemetry):**
+
 - Distributed trace from API → Redis → Worker → PostgreSQL → Kafka
 - Span attributes: jobId, queue, type, attempt
 - Trace context propagation
 
 **Dashboard (Grafana):**
+
 - Job throughput (jobs/sec)
 - Queue depth by queue
 - Success/failure rates
@@ -353,6 +375,7 @@ handlers = {
 ### Decision 1: PostgreSQL as Source of Truth
 
 **Rationale:**
+
 - Jobs must survive system crashes
 - Redis Streams are ephemeral by nature
 - PostgreSQL provides ACID transactions
@@ -360,6 +383,7 @@ handlers = {
 - Industry-standard approach for durable state
 
 **Trade-off:**
+
 - Higher latency for state updates
 - Database becomes potential bottleneck
 - Requires careful index design
@@ -367,6 +391,7 @@ handlers = {
 ### Decision 2: Redis Streams for Job Delivery
 
 **Rationale:**
+
 - Low-latency message delivery
 - Built-in consumer groups
 - Automatic load balancing across workers
@@ -374,11 +399,13 @@ handlers = {
 - Stale message reclaim
 
 **Why not BullMQ?**
+
 - Goal is to demonstrate understanding of queue internals
 - BullMQ hides distributed systems complexity
 - Building from Redis Streams directly shows deeper knowledge
 
 **Trade-off:**
+
 - Must implement retry logic ourselves
 - Must implement scheduling ourselves
 - More code to maintain
@@ -386,6 +413,7 @@ handlers = {
 ### Decision 3: Separate Kafka for Events
 
 **Rationale:**
+
 - Redis Streams = task execution (at-least-once delivery)
 - Kafka = event propagation (ordered event log)
 - Separates concerns: job processing vs event streaming
@@ -393,6 +421,7 @@ handlers = {
 - Enables multiple independent consumers
 
 **Trade-off:**
+
 - Increased system complexity
 - Another service to manage
 - Additional failure modes
@@ -400,17 +429,20 @@ handlers = {
 ### Decision 4: At-Least-Once Delivery
 
 **Guarantee:**
+
 - Jobs MAY be delivered more than once
 - Jobs WILL NOT be lost (durable in PostgreSQL)
 - Handlers MUST be idempotent
 
 **Why not Exactly-Once?**
+
 - Distributed exactly-once is extremely difficult
 - Requires distributed transactions or two-phase commit
 - Performance overhead is significant
 - At-least-once + idempotency is pragmatic solution
 
 **Implementation:**
+
 - Idempotency keys for job submission
 - Handler-level idempotency patterns
 - Database constraints prevent duplicate processing
@@ -418,11 +450,13 @@ handlers = {
 ### Decision 5: Worker Leases
 
 **Rationale:**
+
 - Workers can crash during processing
 - Need mechanism to detect stale workers
 - Need mechanism to reclaim abandoned jobs
 
 **Implementation:**
+
 - Lease stored in PostgreSQL `jobs` table
 - `lease_id`, `lease_expires_at`, `worker_id`
 - Worker renews lease periodically
@@ -430,6 +464,7 @@ handlers = {
 - Prevents duplicate processing under normal conditions
 
 **Trade-off:**
+
 - Requires heartbeat mechanism
 - Clock synchronization concerns
 - Lease duration tuning required
@@ -437,43 +472,53 @@ handlers = {
 ## Critical Invariants
 
 ### Invariant 1: Job State Consistency
+
 **Rule:** Job state in PostgreSQL is authoritative. Redis and Kafka are derived state.
 
 **Enforcement:**
+
 - All state transitions write to PostgreSQL first
 - Redis message contains only job ID (not full state)
 - Workers re-fetch state from PostgreSQL before processing
 
 ### Invariant 2: No Orphaned Jobs
+
 **Rule:** Every job in QUEUED state must either be in Redis or recoverable.
 
 **Enforcement:**
+
 - Job insertion and Redis enqueue must be atomic (see consistency strategies)
 - Periodic sweep finds QUEUED jobs not in Redis and re-enqueues them
 - Dead letter queue captures jobs exceeding max attempts
 
 ### Invariant 3: State Machine Compliance
+
 **Rule:** Only valid state transitions are allowed.
 
 **Enforcement:**
+
 - State transition validation in domain layer
 - PostgreSQL CHECK constraints
 - Optimistic locking for concurrent updates
 - Transaction rollback on invalid transitions
 
 ### Invariant 4: Idempotency
+
 **Rule:** Duplicate submissions with same idempotency key return same job.
 
 **Enforcement:**
+
 - Unique index on `idempotency_keys` table
 - Foreign key to `jobs` table
 - TTL-based cleanup of old keys
 - Race-safe INSERT ... ON CONFLICT
 
 ### Invariant 5: Lease Exclusivity
+
 **Rule:** At most one worker processes a job at a time (under normal conditions).
 
 **Enforcement:**
+
 - Optimistic locking with `lease_id`
 - UPDATE WHERE lease_expires_at < NOW()
 - Heartbeat renewal extends lease
@@ -517,6 +562,7 @@ The system is designed to handle:
 ## Consistency Strategy: API + Redis + PostgreSQL
 
 **The Problem:**
+
 ```
 Client → POST /jobs
 API → INSERT INTO jobs (PostgreSQL) ✓
@@ -527,6 +573,7 @@ API → Response ???
 Job is in PostgreSQL but not in Redis. Job will never execute.
 
 **Solution A: Write-Ahead (Chosen)**
+
 ```
 1. BEGIN TRANSACTION
 2. INSERT INTO jobs (status=CREATED)
@@ -541,6 +588,7 @@ Job is in PostgreSQL but not in Redis. Job will never execute.
 ```
 
 **Solution B: Write-Behind**
+
 ```
 1. XADD to Redis
 2. If fails: return error
@@ -550,18 +598,19 @@ Job is in PostgreSQL but not in Redis. Job will never execute.
 
 **Trade-off Analysis:**
 
-| Aspect | Write-Ahead | Write-Behind |
-|--------|-------------|--------------|
-| Durability | ✅ PostgreSQL first | ⚠️ Redis first |
+| Aspect      | Write-Ahead         | Write-Behind         |
+| ----------- | ------------------- | -------------------- |
+| Durability  | ✅ PostgreSQL first | ⚠️ Redis first       |
 | Consistency | ✅ Sweeper recovers | ❌ Orphaned messages |
-| Performance | ⚠️ 2 round trips | ✅ 1 round trip |
-| Complexity | ⚠️ Sweeper needed | ✅ Simpler |
+| Performance | ⚠️ 2 round trips    | ✅ 1 round trip      |
+| Complexity  | ⚠️ Sweeper needed   | ✅ Simpler           |
 
 **Decision: Write-Ahead** because durability and consistency are more important than raw performance for a portfolio project demonstrating distributed systems understanding.
 
 ## Scalability Characteristics
 
 **Horizontal Scaling:**
+
 - API: Stateless, scale by adding instances behind load balancer
 - Workers: Scale by adding worker processes/containers
 - PostgreSQL: Vertical scaling + read replicas for queries
@@ -569,11 +618,13 @@ Job is in PostgreSQL but not in Redis. Job will never execute.
 - Kafka: Partition-based scaling
 
 **Bottlenecks:**
+
 - PostgreSQL write throughput (job state updates)
 - Redis Stream throughput (job enqueue rate)
 - Worker handler execution time
 
 **Scaling Strategy:**
+
 ```
 1K jobs/sec:  3 API instances, 5 workers, single PostgreSQL
 10K jobs/sec: 5 API instances, 20 workers, PostgreSQL tuning
@@ -583,16 +634,19 @@ Job is in PostgreSQL but not in Redis. Job will never execute.
 ## Security Model
 
 **Authentication:**
+
 - JWT tokens for user authentication
 - API keys for service-to-service
 - Role-based access control (RBAC)
 
 **Authorization:**
+
 - Users can only access their own jobs
 - Admin role can access all jobs
 - Worker role can update job status
 
 **Data Protection:**
+
 - Secrets via environment variables
 - No secrets in logs
 - TLS for all network communication (production)
@@ -600,6 +654,7 @@ Job is in PostgreSQL but not in Redis. Job will never execute.
 - Input validation (Zod schemas)
 
 **Rate Limiting:**
+
 - Per-user limits (100 req/min)
 - Per-API-key limits (1000 req/min)
 - DDoS protection at load balancer

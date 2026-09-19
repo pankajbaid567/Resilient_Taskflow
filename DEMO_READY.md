@@ -1,3 +1,5 @@
+> Historical snapshot only. Claims and numbers below are not current acceptance evidence; use the root README and executable gates.
+
 # TaskFlow Demo - READY TO RUN! 🚀
 
 ## Current Status
@@ -5,7 +7,7 @@
 ✅ **Docker Desktop**: Running  
 ✅ **Code Implementation**: 100% Complete  
 ✅ **Dependencies**: Installed  
-✅ **Scripts**: Created  
+✅ **Scripts**: Created
 
 ## Why I Can't Run It Automatically
 
@@ -49,6 +51,7 @@ pnpm dev:api
 ```
 
 **Expected output:**
+
 ```
 ✓ Database connected
 ✓ Redis connected
@@ -64,6 +67,7 @@ pnpm dev:worker
 ```
 
 **Expected output:**
+
 ```
 ✓ Database connected
 ✓ Redis connected
@@ -85,6 +89,7 @@ pnpm demo
 ```
 
 **Expected output:**
+
 ```
 ╔════════════════════════════════════════════════════════════════╗
 ║             TaskFlow End-to-End Demo                          ║
@@ -99,13 +104,13 @@ pnpm demo
 2. Submitting test jobs...
    Submitting: send-email (HIGH priority)
    ✓ Job created: 550e8400-e29b-41d4-a716-446655440000
-   
+
    Submitting: process-data (NORMAL priority)
    ✓ Job created: 660e9500-f39c-52e5-b827-557766551111
-   
+
    Submitting: send-email (CRITICAL priority)
    ✓ Job created: 770ea600-g40d-63f6-c938-668877662222
-   
+
    Submitting: process-data (aggregation)
    ✓ Job created: 880eb700-h51e-74g7-d049-779988773333
 
@@ -119,7 +124,7 @@ pnpm demo
    Polling job 660e9500-f39c-52e5-b827-557766551111...
    ✓ Job 660e9500-f39c-52e5-b827-557766551111 succeeded
       Status: SUCCEEDED
-      
+
    [All 4 jobs succeed...]
 
 4. Demo Summary
@@ -287,7 +292,7 @@ This implementation demonstrates:
 
 ## 📝 Implementation Stats
 
-- **Files Created**: 15+ 
+- **Files Created**: 15+
 - **Lines of Code**: 2,500+
 - **Test Coverage**: 0% (tests not written yet, but system works!)
 - **Time to Implement**: ~2 hours
@@ -303,6 +308,6 @@ This implementation demonstrates:
 
 ---
 
-**Ready to run?** Open 4 terminal windows and copy the commands above! 
+**Ready to run?** Open 4 terminal windows and copy the commands above!
 
 The system is **fully implemented and waiting for you** to see it in action! 🚀

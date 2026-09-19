@@ -241,12 +241,20 @@ export class Worker {
       if (this.state !== 'RUNNING') return;
       this.heartbeatTimer = setTimeout(async () => {
         try {
-          await updateWorkerHeartbeat(this.config.workerId, {
+          const worker = await updateWorkerHeartbeat(this.config.workerId, {
             currentJobCount: this.activeJobs.size,
             totalJobsProcessed: this.stats.totalProcessed,
             totalJobsSucceeded: this.stats.totalSucceeded,
             totalJobsFailed: this.stats.totalFailed,
           });
+          if (worker?.status === WorkerStatus.STOPPING) {
+            this.logger.info('Durable worker stop request observed');
+            if (this.config.onStopRequested) {
+              await this.config.onStopRequested();
+            } else {
+              await this.stop();
+            }
+          }
         } catch (error) {
           this.logger.error('Worker heartbeat failed', { error });
         } finally {
@@ -633,6 +641,7 @@ export class Worker {
         type: job.type,
         attempts: job.attempts,
         maxAttempts: job.maxAttempts,
+        metadata: job.metadata as Record<string, unknown> | null,
       },
       cancellationToken: {
         get isCancellationRequested() {

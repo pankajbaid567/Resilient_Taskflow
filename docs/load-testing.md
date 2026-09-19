@@ -20,6 +20,7 @@ This guide covers load testing for Resilient TaskFlow using k6, an open-source l
 ### Why k6?
 
 k6 is a modern load testing tool that:
+
 - Uses JavaScript for test scripts (accessible to developers)
 - Provides excellent performance (thousands of VUs on a single machine)
 - Generates detailed metrics (P95, P99 latency, throughput, error rates)
@@ -124,6 +125,7 @@ k6 run tests/load/sustained-load.test.js
 ### 3. View Results
 
 Test results are saved to `tests/load/results/`:
+
 - `sustained-load-<timestamp>.html` - Visual report
 - `sustained-load-<timestamp>.json` - Raw data
 
@@ -142,6 +144,7 @@ open tests/load/results/sustained-load-*.html
 **Duration**: 5 minutes
 
 **Load Pattern**:
+
 ```
 VUs
 50 |         ___________
@@ -153,6 +156,7 @@ VUs
 ```
 
 **What It Tests**:
+
 - System handles sustained traffic without degradation
 - Latency remains stable over time
 - No memory leaks or resource exhaustion
@@ -160,17 +164,20 @@ VUs
 - Success rate remains high (>99%)
 
 **Success Criteria**:
+
 - P95 latency < 500ms
 - P99 latency < 1000ms
 - Error rate < 1%
 - Queue depth < 500 jobs
 
 **Run**:
+
 ```bash
 pnpm load:sustained
 ```
 
 **Key Metrics to Watch**:
+
 - `http_req_duration` (P95, P99)
 - `http_req_failed` (error rate)
 - `job_submission_duration`
@@ -183,6 +190,7 @@ pnpm load:sustained
 **Duration**: 4 minutes
 
 **Load Pattern**:
+
 ```
 VUs
 100|         ____
@@ -195,6 +203,7 @@ VUs
 ```
 
 **What It Tests**:
+
 - System handles sudden 10x traffic increase
 - Error rate remains acceptable during spike
 - System recovers gracefully after spike
@@ -202,17 +211,20 @@ VUs
 - Queue backlog clears after spike
 
 **Success Criteria**:
+
 - P95 latency < 1000ms (during spike)
 - P99 latency < 2000ms (during spike)
 - Error rate < 5% (during spike)
 - Queue depth < 2000 jobs
 
 **Run**:
+
 ```bash
 pnpm load:spike
 ```
 
 **Key Metrics to Watch**:
+
 - Max latency during spike
 - Error rate spike (should be temporary)
 - Queue depth (should recover after spike)
@@ -225,6 +237,7 @@ pnpm load:spike
 **Duration**: 10 minutes
 
 **Load Pattern**:
+
 ```
 Jobs/s: 50 (constant)
 
@@ -238,6 +251,7 @@ Workers:
 ```
 
 **What It Tests**:
+
 - Job throughput increases with worker count
 - Queue depth decreases as workers are added
 - System gracefully handles worker removal
@@ -245,12 +259,14 @@ Workers:
 - Leases properly transfer between workers
 
 **Success Criteria**:
+
 - Throughput scales with worker count
 - No job loss (DB count = submitted count)
 - Queue drains with 10 workers
 - Queue backs up with 1 worker
 
 **Run**:
+
 ```bash
 # Terminal 1: Run the test
 pnpm load:scaling
@@ -260,6 +276,7 @@ node tests/load/scale-workers.js
 ```
 
 **Scaling Schedule**:
+
 - 0:00 - 2:00 → 1 worker (baseline, queue backs up)
 - 2:00 - 4:00 → 5 workers (queue drains)
 - 4:00 - 6:00 → 10 workers (queue clears quickly)
@@ -267,6 +284,7 @@ node tests/load/scale-workers.js
 - 8:00 - 10:00 → 1 worker (queue backs up again)
 
 **Key Metrics to Watch**:
+
 - Queue depth vs. worker count correlation
 - Jobs per second throughput
 - No errors during scaling events
@@ -278,6 +296,7 @@ node tests/load/scale-workers.js
 **Duration**: 5 minutes
 
 **Load Pattern**:
+
 ```
 5 concurrent scenarios with different behaviors:
 
@@ -289,6 +308,7 @@ node tests/load/scale-workers.js
 ```
 
 **What It Tests**:
+
 - System handles mixed priorities correctly
 - Different job types coexist without interference
 - Scheduled jobs and immediate jobs work together
@@ -297,17 +317,20 @@ node tests/load/scale-workers.js
 - Realistic user behavior patterns
 
 **Success Criteria**:
+
 - P95 latency < 600ms (overall)
 - P99 latency < 1200ms (overall)
 - Error rate < 1%
 - Urgent jobs have lower latency than batch jobs
 
 **Run**:
+
 ```bash
 pnpm load:mixed
 ```
 
 **Key Metrics to Watch**:
+
 - Per-scenario latency (urgent should be fastest)
 - Priority queue ordering (CRITICAL > HIGH > NORMAL > LOW)
 - Mixed read/write performance
@@ -319,32 +342,33 @@ pnpm load:mixed
 
 k6 tracks these metrics automatically:
 
-| Metric | Description | Good Value |
-|--------|-------------|------------|
-| `http_req_duration` | Request latency | P95 < 500ms, P99 < 1s |
-| `http_req_failed` | Failed request rate | < 1% |
-| `http_reqs` | Total requests per second | Depends on test |
-| `vus` | Virtual users (concurrent) | Depends on test |
-| `iterations` | Total iterations completed | Depends on test |
+| Metric              | Description                | Good Value            |
+| ------------------- | -------------------------- | --------------------- |
+| `http_req_duration` | Request latency            | P95 < 500ms, P99 < 1s |
+| `http_req_failed`   | Failed request rate        | < 1%                  |
+| `http_reqs`         | Total requests per second  | Depends on test       |
+| `vus`               | Virtual users (concurrent) | Depends on test       |
+| `iterations`        | Total iterations completed | Depends on test       |
 
 ### Custom Metrics
 
 We track additional application-specific metrics:
 
-| Metric | Description | Good Value |
-|--------|-------------|------------|
-| `job_submission_duration` | Time to submit a job | P95 < 200ms |
-| `job_completion_duration` | End-to-end job time | P95 < 5s |
-| `queue_depth` | Current queue backlog | < 500 jobs |
-| `queue_depth_critical` | CRITICAL priority queue | < 10 jobs |
-| `active_workers` | Number of active workers | Depends on config |
-| `jobs_per_second` | Job throughput | Depends on workers |
+| Metric                    | Description              | Good Value         |
+| ------------------------- | ------------------------ | ------------------ |
+| `job_submission_duration` | Time to submit a job     | P95 < 200ms        |
+| `job_completion_duration` | End-to-end job time      | P95 < 5s           |
+| `queue_depth`             | Current queue backlog    | < 500 jobs         |
+| `queue_depth_critical`    | CRITICAL priority queue  | < 10 jobs          |
+| `active_workers`          | Number of active workers | Depends on config  |
+| `jobs_per_second`         | Job throughput           | Depends on workers |
 
 ### Threshold Configuration
 
 Thresholds define pass/fail criteria. Tests fail if thresholds are not met.
 
 **Common Thresholds**:
+
 ```javascript
 thresholds: {
   'http_req_duration': ['p(95)<500', 'p(99)<1000'],
@@ -355,6 +379,7 @@ thresholds: {
 ```
 
 **Spike Test Thresholds** (more relaxed):
+
 ```javascript
 thresholds: {
   'http_req_duration': ['p(95)<1000', 'p(99)<2000'],
@@ -375,6 +400,7 @@ Averages hide outliers. P95/P99 show what most users experience:
 - **P99.9**: 99.9% of requests faster (0.1% outliers)
 
 **Example**:
+
 ```
 Average latency: 150ms  (looks good!)
 P99 latency: 3000ms     (1% of users wait 3 seconds!)
@@ -481,6 +507,7 @@ k6 displays results at the end of each test:
 ### Success Indicators
 
 ✅ **Good Performance**:
+
 ```
 http_req_duration..........: avg=120ms  p(95)=250ms  p(99)=400ms  ✓
 http_req_failed............: 0.05% ✓
@@ -489,6 +516,7 @@ queue_depth................: 120
 ```
 
 ⚠️ **Degraded Performance**:
+
 ```
 http_req_duration..........: avg=450ms  p(95)=800ms  p(99)=1200ms  ✗
 http_req_failed............: 2.5% ✗
@@ -505,6 +533,7 @@ open tests/load/results/sustained-load-*.html
 ```
 
 The report includes:
+
 - Request rate over time
 - Latency percentiles over time
 - Error rate visualization
@@ -543,6 +572,7 @@ Correlate load test results with system metrics:
 ### Common Patterns
 
 **Pattern 1: Queue Backup**
+
 ```
 Symptom: Queue depth grows continuously
 Cause: Workers can't keep up with submission rate
@@ -550,6 +580,7 @@ Fix: Add more workers or optimize job processing
 ```
 
 **Pattern 2: Latency Spikes**
+
 ```
 Symptom: P99 >> P95, high max latency
 Cause: Database slow queries or connection exhaustion
@@ -557,6 +588,7 @@ Fix: Add database indexes, increase connection pool
 ```
 
 **Pattern 3: Error Rate Increase**
+
 ```
 Symptom: http_req_failed > 1%
 Cause: Rate limiting, timeouts, or backend errors
@@ -564,6 +596,7 @@ Fix: Check logs, adjust rate limits, scale backend
 ```
 
 **Pattern 4: Memory Leak**
+
 ```
 Symptom: Performance degrades over time
 Cause: Memory not being released
@@ -600,13 +633,13 @@ Fix: Profile with heap snapshots, fix leaks
 
 For production readiness, aim for:
 
-| Metric | Target | Acceptable | Poor |
-|--------|--------|------------|------|
-| P95 Latency | < 300ms | < 500ms | > 500ms |
-| P99 Latency | < 500ms | < 1000ms | > 1000ms |
-| Success Rate | > 99.9% | > 99% | < 99% |
-| Throughput | > 100 jobs/s | > 50 jobs/s | < 50 jobs/s |
-| Queue Depth | < 100 | < 500 | > 500 |
+| Metric       | Target       | Acceptable  | Poor        |
+| ------------ | ------------ | ----------- | ----------- |
+| P95 Latency  | < 300ms      | < 500ms     | > 500ms     |
+| P99 Latency  | < 500ms      | < 1000ms    | > 1000ms    |
+| Success Rate | > 99.9%      | > 99%       | < 99%       |
+| Throughput   | > 100 jobs/s | > 50 jobs/s | < 50 jobs/s |
+| Queue Depth  | < 100        | < 500       | > 500       |
 
 ### Optimization Workflow
 
@@ -623,12 +656,14 @@ For production readiness, aim for:
 ### Test Won't Start
 
 **Problem**: k6 command not found
+
 ```bash
 # Solution: Install k6
 brew install k6  # macOS
 ```
 
 **Problem**: Connection refused
+
 ```bash
 # Solution: Ensure services are running
 docker-compose ps
@@ -641,12 +676,14 @@ curl http://localhost:3000/health
 **Problem**: http_req_failed > 5%
 
 **Possible Causes**:
+
 1. Rate limiting triggered
 2. Database connection exhausted
 3. Redis out of memory
 4. API server crashed
 
 **Investigation**:
+
 ```bash
 # Check API logs
 docker-compose logs api | tail -100
@@ -666,12 +703,14 @@ docker-compose exec redis redis-cli INFO memory
 **Problem**: P95 > 1000ms
 
 **Possible Causes**:
+
 1. Database slow queries
 2. Redis network latency
 3. Worker backlog
 4. CPU exhaustion
 
 **Investigation**:
+
 ```bash
 # Check slow queries
 docker-compose logs postgres | grep "duration"
@@ -691,12 +730,14 @@ curl http://localhost:3000/api/queues/default/stats
 **Problem**: Queue depth > 1000
 
 **Possible Causes**:
+
 1. Too few workers
 2. Slow job processing
 3. Worker crashes
 4. Database bottleneck
 
 **Investigation**:
+
 ```bash
 # Check worker count
 curl http://localhost:3000/api/workers | jq '.workers | length'
@@ -716,6 +757,7 @@ curl http://localhost:3000/api/metrics | grep job_duration
 **Problem**: Performance degrades over time
 
 **Investigation**:
+
 ```bash
 # Check memory usage
 docker stats
@@ -738,16 +780,16 @@ name: Load Tests
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # Daily at 2 AM
-  workflow_dispatch:      # Manual trigger
+    - cron: '0 2 * * *' # Daily at 2 AM
+  workflow_dispatch: # Manual trigger
 
 jobs:
   load-test:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Install k6
         run: |
           sudo gpg -k
@@ -759,29 +801,29 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/k6.list
           sudo apt-get update
           sudo apt-get install k6
-      
+
       - name: Start services
         run: |
           docker-compose up -d
           sleep 30  # Wait for services
-      
+
       - name: Health check
         run: |
           curl -f http://localhost:3000/health || exit 1
-      
+
       - name: Run sustained load test
         run: k6 run tests/load/sustained-load.test.js
-      
+
       - name: Run spike load test
         run: k6 run tests/load/spike-load.test.js
-      
+
       - name: Upload results
         uses: actions/upload-artifact@v3
         if: always()
         with:
           name: load-test-results
           path: tests/load/results/
-      
+
       - name: Cleanup
         if: always()
         run: docker-compose down -v
@@ -794,10 +836,10 @@ jobs:
   run: |
     # Extract P95 latency from current test
     CURRENT_P95=$(cat tests/load/results/sustained-*.json | jq '.metrics.http_req_duration.values["p(95)"]')
-    
+
     # Load baseline from previous run
     BASELINE_P95=350  # ms
-    
+
     # Fail if regression > 20%
     THRESHOLD=$(echo "$BASELINE_P95 * 1.2" | bc)
     if (( $(echo "$CURRENT_P95 > $THRESHOLD" | bc -l) )); then
@@ -834,10 +876,10 @@ export const options = {
       startRate: 10,
       timeUnit: '1s',
       stages: [
-        { duration: '2m', target: 50 },  // Ramp to 50 rps
-        { duration: '5m', target: 50 },  // Hold at 50 rps
+        { duration: '2m', target: 50 }, // Ramp to 50 rps
+        { duration: '5m', target: 50 }, // Hold at 50 rps
         { duration: '2m', target: 100 }, // Spike to 100 rps
-        { duration: '5m', target: 10 },  // Drop to 10 rps
+        { duration: '5m', target: 10 }, // Drop to 10 rps
       ],
       preAllocatedVUs: 50,
       maxVUs: 200,
@@ -891,6 +933,6 @@ This load testing suite provides:
 ✅ **HTML and JSON reports** for analysis  
 ✅ **Grafana integration** for real-time monitoring  
 ✅ **CI/CD ready** with GitHub Actions example  
-✅ **Production-ready thresholds** based on industry standards  
+⚠️ **Deferred example thresholds**; no repository benchmark result or production target is claimed
 
 Use these tests to validate performance, identify bottlenecks, and ensure your system can handle production traffic.

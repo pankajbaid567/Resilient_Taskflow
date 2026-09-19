@@ -462,8 +462,8 @@ beforeAll(async () => {
      );`
   );
   await pool.query(
-    `INSERT INTO users (id, email, password_hash)
-     VALUES ($1, 'worker-it@example.test', 'unused')`,
+    `INSERT INTO users (id, email, password_hash, role)
+     VALUES ($1, 'worker-it@example.test', 'unused', 'admin')`,
     [userId]
   );
   await pool.query(
@@ -501,6 +501,7 @@ beforeEach(async () => {
        workers
      RESTART IDENTITY CASCADE`
   );
+  await pool.query(`UPDATE queues SET is_active = true`);
 });
 
 afterEach(async () => {
@@ -517,6 +518,118 @@ afterAll(async () => {
 }, 30_000);
 
 describe.sequential('authoritative worker delivery', () => {
+  describe('operational controls', () => {
+    it('holds durable delivery while a queue is paused and resumes processing', async () => {
+      const jobId = await submitJob({
+        payload: { effectKey: 'pause-resume' },
+      });
+      const paused = await app.inject({
+        method: 'POST',
+        url: '/api/v1/queues/default/pause',
+        headers: { 'x-api-key': apiKey },
+        payload: {},
+      });
+      expect(paused.statusCode, paused.body).toBe(200);
+      expect(paused.json<{ isActive: boolean }>().isActive).toBe(false);
+
+      const worker = startWorker();
+      await waitForWorkerReady(worker);
+      await sleep(500);
+      expect(await readJob(jobId)).toMatchObject({
+        status: JobStatus.QUEUED,
+        attempts: 0,
+      });
+      // Worker startup creates the consumer-group stream, but a paused queue
+      // must not publish the durable outbox row into it.
+      expect(await redis.xlen(stream)).toBe(0);
+
+      const resumed = await app.inject({
+        method: 'POST',
+        url: '/api/v1/queues/default/resume',
+        headers: { 'x-api-key': apiKey },
+        payload: {},
+      });
+      expect(resumed.statusCode, resumed.body).toBe(200);
+      expect(resumed.json<{ isActive: boolean }>().isActive).toBe(true);
+      await waitForJobStatus(jobId, JobStatus.SUCCEEDED);
+      await waitForPendingCount(0);
+    }, 20_000);
+
+    it('turns an API stop request into a clean worker-process shutdown', async () => {
+      const worker = startWorker();
+      await waitForWorkerReady(worker);
+      const active = await pool.query<{ id: string }>(
+        `SELECT id FROM workers WHERE status = 'ACTIVE' LIMIT 1`
+      );
+      const workerId = active.rows[0]?.id;
+      expect(workerId).toMatch(/^[0-9a-f-]{36}$/);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/v1/workers/${workerId}/stop`,
+        headers: { 'x-api-key': apiKey },
+        payload: {},
+      });
+      expect(response.statusCode, response.body).toBe(202);
+      await expect(waitForWorkerExit(worker)).resolves.toEqual({
+        exitCode: 0,
+        signalCode: null,
+      });
+      const stopped = await pool.query<{ status: string }>(
+        `SELECT status FROM workers WHERE id = $1`,
+        [workerId]
+      );
+      expect(stopped.rows[0]?.status).toBe('STOPPED');
+    }, 20_000);
+
+    it('creates one owned replacement for a dead-lettered job and executes it', async () => {
+      const worker = startWorker();
+      await waitForWorkerReady(worker);
+      const originalJobId = await submitJob({
+        payload: {
+          effectKey: 'manual-retry',
+          failUntilManualRetry: true,
+        },
+        maxAttempts: 1,
+      });
+      await waitForJobStatus(originalJobId, JobStatus.DEAD_LETTERED);
+
+      const retry = await app.inject({
+        method: 'POST',
+        url: `/api/v1/jobs/${originalJobId}/retry`,
+        headers: { 'x-api-key': apiKey },
+        payload: {},
+      });
+      expect(retry.statusCode, retry.body).toBe(201);
+      const replacementId = retry.json<{ id: string }>().id;
+      expect(replacementId).not.toBe(originalJobId);
+
+      const repeated = await app.inject({
+        method: 'POST',
+        url: `/api/v1/jobs/${originalJobId}/retry`,
+        headers: { 'x-api-key': apiKey },
+        payload: {},
+      });
+      expect(repeated.statusCode, repeated.body).toBe(409);
+      await waitForJobStatus(replacementId, JobStatus.SUCCEEDED);
+      await waitForPendingCount(0);
+
+      const deadLetter = await pool.query<{
+        requeued: boolean;
+        requeued_job_id: string;
+      }>(
+        `SELECT requeued, requeued_job_id
+           FROM dead_letter_jobs
+          WHERE original_job_id = $1`,
+        [originalJobId]
+      );
+      expect(deadLetter.rows[0]).toEqual({
+        requeued: true,
+        requeued_job_id: replacementId,
+      });
+    }, 25_000);
+  });
+
   describe('durable lifecycle', () => {
     it('retains an API-created job in the database outbox until a worker starts', async () => {
       const jobId = await submitJob({

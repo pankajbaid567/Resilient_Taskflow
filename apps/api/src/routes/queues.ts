@@ -3,6 +3,7 @@ import {
   getQueueByName,
   getQueueStats,
   listQueues,
+  setQueueActive,
   type Queue,
 } from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
@@ -54,7 +55,7 @@ function sendMissingQueue(reply: FastifyReply, name: string): FastifyReply {
   });
 }
 
-/** PostgreSQL-backed queue reads and explicitly unimplemented controls. */
+/** PostgreSQL-backed queue reads and durable admission controls. */
 export function queueRoutes(app: FastifyInstance): Promise<void> {
   app.get<{
     Querystring: {
@@ -126,16 +127,11 @@ export function queueRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAdmin },
     async (request, reply) => {
       const { name } = queueNameParamsSchema.parse(request.params);
-      if (!(await getQueueByName(name))) return sendMissingQueue(reply, name);
+      const queue = await setQueueActive(name, false);
+      if (!queue) return sendMissingQueue(reply, name);
 
-      logger.info('Queue pause requested', { queue: name });
-      return reply.status(501).send({
-        error: 'Not Implemented',
-        message:
-          'Queue pause is unavailable because control signaling is not implemented',
-        statusCode: 501,
-        timestamp: new Date().toISOString(),
-      });
+      logger.info('Queue paused', { queue: name });
+      return reply.send(serializeQueue(queue));
     }
   );
 
@@ -144,16 +140,11 @@ export function queueRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAdmin },
     async (request, reply) => {
       const { name } = queueNameParamsSchema.parse(request.params);
-      if (!(await getQueueByName(name))) return sendMissingQueue(reply, name);
+      const queue = await setQueueActive(name, true);
+      if (!queue) return sendMissingQueue(reply, name);
 
-      logger.info('Queue resume requested', { queue: name });
-      return reply.status(501).send({
-        error: 'Not Implemented',
-        message:
-          'Queue resume is unavailable because control signaling is not implemented',
-        statusCode: 501,
-        timestamp: new Date().toISOString(),
-      });
+      logger.info('Queue resumed', { queue: name });
+      return reply.send(serializeQueue(queue));
     }
   );
 

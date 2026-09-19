@@ -34,6 +34,7 @@ All services run as non-root users with resource limits and health checks.
 ### System Requirements
 
 **Minimum** (Development/Testing):
+
 - 4 CPU cores
 - 8 GB RAM
 - 50 GB disk space
@@ -41,6 +42,7 @@ All services run as non-root users with resource limits and health checks.
 - Docker Compose 2.0+
 
 **Recommended** (Production):
+
 - 8+ CPU cores
 - 16+ GB RAM
 - 200+ GB SSD storage
@@ -67,6 +69,7 @@ docker-compose --version
 ### 1. Non-Root Containers
 
 All services run as non-root users:
+
 - **API/Worker**: `nodejs:1001`
 - **Dashboard**: `nginx:101`
 - **Database**: `postgres:999`
@@ -101,6 +104,7 @@ openssl rand -base64 16  # POSTGRES_PASSWORD
 ```
 
 Store secrets in:
+
 - Docker secrets (Swarm mode)
 - Kubernetes secrets
 - AWS Secrets Manager
@@ -139,7 +143,7 @@ deploy:
 ### CPU Allocation
 
 | Service    | Reserved | Limit | Notes                    |
-|------------|----------|-------|--------------------------|
+| ---------- | -------- | ----- | ------------------------ |
 | API        | 0.25     | 1.0   | Per replica              |
 | Worker     | 0.5      | 2.0   | CPU-intensive processing |
 | PostgreSQL | 0.5      | 2.0   | Database queries         |
@@ -151,16 +155,16 @@ deploy:
 
 ### Memory Allocation
 
-| Service    | Reserved | Limit  | Notes                    |
-|------------|----------|--------|--------------------------|
-| API        | 256M     | 1G     | Per replica              |
-| Worker     | 512M     | 2G     | Job processing overhead  |
-| PostgreSQL | 512M     | 2G     | Query cache + connections|
-| Redis      | 256M     | 1G     | LRU cache policy         |
-| Redpanda   | 512M     | 1.5G   | Message buffering        |
-| Dashboard  | 64M      | 256M   | nginx static serving     |
-| Prometheus | 256M     | 1G     | Time-series storage      |
-| Grafana    | 128M     | 512M   | Dashboard cache          |
+| Service    | Reserved | Limit | Notes                     |
+| ---------- | -------- | ----- | ------------------------- |
+| API        | 256M     | 1G    | Per replica               |
+| Worker     | 512M     | 2G    | Job processing overhead   |
+| PostgreSQL | 512M     | 2G    | Query cache + connections |
+| Redis      | 256M     | 1G    | LRU cache policy          |
+| Redpanda   | 512M     | 1.5G  | Message buffering         |
+| Dashboard  | 64M      | 256M  | nginx static serving      |
+| Prometheus | 256M     | 1G    | Time-series storage       |
+| Grafana    | 128M     | 512M  | Dashboard cache           |
 
 ### Storage Requirements
 
@@ -270,10 +274,12 @@ docker inspect --format='{{json .State.Health}}' taskflow-api | jq
 ### Metrics
 
 **Prometheus Metrics:**
+
 - `http://localhost:9091/targets` - Service health
 - `http://localhost:9091/graph` - Query metrics
 
 **Key Metrics:**
+
 - `taskflow_jobs_submitted_total` - Job submissions
 - `taskflow_jobs_completed_total` - Completed jobs
 - `taskflow_jobs_failed_total` - Failed jobs
@@ -282,6 +288,7 @@ docker inspect --format='{{json .State.Health}}' taskflow-api | jq
 - `taskflow_job_latency_seconds` - Processing time
 
 **Grafana Dashboards:**
+
 1. System Overview
 2. Job Processing
 3. Worker Performance
@@ -428,8 +435,8 @@ Increase resource limits in `docker-compose.prod.yml`:
 deploy:
   resources:
     limits:
-      cpus: '4.0'      # Increased from 2.0
-      memory: 4G       # Increased from 2G
+      cpus: '4.0' # Increased from 2.0
+      memory: 4G # Increased from 2G
 ```
 
 ## Troubleshooting
@@ -569,6 +576,7 @@ Before going live:
 ## Support
 
 For issues:
+
 1. Check logs: `docker-compose logs`
 2. Review health: `docker-compose ps`
 3. Check docs: `docs/`

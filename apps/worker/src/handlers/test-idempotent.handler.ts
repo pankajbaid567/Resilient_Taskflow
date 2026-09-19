@@ -7,6 +7,7 @@ interface TestIdempotentPayload {
   delayFirstAttemptMs?: number;
   effectBeforeDelay?: boolean;
   alwaysFail?: boolean;
+  failUntilManualRetry?: boolean;
   ignoreCancellation?: boolean;
 }
 
@@ -118,7 +119,11 @@ export const testIdempotentHandler: JobHandler = async (payload, context) => {
     context.cancellationToken.throwIfCancellationRequested();
   }
 
-  if (options.alwaysFail) {
+  const metadata = context.job.metadata;
+  if (
+    options.alwaysFail ||
+    (options.failUntilManualRetry && !metadata?.manuallyRetriedFromJobId)
+  ) {
     throw new Error('test-idempotent requested transient failure');
   }
 

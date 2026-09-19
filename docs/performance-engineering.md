@@ -17,27 +17,27 @@ This document provides a comprehensive overview of performance optimization stra
 
 ### Performance Goals
 
-| Metric | Target | Acceptable | Poor |
-|--------|--------|------------|------|
-| **API Latency** |
-| P50 | < 50ms | < 100ms | > 100ms |
-| P95 | < 200ms | < 500ms | > 500ms |
-| P99 | < 500ms | < 1000ms | > 1000ms |
+| Metric               | Target        | Acceptable   | Poor           |
+| -------------------- | ------------- | ------------ | -------------- |
+| **API Latency**      |
+| P50                  | < 50ms        | < 100ms      | > 100ms        |
+| P95                  | < 200ms       | < 500ms      | > 500ms        |
+| P99                  | < 500ms       | < 1000ms     | > 1000ms       |
 | **Database Queries** |
-| P95 | < 10ms | < 50ms | > 50ms |
-| P99 | < 50ms | < 100ms | > 100ms |
-| **Redis Commands** |
-| P95 | < 2ms | < 5ms | > 5ms |
-| P99 | < 5ms | < 10ms | > 10ms |
-| **Job Processing** |
-| Throughput | > 1000 jobs/s | > 500 jobs/s | < 500 jobs/s |
-| Queue Depth | < 100 jobs | < 500 jobs | > 500 jobs |
-| Worker Utilization | 60-80% | 40-90% | < 40% or > 90% |
-| **Resource Usage** |
-| CPU | < 70% | < 80% | > 80% |
-| Memory | < 70% | < 80% | > 80% |
-| DB Connections | < 80% of pool | < 90% | > 90% |
-| Redis Memory | < 70% of max | < 80% | > 80% |
+| P95                  | < 10ms        | < 50ms       | > 50ms         |
+| P99                  | < 50ms        | < 100ms      | > 100ms        |
+| **Redis Commands**   |
+| P95                  | < 2ms         | < 5ms        | > 5ms          |
+| P99                  | < 5ms         | < 10ms       | > 10ms         |
+| **Job Processing**   |
+| Throughput           | > 1000 jobs/s | > 500 jobs/s | < 500 jobs/s   |
+| Queue Depth          | < 100 jobs    | < 500 jobs   | > 500 jobs     |
+| Worker Utilization   | 60-80%        | 40-90%       | < 40% or > 90% |
+| **Resource Usage**   |
+| CPU                  | < 70%         | < 80%        | > 80%          |
+| Memory               | < 70%         | < 80%        | > 80%          |
+| DB Connections       | < 80% of pool | < 90%        | > 90%          |
+| Redis Memory         | < 70% of max  | < 80%        | > 80%          |
 
 ### Performance Philosophy
 
@@ -88,6 +88,7 @@ Request → L1 Cache (In-Memory LRU)
 ```
 
 **Benefits**:
+
 - **L1 (In-Memory)**: Sub-millisecond latency, no network overhead
 - **L2 (Redis)**: Shared across instances, persistence
 - **L3 (Database)**: Source of truth
@@ -123,6 +124,7 @@ profiler.logReport();
 ```
 
 **Output**:
+
 ```
 =================================================================
 PERFORMANCE PROFILING REPORT
@@ -146,17 +148,16 @@ Analyze slow queries and get optimization recommendations:
 import { queryAnalyzer } from '@taskflow/performance';
 
 // Record query execution
-queryAnalyzer.record(
-  'SELECT * FROM jobs WHERE queue_id = $1',
-  duration,
-  { rows: 100 }
-);
+queryAnalyzer.record('SELECT * FROM jobs WHERE queue_id = $1', duration, {
+  rows: 100,
+});
 
 // Generate report
 queryAnalyzer.logReport();
 ```
 
 **Output**:
+
 ```
 =================================================================
 DATABASE QUERY ANALYSIS REPORT
@@ -187,6 +188,7 @@ redisAnalyzer.logReport();
 ```
 
 **Output**:
+
 ```
 =================================================================
 REDIS OPERATIONS ANALYSIS REPORT
@@ -234,7 +236,7 @@ INCLUDE (id, type, payload, max_attempts, timeout_ms, scheduled_at)
 WHERE status = 'QUEUED';
 
 -- Stale lease detection (worker recovery)
-CREATE INDEX idx_jobs_stale_leases 
+CREATE INDEX idx_jobs_stale_leases
 ON jobs (lease_expires_at, status)
 WHERE lease_expires_at IS NOT NULL AND status = 'PROCESSING';
 
@@ -247,6 +249,7 @@ WHERE status = 'CREATED' AND scheduled_at IS NOT NULL;
 ```
 
 **Index Selection Rules**:
+
 1. **Covering indexes** for hot queries (avoid heap lookups)
 2. **Partial indexes** for filtered queries (smaller, faster)
 3. **Composite indexes** with correct column order (WHERE → ORDER BY)
@@ -255,6 +258,7 @@ WHERE status = 'CREATED' AND scheduled_at IS NOT NULL;
 #### Query Optimization
 
 **Before**:
+
 ```typescript
 // N+1 query problem
 for (const job of jobs) {
@@ -266,6 +270,7 @@ for (const job of jobs) {
 ```
 
 **After**:
+
 ```typescript
 // Single query with JOIN
 const jobsWithAttempts = await db
@@ -283,6 +288,7 @@ See [Query Optimization Guide](./query-optimization.md) for more details.
 #### Command Pipelining
 
 **Before**:
+
 ```typescript
 // 100 commands = 100 round trips
 for (let i = 0; i < 100; i++) {
@@ -292,6 +298,7 @@ for (let i = 0; i < 100; i++) {
 ```
 
 **After**:
+
 ```typescript
 // 100 commands = 1 round trip
 const pipeline = redis.pipeline();
@@ -307,6 +314,7 @@ await pipeline.exec();
 #### Lua Scripts for Atomic Operations
 
 **Before**:
+
 ```typescript
 // 3 round trips, not atomic
 const value = await redis.get('counter');
@@ -316,13 +324,10 @@ await redis.expire('counter', 60);
 ```
 
 **After**:
+
 ```typescript
 // 1 round trip, atomic
-const newValue = await optimizedRedis.incrementWithExpiry(
-  'counter',
-  1,
-  60
-);
+const newValue = await optimizedRedis.incrementWithExpiry('counter', 1, 60);
 ```
 
 See [Redis Optimization Guide](./redis-optimization.md) for more details.
@@ -360,23 +365,25 @@ console.log(`Hit rate: ${(overallHitRate * 100).toFixed(1)}%`);
 
 **Cache Configuration**:
 
-| Cache Type | L1 Size | L1 TTL | L2 TTL | Use Case |
-|------------|---------|--------|--------|----------|
-| QueueStats | 100 | 5s | 30s | High read, tolerates staleness |
-| WorkerInfo | 500 | 10s | 60s | Health checks, medium freshness |
-| JobMetadata | 10k | 30s | 5m | Very high read, can be stale |
-| UserPrefs | 5k | 5m | 1h | Low write, high read, refresh-ahead |
-| RateLimit | 50k | 1m | N/A | L1 only (speed critical) |
+| Cache Type  | L1 Size | L1 TTL | L2 TTL | Use Case                            |
+| ----------- | ------- | ------ | ------ | ----------------------------------- |
+| QueueStats  | 100     | 5s     | 30s    | High read, tolerates staleness      |
+| WorkerInfo  | 500     | 10s    | 60s    | Health checks, medium freshness     |
+| JobMetadata | 10k     | 30s    | 5m     | Very high read, can be stale        |
+| UserPrefs   | 5k      | 5m     | 1h     | Low write, high read, refresh-ahead |
+| RateLimit   | 50k     | 1m     | N/A    | L1 only (speed critical)            |
 
 #### Cache Patterns
 
 **1. Cache-Aside (Lazy Loading)**
+
 ```typescript
 // Read: Cache → DB → Cache
 const data = await cache.get(key, () => fetchFromDB());
 ```
 
 **2. Write-Through**
+
 ```typescript
 // Write: DB → Cache
 await writeThrough(cache, key, data, async (data) => {
@@ -385,6 +392,7 @@ await writeThrough(cache, key, data, async (data) => {
 ```
 
 **3. Write-Behind (Async)**
+
 ```typescript
 // Write: Cache → DB (async)
 await writeBehind(cache, key, data, async (data) => {
@@ -393,6 +401,7 @@ await writeBehind(cache, key, data, async (data) => {
 ```
 
 **4. Refresh-Ahead**
+
 ```typescript
 // Proactive refresh before expiration
 const cache = new RefreshAheadCache(/* ... */);
@@ -408,16 +417,16 @@ import { Pool } from 'pg';
 
 const pool = new Pool({
   // Pool size formula: (CPU cores × 2) + effective_spindle_count
-  max: 20,            // Maximum connections
-  min: 5,             // Minimum kept-alive
-  
+  max: 20, // Maximum connections
+  min: 5, // Minimum kept-alive
+
   // Timeouts
-  idleTimeoutMillis: 30000,        // Close idle after 30s
-  connectionTimeoutMillis: 2000,    // Wait max 2s for connection
-  
+  idleTimeoutMillis: 30000, // Close idle after 30s
+  connectionTimeoutMillis: 2000, // Wait max 2s for connection
+
   // Statement timeout (kill slow queries)
-  statement_timeout: 10000,         // 10 seconds
-  
+  statement_timeout: 10000, // 10 seconds
+
   // Health check
   allowExitOnIdle: false,
 });
@@ -442,14 +451,14 @@ const redis = new Redis({
   maxRetriesPerRequest: 3,
   enableReadyCheck: true,
   enableOfflineQueue: true,
-  
+
   // Timeouts
   connectTimeout: 10000,
   commandTimeout: 5000,
-  
+
   // Keep-alive
   keepAlive: 30000,
-  
+
   // Retry strategy
   retryStrategy: (times) => {
     if (times > 10) return null;
@@ -463,12 +472,14 @@ const redis = new Redis({
 **Optimization Techniques**:
 
 1. **Batch Job Polling**:
+
 ```typescript
 // Poll 10 jobs at once instead of 1
 const jobs = await pollJobs(queueId, 10);
 ```
 
 2. **Concurrent Processing**:
+
 ```typescript
 // Process jobs concurrently up to concurrency limit
 const concurrency = 10;
@@ -476,12 +487,14 @@ await Promise.all(jobs.slice(0, concurrency).map(processJob));
 ```
 
 3. **Reduce Heartbeat Frequency**:
+
 ```typescript
 // Heartbeat every 30s instead of every 10s
 setInterval(sendHeartbeat, 30000);
 ```
 
 4. **Optimize Lease Management**:
+
 ```typescript
 // Use optimistic locking instead of row locks
 const updated = await db
@@ -496,26 +509,26 @@ const updated = await db
 
 Create alerts for:
 
-| Metric | Threshold | Action |
-|--------|-----------|--------|
-| **API Latency** |
-| P99 > 1s for 5min | Scale API servers |
-| P95 > 500ms for 10min | Investigate slow queries |
-| **Queue Depth** |
-| > 1000 for 5min | Scale workers |
-| > 5000 for 1min | Critical: auto-scale |
-| **Worker Health** |
-| 0 active workers | Critical: restart workers |
-| < 50% expected workers | Warning: check health |
-| **Database** |
-| Connection pool > 90% | Scale connections or optimize queries |
-| Slow queries > 100ms | Add indexes |
-| **Redis** |
-| Memory > 80% | Enable eviction or scale |
-| Command latency > 10ms | Check network or load |
-| **Error Rates** |
-| API errors > 1% | Investigate failures |
-| Job failures > 5% | Check handlers |
+| Metric                 | Threshold                             | Action |
+| ---------------------- | ------------------------------------- | ------ |
+| **API Latency**        |
+| P99 > 1s for 5min      | Scale API servers                     |
+| P95 > 500ms for 10min  | Investigate slow queries              |
+| **Queue Depth**        |
+| > 1000 for 5min        | Scale workers                         |
+| > 5000 for 1min        | Critical: auto-scale                  |
+| **Worker Health**      |
+| 0 active workers       | Critical: restart workers             |
+| < 50% expected workers | Warning: check health                 |
+| **Database**           |
+| Connection pool > 90%  | Scale connections or optimize queries |
+| Slow queries > 100ms   | Add indexes                           |
+| **Redis**              |
+| Memory > 80%           | Enable eviction or scale              |
+| Command latency > 10ms | Check network or load                 |
+| **Error Rates**        |
+| API errors > 1%        | Investigate failures                  |
+| Job failures > 5%      | Check handlers                        |
 
 ### Grafana Alerts
 
@@ -531,17 +544,17 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "API P99 latency is high"
-          description: "P99 latency is {{ $value }}s (threshold: 1s)"
-      
+          summary: 'API P99 latency is high'
+          description: 'P99 latency is {{ $value }}s (threshold: 1s)'
+
       - alert: HighQueueBacklog
         expr: taskflow_queue_depth > 1000
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "Queue backlog is high"
-          description: "Queue depth is {{ $value }} jobs"
+          summary: 'Queue backlog is high'
+          description: 'Queue depth is {{ $value }} jobs'
 ```
 
 ## Benchmarking
@@ -572,13 +585,13 @@ Performance Improvements:
 
 ### Benchmark Comparison
 
-| Optimization | Before | After | Improvement |
-|--------------|--------|-------|-------------|
-| Database indexes | 120ms | 8ms | **15x faster** |
-| Redis pipelining | 1000ms | 15ms | **66x faster** |
-| Multi-layer cache | 50ms | 0.5ms | **100x faster** |
-| Batch operations | 500ms | 25ms | **20x faster** |
-| Connection pooling | 200ms | 50ms | **4x faster** |
+| Optimization       | Before | After | Improvement     |
+| ------------------ | ------ | ----- | --------------- |
+| Database indexes   | 120ms  | 8ms   | **15x faster**  |
+| Redis pipelining   | 1000ms | 15ms  | **66x faster**  |
+| Multi-layer cache  | 50ms   | 0.5ms | **100x faster** |
+| Batch operations   | 500ms  | 25ms  | **20x faster**  |
+| Connection pooling | 200ms  | 50ms  | **4x faster**   |
 
 ## Production Tuning
 
@@ -605,6 +618,7 @@ Performance Improvements:
 **Formula**: `capacity = workers × concurrency × jobs_per_second`
 
 Example:
+
 - Workers: 10
 - Concurrency per worker: 10
 - Jobs per second per slot: 1
@@ -616,24 +630,28 @@ For 1000 jobs/second, need **100 workers** or **10 workers with 100 concurrency*
 ### Scaling Strategy
 
 **Horizontal Scaling** (Recommended):
+
 - Scale API servers: 2 → 10 (5x capacity)
 - Scale workers: 5 → 50 (10x capacity)
 - Use load balancer for API
 - Use Redis for shared state
 
 **Vertical Scaling** (When horizontal not enough):
+
 - Increase CPU: 4 cores → 8 cores
 - Increase memory: 8GB → 16GB
 - Increase DB connections: 20 → 50
 - Increase worker concurrency: 10 → 20
 
 **Database Scaling**:
+
 - Read replicas for read-heavy workloads
 - Connection pooler (PgBouncer)
 - Partitioning for large tables
 - Archiving old data
 
 **Redis Scaling**:
+
 - Redis Cluster for high throughput
 - Redis Sentinel for high availability
 - Separate Redis instances per use case (cache, queue, rate limiting)
@@ -645,11 +663,13 @@ For 1000 jobs/second, need **100 workers** or **10 workers with 100 concurrency*
 **Problem**: Dashboard loading slowly (3 seconds)
 
 **Investigation**:
+
 ```bash
 pnpm perf:report
 ```
 
 **Finding**:
+
 ```
 DATABASE QUERY ANALYSIS:
 Possible N+1 Query Pattern:
@@ -659,6 +679,7 @@ Possible N+1 Query Pattern:
 ```
 
 **Solution**:
+
 ```typescript
 // Before: N+1 queries
 const jobs = await getJobs();
@@ -680,18 +701,21 @@ const jobs = await db
 **Problem**: Redis OOM errors, evicting keys
 
 **Investigation**:
+
 ```bash
 redis-cli INFO memory
 redis-cli --bigkeys
 ```
 
 **Finding**:
+
 ```
 used_memory: 1.95GB (98% of 2GB maxmemory)
 Biggest key: session:* (avg 50KB × 40,000 keys = 2GB)
 ```
 
 **Solution**:
+
 1. Set TTL on session keys: `SETEX session:* 3600`
 2. Enable eviction: `maxmemory-policy allkeys-lru`
 3. Increase memory: 2GB → 4GB
@@ -703,6 +727,7 @@ Biggest key: session:* (avg 50KB × 40,000 keys = 2GB)
 **Problem**: P99 latency spiked to 2 seconds
 
 **Investigation**:
+
 ```bash
 # Check slow queries
 SELECT query, calls, mean_exec_time
@@ -712,6 +737,7 @@ ORDER BY mean_exec_time DESC;
 ```
 
 **Finding**:
+
 ```
 Query: SELECT * FROM jobs WHERE status = 'QUEUED' ORDER BY created_at
 Calls: 1,234
@@ -720,6 +746,7 @@ Issue: Missing index on (status, created_at)
 ```
 
 **Solution**:
+
 ```sql
 CREATE INDEX idx_jobs_status_created
 ON jobs (status, created_at DESC);
@@ -752,11 +779,12 @@ VACUUM ANALYZE jobs;
 ✅ **Monitor continuously** in production  
 ✅ **Set up alerts** for key metrics  
 ✅ **Load test** before deploying  
-✅ **Document runbooks** for incidents  
+✅ **Document runbooks** for incidents
 
 ### Performance Checklist
 
 Before production:
+
 - [x] Database indexes optimized
 - [x] Redis commands pipelined
 - [x] Multi-layer caching enabled
@@ -779,4 +807,4 @@ Before production:
 
 ---
 
-*"You can't improve what you don't measure."* – Peter Drucker
+_"You can't improve what you don't measure."_ – Peter Drucker

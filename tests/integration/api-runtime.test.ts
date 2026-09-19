@@ -726,7 +726,7 @@ describe.sequential('API runtime against PostgreSQL and Redis', () => {
       }),
       {}
     );
-    expect(statusCounts).toEqual({ 429: 10, 501: 50 });
+    expect(statusCounts).toEqual({ 200: 50, 429: 10 });
 
     if (!redis) throw new Error('Redis client not initialized');
     expect(await redis.zcard(`taskflow:rate-limit:mutation:${adminId}`)).toBe(

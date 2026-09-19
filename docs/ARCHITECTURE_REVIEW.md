@@ -1,3 +1,5 @@
+> Historical snapshot only. Claims and numbers below are not current acceptance evidence; use the root README and executable gates.
+
 # Architecture Review: TaskFlow Distributed Task Queue
 
 **Review Date**: January 2024  
@@ -12,19 +14,20 @@ TaskFlow is a **well-architected distributed task queue** demonstrating strong u
 
 ### Overall Assessment
 
-| Category | Rating | Status |
-|----------|--------|--------|
-| **Architecture Design** | ⭐⭐⭐⭐⭐ | Excellent |
-| **Correctness** | ⭐⭐⭐ | Good (with P0 issues) |
-| **Reliability** | ⭐⭐⭐⭐ | Very Good |
-| **Scalability** | ⭐⭐⭐ | Good (needs work) |
-| **Security** | ⭐⭐ | Poor (NOT production-ready) |
-| **Observability** | ⭐⭐⭐⭐ | Very Good |
-| **Operations** | ⭐⭐⭐ | Good (missing features) |
+| Category                | Rating     | Status                      |
+| ----------------------- | ---------- | --------------------------- |
+| **Architecture Design** | ⭐⭐⭐⭐⭐ | Excellent                   |
+| **Correctness**         | ⭐⭐⭐     | Good (with P0 issues)       |
+| **Reliability**         | ⭐⭐⭐⭐   | Very Good                   |
+| **Scalability**         | ⭐⭐⭐     | Good (needs work)           |
+| **Security**            | ⭐⭐       | Poor (NOT production-ready) |
+| **Observability**       | ⭐⭐⭐⭐   | Very Good                   |
+| **Operations**          | ⭐⭐⭐     | Good (missing features)     |
 
 ### Production Readiness: **NOT READY** ❌
 
 **Blockers:**
+
 1. P0-1: Duplicate execution race condition (RACE-6)
 2. P0-2: Hardcoded authentication credentials
 3. P0-3: Lease expiry sweeper not running
@@ -113,6 +116,7 @@ TaskFlow is a **well-architected distributed task queue** demonstrating strong u
 ### Key Design Decisions
 
 ✅ **Good Decisions:**
+
 1. **PostgreSQL as source of truth** - Single source of state, no eventual consistency issues
 2. **Redis Streams with consumer groups** - Distributed consumption, automatic load balancing
 3. **Lease-based coordination** - Prevents duplicate execution (mostly)
@@ -125,6 +129,7 @@ TaskFlow is a **well-architected distributed task queue** demonstrating strong u
 10. **Observability built-in** - Prometheus metrics, structured logging, OpenTelemetry support
 
 ❌ **Questionable Decisions:**
+
 1. **Fire-and-forget event publishing** - Events can be lost, not transactional
 2. **Single consumer group** - All workers share one group (limits flexibility)
 3. **Priority queue only in PostgreSQL** - Redis delivers FIFO regardless of priority
@@ -146,18 +151,19 @@ TaskFlow is a **well-architected distributed task queue** demonstrating strong u
 Worker updates job to `SUCCEEDED` in PostgreSQL, then crashes **before** XACK to Redis. Message stays in Redis pending state. Stale recovery claims the message and re-executes the succeeded job.
 
 **Code Location:**
+
 ```typescript
 // packages/worker/src/worker.ts:400-450
 try {
   // Execute handler
   const result = await this.runHandler(job, cancellationToken);
-  
+
   // Complete job in PostgreSQL
   await completeJob(jobId, this.config.workerId, result); // ✅ COMMITTED
-  
+
   // Acknowledge message in Redis
   await acknowledgeMessage(queue, consumerGroup, message.id); // ⚠️ CRASH HERE = DUPLICATE EXECUTION
-  
+
   // Update stats
   this.updateStats(true, duration);
 } catch (error) {
@@ -166,6 +172,7 @@ try {
 ```
 
 **Scenario:**
+
 1. Worker A executes job, writes `SUCCEEDED` to PostgreSQL
 2. Worker A crashes before XACK
 3. Message stays in Redis pending (not acknowledged)
@@ -176,22 +183,24 @@ try {
 PostgreSQL and Redis operations are **not atomic**. Two-phase commit not used.
 
 **Impact:**
+
 - If handler is **not idempotent**: Duplicate side effects (double charge, double email, etc.)
 - If lease acquisition checks status: Message is acknowledged but job stuck in `SUCCEEDED` with no re-execution (better but still broken)
 
 **Recommended Fix:**
 
 **Option 1: Reverse Order (Simpler)**
+
 ```typescript
 try {
   const result = await this.runHandler(job, cancellationToken);
-  
+
   // 1. XACK first (idempotent, can retry)
   await acknowledgeMessage(queue, consumerGroup, message.id);
-  
+
   // 2. Update PostgreSQL (idempotent with optimistic locking)
   await completeJob(jobId, this.config.workerId, result);
-  
+
   this.updateStats(true, duration);
 } catch (error) {
   // If XACK succeeds but completeJob fails, job stays PROCESSING
@@ -203,6 +212,7 @@ try {
 **Cons:** Job can be stuck in PROCESSING if completeJob fails
 
 **Option 2: Idempotency Token (Better)**
+
 ```typescript
 // Store execution result with idempotency token before XACK
 const executionToken = `exec:${jobId}:${attempt}`;
@@ -215,7 +225,7 @@ await db.transaction(async (tx) => {
     result,
     createdAt: new Date(),
   });
-  
+
   // Update job
   await completeJob(jobId, workerId, result, tx);
 });
@@ -241,45 +251,54 @@ await acknowledgeMessage(queue, consumerGroup, message.id);
 Authentication middleware uses hardcoded test credentials in production code.
 
 **Code Location:**
+
 ```typescript
 // apps/api/src/middleware/auth.ts:98-120
-async function validateApiKey(apiKey: string): Promise<AuthenticatedUser | null> {
+async function validateApiKey(
+  apiKey: string
+): Promise<AuthenticatedUser | null> {
   // Temporary implementation for development
-  if (apiKey === 'test-api-key') {  // ⚠️ HARDCODED!
+  if (apiKey === 'test-api-key') {
+    // ⚠️ HARDCODED!
     return {
       id: 'test-user-id',
       email: 'test@example.com',
       role: 'user',
     };
   }
-  
-  if (apiKey === 'admin-api-key') {  // ⚠️ HARDCODED!
+
+  if (apiKey === 'admin-api-key') {
+    // ⚠️ HARDCODED!
     return {
       id: 'admin-user-id',
       email: 'admin@example.com',
       role: 'admin',
     };
   }
-  
+
   return null;
 }
 
-async function validateJwtToken(token: string): Promise<AuthenticatedUser | null> {
+async function validateJwtToken(
+  token: string
+): Promise<AuthenticatedUser | null> {
   // Temporary implementation for development
   // In production, use jsonwebtoken or jose library
-  if (token === 'valid-jwt-token') {  // ⚠️ HARDCODED!
+  if (token === 'valid-jwt-token') {
+    // ⚠️ HARDCODED!
     return {
       id: 'jwt-user-id',
       email: 'jwt@example.com',
       role: 'user',
     };
   }
-  
+
   return null;
 }
 ```
 
 **Impact:**
+
 - **Anyone** can submit jobs with `X-API-Key: test-api-key`
 - **No user isolation** - test users can access any job
 - **No audit trail** - All actions attributed to test users
@@ -288,14 +307,19 @@ async function validateJwtToken(token: string): Promise<AuthenticatedUser | null
 **Recommended Fix:**
 
 1. **Immediate:** Add environment check
+
 ```typescript
-async function validateApiKey(apiKey: string): Promise<AuthenticatedUser | null> {
+async function validateApiKey(
+  apiKey: string
+): Promise<AuthenticatedUser | null> {
   // NEVER allow test keys in production
   if (process.env.NODE_ENV === 'production' && apiKey.startsWith('test-')) {
-    logger.error('Test API key used in production', { apiKey: apiKey.substring(0, 8) });
+    logger.error('Test API key used in production', {
+      apiKey: apiKey.substring(0, 8),
+    });
     return null;
   }
-  
+
   // Look up API key in database
   const apiKeyRecord = await db
     .select()
@@ -303,11 +327,11 @@ async function validateApiKey(apiKey: string): Promise<AuthenticatedUser | null>
     .where(eq(apiKeys.key, apiKey))
     .where(eq(apiKeys.isActive, true))
     .where(gt(apiKeys.expiresAt, new Date()));
-  
+
   if (!apiKeyRecord) {
     return null;
   }
-  
+
   // Fetch user
   const user = await getUserById(apiKeyRecord.userId);
   return user;
@@ -315,14 +339,17 @@ async function validateApiKey(apiKey: string): Promise<AuthenticatedUser | null>
 ```
 
 2. **Proper JWT validation:**
+
 ```typescript
 import { jwtVerify } from 'jose';
 
-async function validateJwtToken(token: string): Promise<AuthenticatedUser | null> {
+async function validateJwtToken(
+  token: string
+): Promise<AuthenticatedUser | null> {
   try {
     const secret = new TextEncoder().encode(process.env.JWT_SECRET);
     const { payload } = await jwtVerify(token, secret);
-    
+
     return {
       id: payload.sub as string,
       email: payload.email as string,
@@ -336,6 +363,7 @@ async function validateJwtToken(token: string): Promise<AuthenticatedUser | null
 ```
 
 3. **Add api_keys table to schema:**
+
 ```sql
 CREATE TABLE api_keys (
   id UUID PRIMARY KEY,
@@ -363,17 +391,17 @@ CREATE TABLE api_keys (
 Function `getJobsWithExpiredLeases()` exists but is never called. Expired leases accumulate forever.
 
 **Code Location:**
+
 ```typescript
 // packages/database/src/repositories/job.repository.ts:450-470
-export async function getJobsWithExpiredLeases(limit: number = 100): Promise<Job[]> {
+export async function getJobsWithExpiredLeases(
+  limit: number = 100
+): Promise<Job[]> {
   return await db
     .select()
     .from(jobs)
     .where(
-      and(
-        eq(jobs.status, 'PROCESSING'),
-        lt(jobs.leaseExpiresAt, new Date())
-      )
+      and(eq(jobs.status, 'PROCESSING'), lt(jobs.leaseExpiresAt, new Date()))
     )
     .limit(limit);
 }
@@ -381,6 +409,7 @@ export async function getJobsWithExpiredLeases(limit: number = 100): Promise<Job
 ```
 
 **Scenario:**
+
 1. Worker A acquires lease (30s), starts processing
 2. Worker A hangs (infinite loop, network partition, deadlock)
 3. Lease expires after 30s
@@ -388,6 +417,7 @@ export async function getJobsWithExpiredLeases(limit: number = 100): Promise<Job
 5. Job stuck forever in PROCESSING
 
 **Impact:**
+
 - **Job starvation**: Jobs never complete or retry
 - **Worker deadlock**: All workers waiting for jobs that will never be released
 - **Queue depth grows**: Throughput drops to zero
@@ -395,6 +425,7 @@ export async function getJobsWithExpiredLeases(limit: number = 100): Promise<Job
 **Recommended Fix:**
 
 **Background Sweeper:**
+
 ```typescript
 // packages/worker/src/lease-sweeper.ts (NEW FILE)
 import { getJobsWithExpiredLeases, releaseJobLease } from '@taskflow/database';
@@ -404,15 +435,15 @@ const logger = createLogger({ component: 'LeaseSweeper' });
 
 export class LeaseSweeper {
   private timer: NodeJS.Timeout | null = null;
-  
+
   start(intervalMs: number = 30000) {
     this.timer = setInterval(async () => {
       try {
         const expiredJobs = await getJobsWithExpiredLeases(100);
-        
+
         if (expiredJobs.length > 0) {
           logger.warn('Found expired leases', { count: expiredJobs.length });
-          
+
           for (const job of expiredJobs) {
             await releaseJobLease(job.id, job.workerId, job.leaseId);
             logger.info('Released expired lease', { jobId: job.id });
@@ -423,7 +454,7 @@ export class LeaseSweeper {
       }
     }, intervalMs);
   }
-  
+
   stop() {
     if (this.timer) {
       clearInterval(this.timer);
@@ -434,6 +465,7 @@ export class LeaseSweeper {
 ```
 
 **Start in Worker:**
+
 ```typescript
 // apps/worker/src/index.ts
 const leaseSweeper = new LeaseSweeper();
@@ -447,6 +479,7 @@ process.on('SIGTERM', () => {
 ```
 
 **Alternative: Use Scheduled Jobs** (if using scheduler already)
+
 ```typescript
 // Register lease sweeper as a recurring job
 scheduler.schedule('lease-sweeper', {
@@ -474,6 +507,7 @@ scheduler.schedule('lease-sweeper', {
 `queues` table exists in schema with `maxConcurrency`, `priority`, `rateLimitPerMinute` fields, but API hardcodes `queueId` to `'default-queue-id'` and never reads queue config.
 
 **Code Location:**
+
 ```typescript
 // apps/api/src/routes/jobs.ts:85
 const jobData = {
@@ -488,6 +522,7 @@ const jobData = {
 ```
 
 **Queue API Returns Mock Data:**
+
 ```typescript
 // apps/api/src/routes/queues.ts:25-60
 fastify.get('/', async (request, reply) => {
@@ -496,17 +531,18 @@ fastify.get('/', async (request, reply) => {
     {
       id: 'default-queue-id',
       name: 'default',
-      maxConcurrency: 10,  // ⚠️ IGNORED BY WORKERS!
+      maxConcurrency: 10, // ⚠️ IGNORED BY WORKERS!
       // ...
     },
     // ...
   ];
-  
+
   return reply.send({ queues: mockQueues });
 });
 ```
 
 **Impact:**
+
 - **Cannot configure queues dynamically** - Must redeploy to change concurrency
 - **Per-queue rate limiting impossible** - All jobs treated equally
 - **Queue priorities ignored** - Cannot prioritize critical queues
@@ -515,6 +551,7 @@ fastify.get('/', async (request, reply) => {
 **Recommended Fix:**
 
 1. **Read queue from database:**
+
 ```typescript
 // apps/api/src/routes/jobs.ts
 const queue = await getQueueByName(body.queue || 'default');
@@ -537,12 +574,13 @@ const jobData = {
 ```
 
 2. **Workers read queue config:**
+
 ```typescript
 // packages/worker/src/worker.ts
 async start() {
   // Fetch queue configuration from database
   const queueConfigs = await getQueuesByNames(this.config.queues);
-  
+
   for (const queue of queueConfigs) {
     // Apply per-queue concurrency limits
     this.queueLimits.set(queue.name, {
@@ -550,12 +588,13 @@ async start() {
       currentLoad: 0,
     });
   }
-  
+
   // ...
 }
 ```
 
 3. **Seed default queues:**
+
 ```typescript
 // packages/database/src/seed.ts
 await db.insert(queues).values([
@@ -594,6 +633,7 @@ await db.insert(queues).values([
 Rate limiter middleware exists but is **not applied** to job submission endpoints.
 
 **Code Location:**
+
 ```typescript
 // apps/api/src/routes/jobs.ts:60-150
 // POST /api/v1/jobs
@@ -604,8 +644,8 @@ fastify.post<{
   '/',
   {
     preHandler: [
-      authenticate,      // ✅ Applied
-      checkIdempotency,  // ✅ Applied
+      authenticate, // ✅ Applied
+      checkIdempotency, // ✅ Applied
       // ⚠️ MISSING: rateLimiter!
     ],
   },
@@ -616,6 +656,7 @@ fastify.post<{
 ```
 
 **Impact:**
+
 - **API DoS**: Single user can submit millions of jobs
 - **Database exhaustion**: Jobs table grows unbounded
 - **Redis exhaustion**: Streams fill memory
@@ -626,7 +667,7 @@ fastify.post<{
 ```typescript
 // Create job-specific rate limiter
 const jobSubmissionLimiter = createRateLimiter({
-  maxRequests: 100,      // 100 jobs per minute per user
+  maxRequests: 100, // 100 jobs per minute per user
   windowSeconds: 60,
   keyExtractor: (request) => {
     return `job-submission:${request.user?.id || request.ip}`;
@@ -639,7 +680,7 @@ fastify.post(
   {
     preHandler: [
       authenticate,
-      jobSubmissionLimiter,  // ✅ Add rate limiting
+      jobSubmissionLimiter, // ✅ Add rate limiting
       checkIdempotency,
     ],
   },
@@ -650,6 +691,7 @@ fastify.post(
 ```
 
 **Additional Recommendations:**
+
 - **Per-queue limits**: Different limits for different queues
 - **Burst allowance**: Allow short bursts (token bucket algorithm)
 - **Admin bypass**: Allow admins to submit without limits (with flag)
@@ -666,31 +708,40 @@ fastify.post(
 Job priority is stored in PostgreSQL and used in `ORDER BY`, but Redis Streams delivers messages in FIFO order (insertion order). Workers receive jobs in wrong order.
 
 **Code Location:**
+
 ```typescript
 // packages/queue/src/consumer.ts:40-80
 export async function consumeJobs(
   workerId: string,
   queueNames: string[],
-  options: { batchSize?: number; blockMs?: number; } = {}
+  options: { batchSize?: number; blockMs?: number } = {}
 ): Promise<ConsumedMessage[]> {
   // ...
   const result = await redis.xreadgroup(
-    'GROUP', groupName, consumerName,
-    'COUNT', batchSize,
-    'BLOCK', blockMs,
-    'STREAMS', ...streams, ...ids  // ⚠️ Returns FIFO order
+    'GROUP',
+    groupName,
+    consumerName,
+    'COUNT',
+    batchSize,
+    'BLOCK',
+    blockMs,
+    'STREAMS',
+    ...streams,
+    ...ids // ⚠️ Returns FIFO order
   );
   // ...
 }
 ```
 
 **Scenario:**
+
 1. Submit 1000 LOW priority jobs (enqueued to Redis)
 2. Submit 1 CRITICAL priority job (enqueued after)
 3. Worker consumes in FIFO order
 4. CRITICAL job waits behind 1000 LOW jobs
 
 **Impact:**
+
 - **Priority inversion**: Critical jobs starved
 - **SLA violations**: High-priority customers wait
 - **Business impact**: Time-sensitive jobs delayed (payment processing, notifications)
@@ -698,22 +749,24 @@ export async function consumeJobs(
 **Recommended Fix:**
 
 **Option 1: Separate Streams Per Priority (Simpler)**
+
 ```typescript
 // Use different Redis streams per priority
 const streamKey = `taskflow:stream:${queueName}:${priority}`;
 
 // Worker consumes from multiple streams with priority
 const streams = [
-  ...queues.map(q => `taskflow:stream:${q}:CRITICAL`),
-  ...queues.map(q => `taskflow:stream:${q}:HIGH`),
-  ...queues.map(q => `taskflow:stream:${q}:NORMAL`),
-  ...queues.map(q => `taskflow:stream:${q}:LOW`),
+  ...queues.map((q) => `taskflow:stream:${q}:CRITICAL`),
+  ...queues.map((q) => `taskflow:stream:${q}:HIGH`),
+  ...queues.map((q) => `taskflow:stream:${q}:NORMAL`),
+  ...queues.map((q) => `taskflow:stream:${q}:LOW`),
 ];
 
 // XREADGROUP automatically round-robins, but consume CRITICAL first
 ```
 
 **Option 2: Redis Sorted Sets (Better for priorities)**
+
 ```typescript
 // Use sorted set with priority as score
 await redis.zadd(
@@ -727,6 +780,7 @@ const jobs = await redis.zpopmax(`taskflow:queue:${queueName}`, batchSize);
 ```
 
 **Pros/Cons:**
+
 - **Option 1**: Preserves consumer groups, easier migration
 - **Option 2**: More flexible, true priority queue, but loses consumer group features
 
@@ -744,6 +798,7 @@ const jobs = await redis.zpopmax(`taskflow:queue:${queueName}`, batchSize);
 Job state changes in PostgreSQL are separate from Kafka event publishing. If Kafka is down or publish fails, events are lost.
 
 **Code Location:**
+
 ```typescript
 // packages/events/src/publisher.ts:50-80
 export async function publishJobCompleted(event: JobCompletedEvent): Promise<void> {
@@ -764,6 +819,7 @@ export async function publishJobCompleted(event: JobCompletedEvent): Promise<voi
 ```
 
 **Called After PostgreSQL Commit:**
+
 ```typescript
 // packages/worker/src/worker.ts:450
 await completeJob(jobId, workerId, result); // ✅ COMMITTED
@@ -771,6 +827,7 @@ await publishJobCompleted({ jobId, ... });  // ⚠️ MAY FAIL, EVENT LOST
 ```
 
 **Impact:**
+
 - **Missing events**: Downstream services don't know job completed
 - **Inconsistent views**: Dashboard shows stale data
 - **Audit trail gaps**: Events missing from audit log
@@ -779,6 +836,7 @@ await publishJobCompleted({ jobId, ... });  // ⚠️ MAY FAIL, EVENT LOST
 **Recommended Fix:**
 
 **Option 1: Outbox Pattern (Best)**
+
 ```sql
 CREATE TABLE outbox (
   id UUID PRIMARY KEY,
@@ -794,7 +852,7 @@ CREATE TABLE outbox (
 // In same transaction as job update
 await db.transaction(async (tx) => {
   await completeJob(jobId, workerId, result, tx);
-  
+
   // Store event in outbox (transactional)
   await tx.insert(outbox).values({
     id: crypto.randomUUID(),
@@ -806,7 +864,7 @@ await db.transaction(async (tx) => {
 // Separate background process publishes from outbox
 setInterval(async () => {
   const pending = await db.select().from(outbox).where(isNull(outbox.publishedAt)).limit(100);
-  
+
   for (const event of pending) {
     try {
       await publishToKafka(event);
@@ -819,11 +877,13 @@ setInterval(async () => {
 ```
 
 **Option 2: Change Data Capture (Ideal for large scale)**
+
 - Use Debezium to stream PostgreSQL WAL to Kafka
 - No application code needed, guaranteed consistency
 - Requires infrastructure setup
 
 **Option 3: Make Events Optional (Pragmatic)**
+
 - Allow disabling Kafka entirely
 - Use job_events table in PostgreSQL as fallback
 - Consumers poll database instead of Kafka
@@ -842,19 +902,21 @@ setInterval(async () => {
 Function `cleanupExpiredIdempotencyKeys()` exists but is never called. Expired keys (>24h) accumulate forever.
 
 **Code Location:**
+
 ```typescript
 // packages/database/src/repositories/job.repository.ts:750-760
 export async function cleanupExpiredIdempotencyKeys(): Promise<number> {
   const result = await db
     .delete(schema.idempotencyKeys)
     .where(lt(schema.idempotencyKeys.expiresAt, new Date()));
-  
+
   return result.rowCount || 0;
 }
 // ⚠️ NEVER CALLED!
 ```
 
 **Impact:**
+
 - **Table bloat**: Idempotency keys table grows to millions of rows
 - **Query slowdown**: Lookups become slow despite indexes
 - **Disk exhaustion**: Database runs out of space
@@ -865,18 +927,21 @@ export async function cleanupExpiredIdempotencyKeys(): Promise<number> {
 // packages/database/src/cleanup-scheduler.ts (NEW FILE)
 export class DatabaseCleaner {
   private timer: NodeJS.Timeout | null = null;
-  
-  start(intervalMs: number = 3600000) { // 1 hour
+
+  start(intervalMs: number = 3600000) {
+    // 1 hour
     this.timer = setInterval(async () => {
       try {
         // Clean up expired idempotency keys
         const idempotencyDeleted = await cleanupExpiredIdempotencyKeys();
-        logger.info('Cleaned up idempotency keys', { count: idempotencyDeleted });
-        
+        logger.info('Cleaned up idempotency keys', {
+          count: idempotencyDeleted,
+        });
+
         // Clean up old completed jobs (older than 30 days)
         const jobsDeleted = await deleteOldCompletedJobs(30);
         logger.info('Cleaned up old jobs', { count: jobsDeleted });
-        
+
         // Clean up old job attempts (older than 90 days)
         const attemptsDeleted = await deleteOldJobAttempts(90);
         logger.info('Cleaned up job attempts', { count: attemptsDeleted });
@@ -885,7 +950,7 @@ export class DatabaseCleaner {
       }
     }, intervalMs);
   }
-  
+
   stop() {
     if (this.timer) {
       clearInterval(this.timer);
@@ -895,6 +960,7 @@ export class DatabaseCleaner {
 ```
 
 **Start in API or Worker:**
+
 ```typescript
 const cleaner = new DatabaseCleaner();
 cleaner.start(3600000); // Run every hour
@@ -912,6 +978,7 @@ cleaner.start(3600000); // Run every hour
 No distributed lock ensures only one scheduler instance runs. If multiple API/worker instances run schedulers, same jobs are enqueued multiple times.
 
 **Code Location:**
+
 ```typescript
 // packages/queue/src/scheduler.ts:50-100
 export class JobScheduler {
@@ -919,7 +986,7 @@ export class JobScheduler {
     this.timer = setInterval(async () => {
       // ⚠️ ALL INSTANCES RUN THIS SIMULTANEOUSLY!
       const dueJobs = await getDueJobs();
-      
+
       for (const job of dueJobs) {
         await enqueueJob(job.id, job.queueName);
         await updateJobStatus(job.id, 'QUEUED');
@@ -930,12 +997,14 @@ export class JobScheduler {
 ```
 
 **Scenario:**
+
 1. Deploy 3 API replicas, each runs scheduler
 2. Scheduler finds 100 due jobs
 3. All 3 replicas enqueue same 100 jobs to Redis (300 messages total)
 4. Workers process 300 messages for 100 jobs (3x duplicate execution)
 
 **Impact:**
+
 - **Duplicate execution**: Jobs run multiple times
 - **Wasted resources**: Workers process duplicate work
 - **Increased costs**: 3x Redis memory, 3x compute
@@ -943,16 +1012,17 @@ export class JobScheduler {
 **Recommended Fix:**
 
 **Option 1: Distributed Lock with Redis**
+
 ```typescript
 import Redlock from 'redlock';
 
 export class JobScheduler {
   private redlock: Redlock;
-  
+
   constructor(redis: Redis) {
     this.redlock = new Redlock([redis]);
   }
-  
+
   async start() {
     this.timer = setInterval(async () => {
       try {
@@ -961,11 +1031,11 @@ export class JobScheduler {
           ['scheduler-lock'],
           30000 // 30s
         );
-        
+
         try {
           // Only one instance runs this
           const dueJobs = await getDueJobs();
-          
+
           for (const job of dueJobs) {
             await enqueueJob(job.id, job.queueName);
             await updateJobStatus(job.id, 'QUEUED');
@@ -983,16 +1053,17 @@ export class JobScheduler {
 ```
 
 **Option 2: PostgreSQL Advisory Locks**
+
 ```typescript
 async runScheduler() {
   // Try to acquire advisory lock (non-blocking)
   const [result] = await db.execute(sql`SELECT pg_try_advisory_lock(12345)`);
-  
+
   if (!result.pg_try_advisory_lock) {
     // Another instance holds lock
     return;
   }
-  
+
   try {
     // Run scheduler logic
     const dueJobs = await getDueJobs();
@@ -1005,6 +1076,7 @@ async runScheduler() {
 ```
 
 **Option 3: Single Scheduler Instance (Simplest)**
+
 - Deploy dedicated scheduler service (separate from API/worker)
 - Only one replica
 - Use liveness probe to restart on failure
@@ -1025,6 +1097,7 @@ async runScheduler() {
 PostgreSQL connection pool has default max=10 connections, but with multiple API/worker instances, connections are exhausted quickly.
 
 **Code Location:**
+
 ```typescript
 // packages/database/src/client.ts:15-20
 const queryClient = postgres(connectionString, {
@@ -1035,6 +1108,7 @@ const queryClient = postgres(connectionString, {
 ```
 
 **Problem:**
+
 - 3 API replicas × 10 connections = 30
 - 5 worker replicas × 10 connections = 50
 - **Total: 80 connections**
@@ -1057,8 +1131,9 @@ export const databaseConfig = {
 ```
 
 **Sizing Guide:**
+
 ```
-max_connections = (num_api_replicas × api_pool_size) 
+max_connections = (num_api_replicas × api_pool_size)
                 + (num_worker_replicas × worker_pool_size)
                 + 20 (buffer for admin, migrations, etc.)
 
@@ -1086,33 +1161,36 @@ Single Redis instance handles all queue operations. Redis is single-threaded, so
 **Recommended Fix:**
 
 **Option 1: Redis Cluster (Horizontal Scaling)**
+
 ```yaml
 # docker-compose.prod.yml
 services:
   redis-node-1:
     image: redis:7-alpine
     command: redis-server --cluster-enabled yes --port 7000
-    
+
   redis-node-2:
     image: redis:7-alpine
     command: redis-server --cluster-enabled yes --port 7001
-    
+
   redis-node-3:
     image: redis:7-alpine
     command: redis-server --cluster-enabled yes --port 7002
 ```
 
 **Option 2: Separate Redis Per Queue**
+
 ```typescript
 // High-throughput queues get dedicated Redis instances
 const redisInstances = {
-  'critical': new Redis({ host: 'redis-critical' }),
-  'default': new Redis({ host: 'redis-default' }),
-  'low': new Redis({ host: 'redis-low' }),
+  critical: new Redis({ host: 'redis-critical' }),
+  default: new Redis({ host: 'redis-default' }),
+  low: new Redis({ host: 'redis-low' }),
 };
 ```
 
 **Option 3: Redis + Valkey (Redis Fork)**
+
 - Valkey is multi-threaded Redis fork
 - Drop-in replacement, same API
 - Better throughput on multi-core machines
@@ -1129,6 +1207,7 @@ const redisInstances = {
 Workers claim up to 10 stale messages in `claimStaleMessages()`, but don't check if they have capacity. Can overload workers.
 
 **Code Location:**
+
 ```typescript
 // packages/worker/src/worker.ts:350-380
 async claimStaleJobs() {
@@ -1140,7 +1219,7 @@ async claimStaleJobs() {
       this.config.staleThresholdMs || 60000,
       10 // ⚠️ Always claim 10, regardless of capacity
     );
-    
+
     for (const message of staleMessages) {
       this.processJob(message, queue); // Fire and forget
     }
@@ -1155,7 +1234,7 @@ async claimStaleJobs() {
   for (const queue of this.config.queues) {
     // Check available capacity
     const availableSlots = this.config.concurrency - this.activeJobs.size;
-    
+
     if (availableSlots <= 0) {
       logger.debug('No capacity for stale job recovery', {
         concurrency: this.config.concurrency,
@@ -1163,7 +1242,7 @@ async claimStaleJobs() {
       });
       continue;
     }
-    
+
     // Claim only what we can handle
     const staleMessages = await claimStaleMessages(
       queue,
@@ -1172,7 +1251,7 @@ async claimStaleJobs() {
       this.config.staleThresholdMs || 60000,
       Math.min(availableSlots, 10) // ✅ Respect capacity
     );
-    
+
     for (const message of staleMessages) {
       this.processJob(message, queue);
     }
@@ -1190,18 +1269,20 @@ async claimStaleJobs() {
 **Issues Found:**
 
 1. **Missing composite index for retry queries:**
+
 ```sql
 -- Current: Separate indexes on status and scheduledAt
 CREATE INDEX idx_jobs_status ON jobs(status);
 CREATE INDEX idx_jobs_scheduled_at ON jobs(scheduled_at);
 
 -- Needed: Composite index for scheduler query
-CREATE INDEX idx_jobs_retry_scheduled 
-  ON jobs(status, scheduled_at) 
+CREATE INDEX idx_jobs_retry_scheduled
+  ON jobs(status, scheduled_at)
   WHERE status = 'RETRY_SCHEDULED';
 ```
 
 2. **N+1 query in job listing:**
+
 ```typescript
 // apps/api/src/routes/jobs.ts:200-250
 const jobs = await listJobsByUser(userId, { limit, offset });
@@ -1214,6 +1295,7 @@ for (const job of jobs) {
 ```
 
 **Fix:**
+
 ```typescript
 // Use LEFT JOIN
 const jobs = await db
@@ -1229,6 +1311,7 @@ const jobs = await db
 ```
 
 3. **No prepared statements:**
+
 ```typescript
 // Drizzle ORM automatically uses prepared statements, but verify:
 const stmt = db.select().from(jobs).where(eq(jobs.id, jobId)).prepare();
@@ -1242,32 +1325,34 @@ const result = await stmt.execute();
 ### P3-1: Test Coverage Gaps
 
 **Missing Tests:**
+
 - Integration tests for race conditions (RACE-6, etc.)
 - Chaos testing for worker crashes
 - Load testing for throughput limits
 - End-to-end tests for job lifecycle
 
 **Recommendation:**
+
 ```typescript
 // tests/integration/race-conditions.test.ts
 describe('RACE-6: Worker crash before XACK', () => {
   it('should not re-execute succeeded job', async () => {
     // 1. Submit job
     const { jobId } = await submitJob({ type: 'test', payload: {} });
-    
+
     // 2. Worker processes job, marks SUCCEEDED
     await worker.processJob(jobId);
-    
+
     // 3. Simulate crash before XACK
     await worker.simulateCrashBeforeAck(jobId);
-    
+
     // 4. Start new worker
     const worker2 = new Worker();
     await worker2.start();
-    
+
     // 5. Wait for stale recovery
     await sleep(65000); // Stale threshold + buffer
-    
+
     // 6. Verify job not re-executed
     const executionCount = await getJobExecutionCount(jobId);
     expect(executionCount).toBe(1); // Should be 1, not 2
@@ -1280,6 +1365,7 @@ describe('RACE-6: Worker crash before XACK', () => {
 ### P3-2: Metrics Gaps
 
 **Missing Metrics:**
+
 - Per-queue depth and processing rate
 - Retry rate and backoff distribution
 - Lease renewal success rate
@@ -1287,6 +1373,7 @@ describe('RACE-6: Worker crash before XACK', () => {
 - Event publishing failure rate
 
 **Recommendation:**
+
 ```typescript
 // packages/observability/src/metrics.ts
 export const metrics = {
@@ -1295,13 +1382,13 @@ export const metrics = {
     help: 'Number of pending jobs in queue',
     labelNames: ['queue', 'priority'],
   }),
-  
+
   retryRate: new prometheus.Counter({
     name: 'taskflow_job_retries_total',
     help: 'Total number of job retries',
     labelNames: ['queue', 'error_type'],
   }),
-  
+
   leaseRenewalFailures: new prometheus.Counter({
     name: 'taskflow_lease_renewal_failures_total',
     help: 'Failed lease renewal attempts',
@@ -1314,12 +1401,14 @@ export const metrics = {
 ### P3-3: Observability Gaps
 
 **Missing:**
+
 - Distributed tracing spans for job execution
 - Correlation IDs across services
 - Error categorization (retryable vs non-retryable)
 - Audit log for security events
 
 **Recommendation:**
+
 ```typescript
 // Add OpenTelemetry spans
 import { trace } from '@opentelemetry/api';
@@ -1334,7 +1423,7 @@ async executeJob(message, queue) {
       'job.attempt': message.data.attempt,
     },
   });
-  
+
   try {
     await this.runHandler(job, cancellationToken);
     span.setStatus({ code: SpanStatusCode.OK });
@@ -1355,6 +1444,7 @@ async executeJob(message, queue) {
 ### Correctness Assessment
 
 **Strengths:**
+
 - ✅ Optimistic locking prevents concurrent updates
 - ✅ State machine enforces valid transitions
 - ✅ Idempotency at API layer with request hash
@@ -1362,6 +1452,7 @@ async executeJob(message, queue) {
 - ✅ Graceful shutdown waits for active jobs
 
 **Weaknesses:**
+
 - ❌ RACE-6: Duplicate execution on crash before XACK
 - ❌ Lease expiry sweeper not running (jobs stuck forever)
 - ❌ Scheduler not distributed-safe (duplicate enqueues)
@@ -1375,6 +1466,7 @@ async executeJob(message, queue) {
 ### Reliability Assessment
 
 **Strengths:**
+
 - ✅ Comprehensive error handling and logging
 - ✅ Retry logic with exponential backoff
 - ✅ Dead letter queue for failed jobs
@@ -1382,6 +1474,7 @@ async executeJob(message, queue) {
 - ✅ Heartbeat and health checks
 
 **Weaknesses:**
+
 - ❌ Events can be lost (not transactional)
 - ❌ No circuit breaker for failing handlers
 - ⚠️ Fire-and-forget event publishing
@@ -1394,12 +1487,14 @@ async executeJob(message, queue) {
 ### Scalability Assessment
 
 **Strengths:**
+
 - ✅ Horizontal scaling of workers (stateless)
 - ✅ Consumer groups for distributed consumption
 - ✅ Comprehensive indexes on PostgreSQL
 - ✅ Redis Streams for high-throughput messaging
 
 **Weaknesses:**
+
 - ❌ Priority queue not in Redis (FIFO only)
 - ❌ No connection pool configuration guidance
 - ❌ Redis single-threaded bottleneck
@@ -1407,6 +1502,7 @@ async executeJob(message, queue) {
 - ⚠️ Scheduler not horizontally scalable
 
 **Current Limits (Estimated):**
+
 - **Throughput**: ~10,000 jobs/min (Redis bottleneck)
 - **Latency (p95)**: <500ms (no backpressure)
 - **Worker scaling**: Limited by PostgreSQL connections
@@ -1419,12 +1515,14 @@ async executeJob(message, queue) {
 ### Security Assessment
 
 **Strengths:**
+
 - ✅ SQL injection protection (parameterized queries via Drizzle)
 - ✅ Input validation with Zod schemas
 - ✅ Rate limiter middleware (exists but not applied)
 - ✅ HTTPS support in infrastructure
 
 **Weaknesses:**
+
 - ❌ Hardcoded authentication credentials (test-api-key)
 - ❌ No JWT validation (hardcoded token)
 - ❌ No rate limiting on job endpoints
@@ -1440,6 +1538,7 @@ async executeJob(message, queue) {
 ### Operational Complexity Assessment
 
 **Strengths:**
+
 - ✅ Docker Compose for easy local dev
 - ✅ Terraform for AWS infrastructure
 - ✅ GitHub Actions CI/CD pipelines
@@ -1448,6 +1547,7 @@ async executeJob(message, queue) {
 - ✅ Health check endpoints
 
 **Weaknesses:**
+
 - ⚠️ No alerting rules defined
 - ⚠️ No runbook for common failures
 - ⚠️ No automated rollback
@@ -1549,12 +1649,12 @@ describe('Chaos Tests', () => {
     // Submit job, start worker, kill worker mid-execution
     // Verify job is recovered and completed by another worker
   });
-  
+
   test('Redis connection loss', async () => {
     // Disconnect Redis mid-operation
     // Verify graceful error handling and retry
   });
-  
+
   test('PostgreSQL connection loss', async () => {
     // Disconnect PostgreSQL
     // Verify reconnection and recovery
@@ -1589,17 +1689,20 @@ TaskFlow is a **well-designed distributed task queue** with **strong architectur
 5. ✅ P1-1: Rate limiting applied to job endpoints
 
 **After these fixes, the system is suitable for:**
+
 - Internal tools and services (low-criticality workloads)
 - MVP and prototyping (with monitoring)
 - Medium-scale production (10K-100K jobs/day)
 
 **NOT suitable for (without further hardening):**
+
 - Financial transactions (duplicate execution risk)
 - Mission-critical systems (availability concerns)
 - High-throughput workloads (>100K jobs/day)
 - Multi-tenant SaaS (security concerns)
 
 **With P1 and P2 fixes, the system can handle:**
+
 - Production workloads with proper monitoring
 - High-criticality use cases (with idempotent handlers)
 - Large-scale deployments (100K-1M jobs/day)
@@ -1615,6 +1718,7 @@ TaskFlow is a **well-designed distributed task queue** with **strong architectur
 ### Engineering Quality
 
 This project demonstrates:
+
 - ✅ Strong distributed systems knowledge
 - ✅ Production-grade thinking
 - ✅ Comprehensive feature set
@@ -1627,24 +1731,24 @@ This project demonstrates:
 
 ## Appendix: Priority Matrix
 
-| ID | Finding | Severity | Effort | Impact |
-|----|---------|----------|--------|--------|
-| P0-1 | Duplicate execution (RACE-6) | 🔴 Critical | Medium | Data corruption |
-| P0-2 | Hardcoded auth | 🔴 Critical | Low | Security breach |
-| P0-3 | Lease expiry not running | 🔴 Critical | Low | Jobs stuck forever |
-| P0-4 | Queue table not integrated | 🔴 Critical | Medium | Schema/code mismatch |
-| P1-1 | No rate limiting | 🟠 High | Low | DoS vulnerability |
-| P1-2 | Priority inversion | 🟠 High | High | SLA violations |
-| P1-3 | Event loss | 🟠 High | High | Inconsistent state |
-| P1-4 | Idempotency cleanup | 🟠 High | Low | Resource leak |
-| P1-5 | Scheduler races | 🟠 High | Medium | Duplicate work |
-| P2-1 | Connection pooling | 🟡 Medium | Low | Scalability limit |
-| P2-2 | Redis bottleneck | 🟡 Medium | High | Throughput limit |
-| P2-3 | No backpressure | 🟡 Medium | Medium | Worker overload |
-| P2-4 | Query optimization | 🟡 Medium | Medium | Slow queries |
-| P3-1 | Test coverage | 🟢 Low | High | Quality assurance |
-| P3-2 | Metrics gaps | 🟢 Low | Medium | Observability |
-| P3-3 | Tracing gaps | 🟢 Low | Medium | Debugging |
+| ID   | Finding                      | Severity    | Effort | Impact               |
+| ---- | ---------------------------- | ----------- | ------ | -------------------- |
+| P0-1 | Duplicate execution (RACE-6) | 🔴 Critical | Medium | Data corruption      |
+| P0-2 | Hardcoded auth               | 🔴 Critical | Low    | Security breach      |
+| P0-3 | Lease expiry not running     | 🔴 Critical | Low    | Jobs stuck forever   |
+| P0-4 | Queue table not integrated   | 🔴 Critical | Medium | Schema/code mismatch |
+| P1-1 | No rate limiting             | 🟠 High     | Low    | DoS vulnerability    |
+| P1-2 | Priority inversion           | 🟠 High     | High   | SLA violations       |
+| P1-3 | Event loss                   | 🟠 High     | High   | Inconsistent state   |
+| P1-4 | Idempotency cleanup          | 🟠 High     | Low    | Resource leak        |
+| P1-5 | Scheduler races              | 🟠 High     | Medium | Duplicate work       |
+| P2-1 | Connection pooling           | 🟡 Medium   | Low    | Scalability limit    |
+| P2-2 | Redis bottleneck             | 🟡 Medium   | High   | Throughput limit     |
+| P2-3 | No backpressure              | 🟡 Medium   | Medium | Worker overload      |
+| P2-4 | Query optimization           | 🟡 Medium   | Medium | Slow queries         |
+| P3-1 | Test coverage                | 🟢 Low      | High   | Quality assurance    |
+| P3-2 | Metrics gaps                 | 🟢 Low      | Medium | Observability        |
+| P3-3 | Tracing gaps                 | 🟢 Low      | Medium | Debugging            |
 
 **Total Issues:** 16 (4 P0, 5 P1, 4 P2, 3 P3)
 

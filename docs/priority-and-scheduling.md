@@ -10,10 +10,10 @@ TaskFlow supports **priority-based job processing** and **delayed job execution*
 
 ```typescript
 enum JobPriority {
-  CRITICAL = 'CRITICAL',  // Urgent, process immediately
-  HIGH = 'HIGH',          // Important, process soon
-  NORMAL = 'NORMAL',      // Standard priority (default)
-  LOW = 'LOW',            // Background, process when idle
+  CRITICAL = 'CRITICAL', // Urgent, process immediately
+  HIGH = 'HIGH', // Important, process soon
+  NORMAL = 'NORMAL', // Standard priority (default)
+  LOW = 'LOW', // Background, process when idle
 }
 ```
 
@@ -22,6 +22,7 @@ enum JobPriority {
 **Processing order**: `CRITICAL > HIGH > NORMAL > LOW`
 
 When multiple jobs are queued:
+
 1. Higher priority jobs are processed first
 2. Within same priority, FIFO order (oldest first)
 3. Workers can be configured to only process minimum priority levels
@@ -40,7 +41,7 @@ CREATE TABLE jobs (
 );
 
 -- Index for priority queries
-CREATE INDEX idx_jobs_priority_created 
+CREATE INDEX idx_jobs_priority_created
   ON jobs(priority DESC, created_at ASC)
   WHERE status = 'QUEUED';
 ```
@@ -95,6 +96,7 @@ const scheduledJob = await submitJob({
 ### Architecture
 
 The **Scheduler** is a background service that:
+
 1. Polls database for `CREATED` jobs with `scheduledAt <= now()`
 2. Enqueues them to Redis Streams
 3. Updates status to `QUEUED`
@@ -103,9 +105,9 @@ The **Scheduler** is a background service that:
 import { createScheduler } from '@taskflow/worker';
 
 const scheduler = createScheduler({
-  intervalMs: 5000,      // Poll every 5 seconds
-  batchSize: 100,        // Process 100 jobs per batch
-  enabled: true,         // Enable scheduler
+  intervalMs: 5000, // Poll every 5 seconds
+  batchSize: 100, // Process 100 jobs per batch
+  enabled: true, // Enable scheduler
 });
 
 scheduler.start();
@@ -127,10 +129,10 @@ class Scheduler {
     // 2. Enqueue each job
     for (const job of jobs) {
       const queueName = job.metadata?.queue || 'default';
-      
+
       // Add to Redis Stream
       await enqueueJob(job.id, queueName, 1);
-      
+
       // Update status
       await updateJobStatus(job.id, 'QUEUED');
     }
@@ -145,7 +147,7 @@ interface SchedulerConfig {
   /**
    * Interval between scheduling runs (milliseconds)
    * Default: 5000 (5 seconds)
-   * 
+   *
    * Trade-offs:
    * - Lower = More accurate timing, higher database load
    * - Higher = Less database load, less accurate timing
@@ -155,7 +157,7 @@ interface SchedulerConfig {
   /**
    * Maximum jobs to process per run
    * Default: 100
-   * 
+   *
    * Prevents overwhelming Redis with batch inserts
    */
   batchSize?: number;
@@ -163,7 +165,7 @@ interface SchedulerConfig {
   /**
    * Enable/disable scheduler
    * Default: true
-   * 
+   *
    * Disable for workers-only deployments
    */
   enabled?: boolean;
@@ -217,7 +219,7 @@ const backgroundWorker = createWorker(
     queues: ['default'],
     concurrency: 5,
     minPriority: 'LOW',
-    maxPriority: 'LOW',  // TODO: Implement maxPriority
+    maxPriority: 'LOW', // TODO: Implement maxPriority
   },
   handlers
 );
@@ -342,6 +344,7 @@ Redis Streams **do not natively support priority**. TaskFlow handles priority at
 3. Worker consumes from Redis and processes by priority
 
 **Why this approach?**
+
 - PostgreSQL is already the source of truth
 - Priority ordering requires sorting, which Redis Streams can't do efficiently
 - Database query is fast with proper indexes
@@ -352,6 +355,7 @@ Redis Streams **do not natively support priority**. TaskFlow handles priority at
 **Guarantee**: Jobs become eligible when `scheduledAt <= now()`
 
 **Actual execution delay**:
+
 ```
 Total Delay = Scheduler Polling Interval + Queue Processing Delay
 
@@ -373,6 +377,7 @@ Delay = 4 seconds (acceptable for most use cases)
 **Single instance recommended**: Only one scheduler should run to avoid duplicate enqueues
 
 **Future: Leader Election**
+
 ```typescript
 // TODO: Implement leader election with Redis
 class Scheduler {
@@ -380,8 +385,9 @@ class Scheduler {
     const result = await redis.set(
       'scheduler:leader',
       this.instanceId,
-      'EX', 10,  // 10 second lease
-      'NX'       // Only if not exists
+      'EX',
+      10, // 10 second lease
+      'NX' // Only if not exists
     );
     return result === 'OK';
   }
@@ -470,7 +476,7 @@ job_processing_duration_seconds{priority}
    - TaskFlow is for **async background jobs**
 
 3. **Don't schedule too far in advance**
-   - >1 month: Use a separate cron system
+   - > 1 month: Use a separate cron system
    - Database table grows with scheduled jobs
 
 4. **Don't rely on exact timing**
@@ -490,18 +496,20 @@ job_processing_duration_seconds{priority}
 ```typescript
 // BullMQ: Priority in Redis using sorted sets
 queue.add('job', payload, {
-  priority: 1,  // Lower number = higher priority
-  delay: 5000,  // Delay in milliseconds
+  priority: 1, // Lower number = higher priority
+  delay: 5000, // Delay in milliseconds
 });
 ```
 
 **Differences**:
+
 - BullMQ: Redis-native priority with sorted sets
 - TaskFlow: Database-backed priority with proper ordering
 - BullMQ: Built-in delayed jobs with Redis TTL
 - TaskFlow: Scheduler service for delayed jobs
 
 **Why TaskFlow approach?**
+
 - Database is source of truth (ADR-001)
 - Priority needs strong consistency
 - Delayed jobs need durability
@@ -521,6 +529,7 @@ def normal_task():
 ```
 
 **Differences**:
+
 - Celery: Separate queues per priority
 - TaskFlow: Single queue with priority field
 - Celery: Workers subscribe to specific queues
@@ -538,6 +547,7 @@ await client.workflow.start('myWorkflow', {
 ```
 
 **Differences**:
+
 - Temporal: Workflow orchestration, not job queue
 - TaskFlow: Job queue with priority
 - Temporal: Deterministic execution
@@ -554,24 +564,24 @@ kind: Deployment
 metadata:
   name: taskflow-scheduler
 spec:
-  replicas: 1  # Only one scheduler instance
+  replicas: 1 # Only one scheduler instance
   template:
     spec:
       containers:
-      - name: scheduler
-        image: taskflow-scheduler:latest
-        env:
-        - name: SCHEDULER_INTERVAL_MS
-          value: "5000"
-        - name: SCHEDULER_BATCH_SIZE
-          value: "100"
-        resources:
-          requests:
-            memory: 128Mi
-            cpu: 100m
-          limits:
-            memory: 256Mi
-            cpu: 200m
+        - name: scheduler
+          image: taskflow-scheduler:latest
+          env:
+            - name: SCHEDULER_INTERVAL_MS
+              value: '5000'
+            - name: SCHEDULER_BATCH_SIZE
+              value: '100'
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 256Mi
+              cpu: 200m
 ```
 
 ### Worker Deployment
@@ -587,17 +597,17 @@ spec:
   template:
     spec:
       containers:
-      - name: worker
-        image: taskflow-worker:latest
-        env:
-        - name: WORKER_MIN_PRIORITY
-          value: "CRITICAL"
-        - name: WORKER_CONCURRENCY
-          value: "5"
-        resources:
-          requests:
-            memory: 512Mi
-            cpu: 500m
+        - name: worker
+          image: taskflow-worker:latest
+          env:
+            - name: WORKER_MIN_PRIORITY
+              value: 'CRITICAL'
+            - name: WORKER_CONCURRENCY
+              value: '5'
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 500m
 
 ---
 # Standard workers (all priorities)
@@ -610,15 +620,15 @@ spec:
   template:
     spec:
       containers:
-      - name: worker
-        image: taskflow-worker:latest
-        env:
-        - name: WORKER_CONCURRENCY
-          value: "10"
-        resources:
-          requests:
-            memory: 256Mi
-            cpu: 250m
+        - name: worker
+          image: taskflow-worker:latest
+          env:
+            - name: WORKER_CONCURRENCY
+              value: '10'
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
 ```
 
 ## Future Enhancements
@@ -632,7 +642,7 @@ await submitJob({
   payload: {},
   priority: 'LOW',
   metadata: {
-    priorityBoostAfterMinutes: 60,  // Boost to NORMAL after 1 hour
+    priorityBoostAfterMinutes: 60, // Boost to NORMAL after 1 hour
     maxPriority: 'NORMAL',
   },
 });
@@ -678,7 +688,7 @@ TaskFlow's priority and scheduling system provides:
 ✅ **Delayed job execution** via scheduler service  
 ✅ **Worker priority filtering** (minPriority config)  
 ✅ **Strong consistency** (PostgreSQL source of truth)  
-✅ **Production-ready** monitoring and deployment  
+✅ **Local implementation guidance**; monitoring and deployment remain unverified
 
 This enables differentiated service levels, time-based execution, and efficient resource allocation for diverse workload requirements.
 

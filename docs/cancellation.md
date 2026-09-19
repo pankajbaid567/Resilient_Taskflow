@@ -9,6 +9,7 @@ TaskFlow supports **cooperative job cancellation**, allowing jobs to be graceful
 ### Two-Phase Cancellation
 
 **Phase 1: Request Cancellation** (`CANCEL_REQUESTED`)
+
 - Job is running (`PROCESSING`)
 - API marks job as `CANCEL_REQUESTED`
 - Worker detects cancellation request
@@ -16,22 +17,23 @@ TaskFlow supports **cooperative job cancellation**, allowing jobs to be graceful
 - Handler checks token and aborts gracefully
 
 **Phase 2: Actual Cancellation** (`CANCELLED`)
+
 - Handler throws `CancellationError`
 - Worker marks job as `CANCELLED`
 - Job enters terminal state
 
 ### Immediate vs Cooperative
 
-| Job Status | Cancellation Type | Behavior |
-|------------|------------------|----------|
-| `CREATED` | Immediate | Status → `CANCELLED` (job never started) |
-| `QUEUED` | Immediate | Status → `CANCELLED` (job never claimed) |
-| `RETRY_SCHEDULED` | Immediate | Status → `CANCELLED` (retry prevented) |
-| `PROCESSING` | Cooperative | Status → `CANCEL_REQUESTED` → `CANCELLED` |
-| `CANCEL_REQUESTED` | N/A | Already cancelling |
-| `SUCCEEDED` | Not allowed | Job completed |
-| `CANCELLED` | Not allowed | Already cancelled |
-| `DEAD_LETTERED` | Not allowed | Terminal state |
+| Job Status         | Cancellation Type | Behavior                                  |
+| ------------------ | ----------------- | ----------------------------------------- |
+| `CREATED`          | Immediate         | Status → `CANCELLED` (job never started)  |
+| `QUEUED`           | Immediate         | Status → `CANCELLED` (job never claimed)  |
+| `RETRY_SCHEDULED`  | Immediate         | Status → `CANCELLED` (retry prevented)    |
+| `PROCESSING`       | Cooperative       | Status → `CANCEL_REQUESTED` → `CANCELLED` |
+| `CANCEL_REQUESTED` | N/A               | Already cancelling                        |
+| `SUCCEEDED`        | Not allowed       | Job completed                             |
+| `CANCELLED`        | Not allowed       | Already cancelled                         |
+| `DEAD_LETTERED`    | Not allowed       | Terminal state                            |
 
 ## State Machine
 
@@ -69,6 +71,7 @@ if (response.ok) {
 ```
 
 **Response**:
+
 - `200 OK` + status `CANCELLED` → Job cancelled immediately (not running)
 - `200 OK` + status `CANCEL_REQUESTED` → Cancellation requested (running job)
 - `400 Bad Request` → Job in terminal state (cannot cancel)
@@ -152,7 +155,7 @@ const handler: JobHandler = async (payload, ctx) => {
     if (ctx.cancellationToken.isCancellationRequested) {
       // Cleanup
       await rollbackBatch(batch);
-      
+
       // Throw cancellation error
       throw new CancellationError('Job cancelled during batch processing');
     }
@@ -301,6 +304,7 @@ const combined = combineCancellationTokens(token1, token2);
 ### ✅ Do
 
 1. **Check periodically**
+
    ```typescript
    for (const item of items) {
      ctx.cancellationToken.throwIfCancellationRequested();
@@ -309,6 +313,7 @@ const combined = combineCancellationTokens(token1, token2);
    ```
 
 2. **Register cleanup handlers**
+
    ```typescript
    ctx.cancellationToken.onCancellationRequested(() => {
      cleanup();
@@ -316,6 +321,7 @@ const combined = combineCancellationTokens(token1, token2);
    ```
 
 3. **Cancel external processes**
+
    ```typescript
    ctx.cancellationToken.onCancellationRequested(() => {
      childProcess.kill();
@@ -323,6 +329,7 @@ const combined = combineCancellationTokens(token1, token2);
    ```
 
 4. **Throw CancellationError**
+
    ```typescript
    if (ctx.cancellationToken.isCancellationRequested) {
      throw new CancellationError('Cancelled during upload');
@@ -338,6 +345,7 @@ const combined = combineCancellationTokens(token1, token2);
 ### ❌ Don't
 
 1. **Don't ignore cancellation**
+
    ```typescript
    // BAD: No cancellation checks
    for (const item of items) {
@@ -346,6 +354,7 @@ const combined = combineCancellationTokens(token1, token2);
    ```
 
 2. **Don't catch CancellationError**
+
    ```typescript
    // BAD: Swallows cancellation
    try {
@@ -356,6 +365,7 @@ const combined = combineCancellationTokens(token1, token2);
    ```
 
 3. **Don't assume immediate cancellation**
+
    ```typescript
    // BAD: Cancellation is asynchronous
    await cancelJob(jobId);
@@ -363,6 +373,7 @@ const combined = combineCancellationTokens(token1, token2);
    ```
 
 4. **Don't check too infrequently**
+
    ```typescript
    // BAD: Hours between checks
    for (const largeItem of items) {
@@ -438,24 +449,24 @@ job_cancelled_failed_total                  // Error during cancellation
 describe('Cancellation', () => {
   it('should cancel job before execution', async () => {
     const job = await submitJob({ type: 'test', payload: {} });
-    
+
     await cancelJob(job.id);
-    
+
     const cancelled = await getJobById(job.id);
     expect(cancelled.status).toBe('CANCELLED');
   });
 
   it('should request cancellation for running job', async () => {
     const job = await submitJob({ type: 'test', payload: {} });
-    
+
     // Wait for job to start
     await waitForStatus(job.id, 'PROCESSING');
-    
+
     await cancelJob(job.id);
-    
+
     const cancelRequested = await getJobById(job.id);
     expect(cancelRequested.status).toBe('CANCEL_REQUESTED');
-    
+
     // Wait for actual cancellation
     await waitForStatus(job.id, 'CANCELLED');
   });
@@ -525,6 +536,7 @@ await job.remove();
 ```
 
 **Differences**:
+
 - BullMQ: Immediate removal from queue
 - TaskFlow: State machine with CANCEL_REQUESTED
 - BullMQ: No cooperative cancellation
@@ -538,6 +550,7 @@ app.control.revoke(task_id, terminate=True)
 ```
 
 **Differences**:
+
 - Celery: Can forcefully terminate (SIGTERM)
 - TaskFlow: Cooperative only (no force kill)
 - Celery: Broker-dependent
@@ -553,6 +566,7 @@ await CancellationScope.cancellable(async () => {
 ```
 
 **Differences**:
+
 - Temporal: Built into workflow engine
 - TaskFlow: Job queue with token
 - Temporal: Hierarchical cancellation
@@ -563,6 +577,7 @@ await CancellationScope.cancellable(async () => {
 ### Cancellation Latency
 
 **Typical Timeline**:
+
 ```
 User cancels (t0)
   ↓ API processes (10ms)
@@ -616,7 +631,7 @@ TaskFlow's cancellation system provides:
 ✅ **Graceful abort** for running jobs  
 ✅ **Cleanup support** via cancellation callbacks  
 ✅ **State machine validation** (valid transitions only)  
-✅ **Production-ready** monitoring and testing  
+✅ **Locally process-tested** cancellation behavior; production readiness is not asserted
 
 This enables safe, predictable job cancellation for long-running operations.
 

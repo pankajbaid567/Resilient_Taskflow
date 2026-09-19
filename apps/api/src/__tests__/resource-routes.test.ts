@@ -9,6 +9,8 @@ const database = vi.hoisted(() => ({
   getWorkerById: vi.fn(),
   listQueues: vi.fn(),
   listWorkers: vi.fn(),
+  requestWorkerStop: vi.fn(),
+  setQueueActive: vi.fn(),
 }));
 const queue = vi.hoisted(() => ({ getQueueDepth: vi.fn() }));
 
@@ -85,6 +87,15 @@ beforeEach(() => {
   database.listWorkers.mockResolvedValue({ workers: [], total: 0 });
   database.getQueueStats.mockResolvedValue(undefined);
   database.countActiveWorkersForQueue.mockResolvedValue(0);
+  database.requestWorkerStop.mockResolvedValue({
+    ...workerRecord,
+    status: WorkerStatus.STOPPING,
+    stoppedAt: null,
+  });
+  database.setQueueActive.mockImplementation(
+    (_name: string, isActive: boolean) =>
+      Promise.resolve({ ...queueRecord, isActive })
+  );
   queue.getQueueDepth.mockResolvedValue(0);
 });
 
@@ -163,14 +174,14 @@ describe('queue resource routes', () => {
     });
   });
 
-  it('validates pagination and verifies a queue before returning 501 controls', async () => {
+  it('validates pagination and persists queue controls', async () => {
     const app = await createResourceApp();
 
     const invalidPage = await app.inject({
       method: 'GET',
       url: '/queues?limit=101',
     });
-    database.getQueueByName.mockResolvedValueOnce(undefined);
+    database.setQueueActive.mockResolvedValueOnce(undefined);
     const missing = await app.inject({
       method: 'POST',
       url: '/queues/missing/pause',
@@ -183,7 +194,8 @@ describe('queue resource routes', () => {
     expect(invalidPage.statusCode).toBe(400);
     expect(database.listQueues).not.toHaveBeenCalled();
     expect(missing.statusCode).toBe(404);
-    expect(existing.statusCode).toBe(501);
+    expect(existing.statusCode).toBe(200);
+    expect(existing.json()).toMatchObject({ name: 'default', isActive: true });
   });
 });
 
@@ -257,10 +269,10 @@ describe('worker resource routes', () => {
     expect(stats.json()).toEqual({ ...detailBody, successRate: 0.8 });
   });
 
-  it('verifies a worker before returning an unimplemented stop response', async () => {
+  it('persists a worker stop request', async () => {
     const app = await createResourceApp();
 
-    database.getWorkerById.mockResolvedValueOnce(undefined);
+    database.requestWorkerStop.mockResolvedValueOnce(undefined);
     const missing = await app.inject({
       method: 'POST',
       url: '/workers/30000000-0000-4000-8000-000000000002/stop',
@@ -271,6 +283,10 @@ describe('worker resource routes', () => {
     });
 
     expect(missing.statusCode).toBe(404);
-    expect(existing.statusCode).toBe(501);
+    expect(existing.statusCode).toBe(202);
+    expect(existing.json()).toMatchObject({
+      id: workerId,
+      status: WorkerStatus.STOPPING,
+    });
   });
 });

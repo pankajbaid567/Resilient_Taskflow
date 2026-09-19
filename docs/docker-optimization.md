@@ -35,6 +35,7 @@ COPY --from=builder /app/dist ./dist
 ```
 
 **Benefits:**
+
 - Smaller images (1/3 to 1/10 size)
 - Faster deployment
 - Fewer vulnerabilities
@@ -53,6 +54,7 @@ COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker-compose build
 ```
 
 **BuildKit advantages:**
+
 - Parallel build stages
 - Better cache management
 - Improved error messages
@@ -83,6 +85,7 @@ coverage
 ```
 
 **Impact:**
+
 - Faster context upload (10x+)
 - Smaller images
 - Fewer cache invalidations
@@ -92,7 +95,7 @@ coverage
 ### Current Image Sizes
 
 | Service   | Before | After | Savings |
-|-----------|--------|-------|---------|
+| --------- | ------ | ----- | ------- |
 | API       | 1.2GB  | 180MB | 85%     |
 | Worker    | 1.3GB  | 190MB | 85%     |
 | Dashboard | 150MB  | 25MB  | 83%     |
@@ -100,11 +103,13 @@ coverage
 ### Techniques
 
 **1. Use Alpine Linux**
+
 ```dockerfile
 FROM node:20-alpine  # 40MB vs 1GB for standard
 ```
 
 **2. Remove Build Dependencies**
+
 ```dockerfile
 RUN apk add --no-cache python3 make g++ && \
     pnpm install && \
@@ -112,11 +117,13 @@ RUN apk add --no-cache python3 make g++ && \
 ```
 
 **3. Prune Dev Dependencies**
+
 ```dockerfile
 RUN pnpm prune --prod
 ```
 
 **4. Clean Package Manager Cache**
+
 ```dockerfile
 RUN pnpm install && pnpm store prune
 ```
@@ -125,6 +132,7 @@ RUN pnpm install && pnpm store prune
 Exclude test files, documentation, etc.
 
 **6. Minimize Layers**
+
 ```dockerfile
 # ✅ One layer
 RUN apk add --no-cache curl wget && \
@@ -149,6 +157,7 @@ USER nodejs
 ```
 
 **Why:**
+
 - Limit attack surface
 - Follow least privilege principle
 - Required by many orchestrators
@@ -163,6 +172,7 @@ tmpfs:
 ```
 
 **Benefits:**
+
 - Prevent unauthorized writes
 - Detect compromises faster
 - Meet compliance requirements
@@ -190,19 +200,19 @@ security_opt:
 cap_drop:
   - ALL
 cap_add:
-  - NET_BIND_SERVICE  # Only if needed
+  - NET_BIND_SERVICE # Only if needed
 ```
 
 ## Build Speed Optimization
 
 ### Baseline Performance
 
-| Operation         | Time   | Method                |
-|-------------------|--------|-----------------------|
-| Full build        | ~5 min | Multi-stage, no cache |
-| Cached build      | ~30s   | With layer cache      |
-| Code-only change  | ~45s   | Dependencies cached   |
-| Package change    | ~2 min | Rebuild dependencies  |
+| Operation        | Time   | Method                |
+| ---------------- | ------ | --------------------- |
+| Full build       | ~5 min | Multi-stage, no cache |
+| Cached build     | ~30s   | With layer cache      |
+| Code-only change | ~45s   | Dependencies cached   |
+| Package change   | ~2 min | Rebuild dependencies  |
 
 ### Techniques
 
@@ -257,6 +267,7 @@ ARG BUILDKIT_INLINE_CACHE=1
 ```
 
 Usage:
+
 ```bash
 docker build \
   --build-arg NODE_VERSION=20 \
@@ -393,6 +404,7 @@ docker buildx build \
 ```
 
 **Performance tip**: ARM builds are slower. Consider:
+
 - Building on ARM runners
 - Using emulation only for testing
 - Separate builds per platform
@@ -449,12 +461,14 @@ docker buildx build \
 ### Example Results
 
 **Before Optimization:**
+
 - Build time: 12 minutes
 - Image size: 1.8GB
 - Deploy time: 8 minutes
 - Vulnerabilities: 23 (5 critical)
 
 **After Optimization:**
+
 - Build time: 3 minutes (75% faster)
 - Image size: 180MB (90% smaller)
 - Deploy time: 90 seconds (82% faster)
@@ -465,11 +479,13 @@ docker buildx build \
 ### Build Analysis
 
 - **dive**: Analyze image layers
+
   ```bash
   dive app:latest
   ```
 
 - **docker-slim**: Auto-optimize images
+
   ```bash
   docker-slim build app:latest
   ```
@@ -482,11 +498,13 @@ docker buildx build \
 ### Security Scanning
 
 - **Trivy**: Vulnerability scanner
+
   ```bash
   trivy image app:latest
   ```
 
 - **Snyk**: Dependency scanning
+
   ```bash
   snyk container test app:latest
   ```
@@ -554,6 +572,7 @@ docker buildx du --verbose
 ---
 
 **Next Steps:**
+
 1. Implement optimizations
 2. Measure baseline performance
 3. Apply techniques incrementally

@@ -34,7 +34,7 @@ export interface CacheStats {
 /**
  * Multi-layer cache
  */
-export class MultiLayerCache<T> {
+export class MultiLayerCache<T extends object> {
   private l1Cache: LRUCache<string, T> | null = null;
   private l2Get: ((key: string) => Promise<string | null>) | null = null;
   private l2Set:
@@ -294,7 +294,7 @@ export class MultiLayerCache<T> {
 /**
  * Cache-aside pattern helper
  */
-export async function cacheAside<T>(
+export async function cacheAside<T extends object>(
   cache: MultiLayerCache<T>,
   key: string,
   fetcher: () => Promise<T>,
@@ -306,7 +306,7 @@ export async function cacheAside<T>(
 /**
  * Write-through pattern helper
  */
-export async function writeThrough<T>(
+export async function writeThrough<T extends object>(
   cache: MultiLayerCache<T>,
   key: string,
   value: T,
@@ -323,7 +323,7 @@ export async function writeThrough<T>(
 /**
  * Write-behind pattern helper (async write)
  */
-export async function writeBehind<T>(
+export async function writeBehind<T extends object>(
   cache: MultiLayerCache<T>,
   key: string,
   value: T,
@@ -342,7 +342,7 @@ export async function writeBehind<T>(
 /**
  * Refresh-ahead pattern helper
  */
-export class RefreshAheadCache<T> extends MultiLayerCache<T> {
+export class RefreshAheadCache<T extends object> extends MultiLayerCache<T> {
   private refreshThreshold: number;
   private refreshing: Set<string> = new Set();
 

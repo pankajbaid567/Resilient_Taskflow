@@ -1,3 +1,5 @@
+> Historical snapshot only. Claims and numbers below are not current acceptance evidence; use the root README and executable gates.
+
 # Adversarial Architecture Review: TaskFlow
 
 **Interview Format**: Senior Backend/Distributed Systems Engineer  
@@ -23,6 +25,7 @@
 ### Q1: What happens if Redis goes down after DB insertion but before enqueue?
 
 **Scenario:**
+
 ```
 1. API receives POST /api/v1/jobs
 2. Job created in PostgreSQL (status=CREATED) ✅
@@ -32,13 +35,14 @@
 ```
 
 **Current Implementation:**
+
 ```typescript
 // apps/api/src/routes/jobs.ts:100-150
 const job = await createJob(jobData);
 
 // If scheduledAt <= now, enqueue immediately
 if (new Date(job.scheduledAt) <= new Date()) {
-  await enqueueJob(job.id, queueName);  // ⚠️ Can fail!
+  await enqueueJob(job.id, queueName); // ⚠️ Can fail!
   await updateJobStatus(job.id, 'QUEUED');
 }
 
@@ -46,6 +50,7 @@ return reply.status(201).send({ job });
 ```
 
 **What Actually Happens:**
+
 1. Job exists in PostgreSQL with status=CREATED
 2. Redis enqueue fails, exception thrown
 3. API returns 500 Internal Server Error
@@ -54,6 +59,7 @@ return reply.status(201).send({ job });
 6. **Job is now stuck in CREATED state forever** ❌
 
 **Why It's Stuck:**
+
 - Scheduler only enqueues jobs with `scheduledAt <= now AND status = CREATED`
 - But this job has `scheduledAt = now()` (in the past)
 - Scheduler picks it up eventually ✅
@@ -66,7 +72,7 @@ Let me check the scheduler implementation:
 // packages/queue/src/scheduler.ts:50-100
 async pollForDueJobs() {
   const dueJobs = await getDueJobs(this.batchSize);
-  
+
   for (const job of dueJobs) {
     await enqueueJob(job.id, getQueueName(job));
     await updateJobStatus(job.id, 'QUEUED');
@@ -94,11 +100,13 @@ export async function getDueJobs(limit: number = 100): Promise<Job[]> {
 The scheduler will pick up the CREATED job and enqueue it. However:
 
 **Problems:**
+
 1. **Delay**: Job won't start until next scheduler cycle (default: 10s)
 2. **Client confusion**: Client gets 500 error but job eventually processes
 3. **No client notification**: Client doesn't know job succeeded
 
 **Better Solution:**
+
 ```typescript
 // Graceful fallback
 try {
@@ -128,6 +136,7 @@ return reply.status(201).send({
 ### Q2: What happens if Redis accepts the job but API crashes before responding?
 
 **Scenario:**
+
 ```
 1. Job created in PostgreSQL ✅
 2. Job enqueued to Redis ✅
@@ -158,7 +167,7 @@ if (existingKey) {
     .select()
     .from(jobs)
     .where(eq(jobs.id, existingKey.jobId));
-  
+
   return reply
     .status(200)
     .header('X-Idempotent-Replay', 'true')
@@ -183,6 +192,7 @@ if (existingKey) {
 ### Q3: What happens if a worker dies after completing a job but before ACK?
 
 **Scenario:**
+
 ```
 1. Worker A consumes message from Redis
 2. Worker A executes handler successfully
@@ -196,17 +206,18 @@ if (existingKey) {
 **This is RACE-6 from Architecture Review!**
 
 **Current Implementation:**
+
 ```typescript
 // packages/worker/src/worker.ts:450-480
 try {
   const result = await this.runHandler(job, cancellationToken);
-  
+
   // Update PostgreSQL
-  await completeJob(jobId, this.config.workerId, result);  // ✅ COMMITTED
-  
+  await completeJob(jobId, this.config.workerId, result); // ✅ COMMITTED
+
   // Acknowledge Redis
-  await acknowledgeMessage(queue, group, message.id);  // ❌ CRASH HERE
-  
+  await acknowledgeMessage(queue, group, message.id); // ❌ CRASH HERE
+
   this.updateStats(true, duration);
 } catch (error) {
   // ...
@@ -241,12 +252,12 @@ export async function acquireJobLease(
     .where(
       and(
         eq(jobs.id, jobId),
-        eq(jobs.status, 'QUEUED'),  // ⚠️ Only QUEUED jobs!
+        eq(jobs.status, 'QUEUED') // ⚠️ Only QUEUED jobs!
         // ...
       )
     )
     .returning();
-  
+
   return job || null;
 }
 ```
@@ -273,6 +284,7 @@ if (!lease) {
 Worker B **doesn't acknowledge** the message!
 
 **Result:**
+
 - Message stays in Redis pending (claimed by Worker B)
 - Worker B doesn't process it (lease failed)
 - **Message is stuck forever** ❌
@@ -293,13 +305,13 @@ export async function claimStaleMessages(
 ): Promise<ConsumedMessage[]> {
   // 1. Get pending messages
   const pending = await getPendingMessages(queueName, undefined, 100);
-  
+
   // 2. Filter by idle time
   const staleIds = pending
     .filter((p) => p.idleTimeMs > minIdleTimeMs)
     .slice(0, limit)
     .map((p) => p.messageId);
-  
+
   // 3. Claim ownership
   const claimed = await redis.xclaim(
     streamKey,
@@ -308,7 +320,7 @@ export async function claimStaleMessages(
     minIdleTimeMs,
     ...staleIds
   );
-  
+
   return messages;
 }
 ```
@@ -316,6 +328,7 @@ export async function claimStaleMessages(
 **XPENDING returns ALL pending messages**, including those already claimed by the current worker.
 
 So Worker B will:
+
 1. See its own message in pending list
 2. XCLAIM it again (becomes stale after 60s)
 3. Try to acquire lease (fails, status=SUCCEEDED)
@@ -330,7 +343,7 @@ So Worker B will:
 // Option 1: XACK even if lease acquisition fails
 if (!lease) {
   this.logger.warn('Failed to acquire job lease', { jobId });
-  
+
   // Check if job is already in terminal state
   const job = await getJobById(jobId);
   if (job && ['SUCCEEDED', 'CANCELLED', 'DEAD_LETTERED'].includes(job.status)) {
@@ -338,7 +351,7 @@ if (!lease) {
     await acknowledgeMessage(queue, group, message.id);
     this.logger.info('Acknowledged completed job', { jobId });
   }
-  
+
   return;
 }
 
@@ -355,6 +368,7 @@ await completeJob(jobId, workerId, result);
 ### Q4: What happens if ACK succeeds but DB update fails?
 
 **Scenario:**
+
 ```
 1. Worker executes job successfully
 2. Worker calls XACK to Redis ✅
@@ -367,8 +381,8 @@ await completeJob(jobId, workerId, result);
 
 ```typescript
 // Proposed fix
-await acknowledgeMessage(queue, group, message.id);  // ✅
-await completeJob(jobId, workerId, result);  // ❌ Fails
+await acknowledgeMessage(queue, group, message.id); // ✅
+await completeJob(jobId, workerId, result); // ❌ Fails
 ```
 
 **What Actually Happens:**
@@ -389,10 +403,7 @@ const expiredJobs = await db
   .select()
   .from(jobs)
   .where(
-    and(
-      eq(jobs.status, 'PROCESSING'),
-      lt(jobs.leaseExpiresAt, new Date())
-    )
+    and(eq(jobs.status, 'PROCESSING'), lt(jobs.leaseExpiresAt, new Date()))
   );
 
 for (const job of expiredJobs) {
@@ -412,6 +423,7 @@ for (const job of expiredJobs) {
 Let me reconsider the trade-offs:
 
 **Option A: PostgreSQL first, Redis second (CURRENT)**
+
 ```
 completeJob()  ✅
 XACK()         ❌ Crash
@@ -419,6 +431,7 @@ Result: Job SUCCEEDED but message in Redis → Re-execution
 ```
 
 **Option B: Redis first, PostgreSQL second (PROPOSED)**
+
 ```
 XACK()         ✅
 completeJob()  ❌ Crash
@@ -448,7 +461,7 @@ await db.transaction(async (tx) => {
     result,
     createdAt: new Date(),
   });
-  
+
   await completeJob(jobId, workerId, result, tx);
 });
 
@@ -459,7 +472,7 @@ await acknowledgeMessage(queue, group, message.id);
 const existing = await getExecutionResult(executionToken);
 if (existing) {
   logger.info('Job already executed', { jobId, token: executionToken });
-  return existing.result;  // Return cached result
+  return existing.result; // Return cached result
 }
 ```
 
@@ -470,6 +483,7 @@ if (existing) {
 ### Q5: What happens if two workers process the same job?
 
 **Scenario:**
+
 ```
 1. Worker A consumes message from Redis
 2. Worker B claims same message as "stale" (race condition)
@@ -488,7 +502,7 @@ export async function acquireJobLease(
 ): Promise<Job | null> {
   const leaseId = crypto.randomUUID();
   const leaseExpiresAt = new Date(Date.now() + leaseDurationMs);
-  
+
   const [job] = await db
     .update(jobs)
     .set({
@@ -512,7 +526,7 @@ export async function acquireJobLease(
       )
     )
     .returning();
-  
+
   return job || null;
 }
 ```
@@ -520,6 +534,7 @@ export async function acquireJobLease(
 **Answer:** ✅ **Protected by optimistic locking**
 
 Only **one UPDATE succeeds**:
+
 - Worker A: UPDATE returns 1 row (lease acquired)
 - Worker B: UPDATE returns 0 rows (job already PROCESSING)
 
@@ -561,6 +576,7 @@ if (!lease) {
 ### Q6: What happens if a worker heartbeat is delayed?
 
 **Scenario:**
+
 ```
 1. Worker is healthy but CPU-bound (processing 10 jobs)
 2. Heartbeat timer fires but event loop is blocked
@@ -585,10 +601,10 @@ private startHeartbeat(): void {
       this.logger.error('Failed to send heartbeat', { error });
     }
   };
-  
+
   // Send initial heartbeat
   sendHeartbeat();
-  
+
   // Schedule periodic heartbeats
   this.heartbeatTimer = setInterval(
     sendHeartbeat,
@@ -600,11 +616,13 @@ private startHeartbeat(): void {
 **What Actually Happens:**
 
 Node.js event loop is single-threaded:
+
 - If all jobs are CPU-intensive, event loop is blocked
 - `setInterval` callbacks queue up but don't execute
 - Heartbeat can be delayed by 10s, 20s, 30s+
 
 **Impact:**
+
 - External monitoring sees worker as unhealthy
 - Dashboard shows worker as "stale"
 - But worker is actually processing jobs fine
@@ -624,10 +642,7 @@ export async function getStaleWorkers(
     .where(
       and(
         inArray(workers.status, ['ACTIVE', 'IDLE']),
-        lt(
-          workers.lastHeartbeatAt,
-          new Date(Date.now() - staleThresholdMs)
-        )
+        lt(workers.lastHeartbeatAt, new Date(Date.now() - staleThresholdMs))
       )
     );
 }
@@ -638,6 +653,7 @@ export async function getStaleWorkers(
 **Answer:** ⚠️ **Minor issue** (monitoring inaccuracy only)
 
 **Impact:**
+
 - False alarms in monitoring
 - Incorrect worker count in dashboard
 - But no data loss or duplicate execution
@@ -653,20 +669,20 @@ const sendHeartbeat = async () => {
   const now = process.hrtime.bigint();
   const delayNs = now - lastHeartbeatTime;
   const delayMs = Number(delayNs / 1000000n);
-  
+
   if (delayMs > this.config.heartbeatIntervalMs * 2) {
     this.logger.warn('Heartbeat delayed, event loop blocked', {
       expectedMs: this.config.heartbeatIntervalMs,
       actualDelayMs: delayMs,
     });
   }
-  
+
   await updateWorkerHeartbeat(this.config.workerId, {
     currentJobs: this.activeJobs.size,
     // ...
-    heartbeatDelayMs: delayMs,  // Track delay
+    heartbeatDelayMs: delayMs, // Track delay
   });
-  
+
   lastHeartbeatTime = now;
 };
 ```
@@ -678,6 +694,7 @@ const sendHeartbeat = async () => {
 ### Q7: What happens if PostgreSQL is unavailable?
 
 **Scenario:**
+
 ```
 1. PostgreSQL connection pool exhausted or database down
 2. API receives job submission request
@@ -689,7 +706,7 @@ const sendHeartbeat = async () => {
 
 ```typescript
 // apps/api/src/routes/jobs.ts:85-120
-const job = await createJob(jobData);  // ❌ Throws exception
+const job = await createJob(jobData); // ❌ Throws exception
 ```
 
 **Current Error Handling:**
@@ -702,7 +719,7 @@ fastify.setErrorHandler((error, request, reply) => {
     requestId: request.id,
     url: request.url,
   });
-  
+
   reply.status(500).send({
     error: 'Internal Server Error',
     message: 'An unexpected error occurred',
@@ -721,12 +738,13 @@ const job = await getJobById(jobId);
 
 if (!job) {
   this.logger.error('Job not found in database', { jobId });
-  await acknowledgeMessage(queue, group, message.id);  // ⚠️ XACK anyway!
+  await acknowledgeMessage(queue, group, message.id); // ⚠️ XACK anyway!
   return;
 }
 ```
 
 If `getJobById()` throws exception (DB unavailable):
+
 - Exception caught in `executeJob()` catch block
 - Job marked as FAILED
 - But wait, `failJob()` also needs DB access! ❌
@@ -742,7 +760,7 @@ catch (error) {
     shouldRetry: true,
     retryDelayMs: 0,
   });  // ❌ This also fails!
-  
+
   await acknowledgeMessage(queue, group, message.id);  // ⚠️ This might succeed
 }
 ```
@@ -764,11 +782,11 @@ try {
       jobId,
       error,
     });
-    
+
     // DON'T XACK - let stale recovery retry when DB is back
     return;
   }
-  
+
   // Other errors - proceed with failJob
   await failJob(jobId, workerId, { error: error.message });
   await acknowledgeMessage(queue, group, message.id);
@@ -782,6 +800,7 @@ try {
 ### Q8: What happens if Kafka is unavailable?
 
 **Scenario:**
+
 ```
 1. Worker completes job successfully
 2. Worker tries to publish event to Kafka
@@ -821,6 +840,7 @@ await publishJobCompleted({ jobId, ... });  // ❌ Kafka fails
 **Answer:** ⚠️ **Event is lost** (fire-and-forget)
 
 **Impact:**
+
 - Downstream services don't know job completed
 - Webhooks not sent
 - Dashboard doesn't update
@@ -831,6 +851,7 @@ await publishJobCompleted({ jobId, ... });  // ❌ Kafka fails
 **Is this acceptable?**
 
 Depends on requirements:
+
 - If events are **critical**: NO (use outbox pattern)
 - If events are **nice-to-have**: YES (current approach is fine)
 
@@ -840,7 +861,7 @@ Depends on requirements:
 // In same transaction as completeJob
 await db.transaction(async (tx) => {
   await completeJob(jobId, workerId, result, tx);
-  
+
   // Store event in outbox
   await tx.insert(outbox).values({
     id: crypto.randomUUID(),
@@ -853,7 +874,7 @@ await db.transaction(async (tx) => {
 // Separate background process publishes from outbox
 setInterval(async () => {
   const pendingEvents = await getPendingOutboxEvents(100);
-  
+
   for (const event of pendingEvents) {
     try {
       await publishToKafka(event);
@@ -874,6 +895,7 @@ setInterval(async () => {
 ### Q9: How does cancellation race with completion?
 
 **Scenario:**
+
 ```
 Timeline:
 T0: Worker starts processing job
@@ -893,8 +915,8 @@ export const VALID_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
   // ...
   CANCEL_REQUESTED: [
     'CANCELLED',
-    'SUCCEEDED',     // ✅ Allowed!
-    'FAILED',        // ✅ Allowed!
+    'SUCCEEDED', // ✅ Allowed!
+    'FAILED', // ✅ Allowed!
     'DEAD_LETTERED', // ✅ Allowed!
   ],
   // ...
@@ -904,12 +926,14 @@ export const VALID_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
 **Answer:** ✅ **Explicitly allowed**
 
 **Reasoning:**
+
 - Job already executing when cancel requested
 - Cancellation is best-effort (cooperative)
 - If job completes before worker checks cancellation token, it succeeds
 - This is correct behavior (job actually completed successfully)
 
 **Client receives:**
+
 - DELETE /api/v1/jobs/:id → 200 OK (cancellation requested)
 - GET /api/v1/jobs/:id → status=SUCCEEDED (job completed)
 
@@ -920,6 +944,7 @@ export const VALID_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
 ### Q10: How does idempotency work under concurrent requests?
 
 **Scenario:**
+
 ```
 Two clients send same idempotency key simultaneously:
 
@@ -938,11 +963,11 @@ export async function checkIdempotency(
   reply: FastifyReply
 ): Promise<void> {
   const idempotencyKey = request.headers['idempotency-key'] as string;
-  
+
   if (!idempotencyKey) {
-    return;  // No idempotency key, proceed
+    return; // No idempotency key, proceed
   }
-  
+
   // Check existing key
   const [existingKey] = await db
     .select()
@@ -954,20 +979,20 @@ export async function checkIdempotency(
         gt(idempotencyKeys.expiresAt, new Date())
       )
     );
-  
+
   if (existingKey) {
     // Return existing job
     const [existingJob] = await db
       .select()
       .from(jobs)
       .where(eq(jobs.id, existingKey.jobId));
-    
+
     return reply
       .status(200)
       .header('X-Idempotent-Replay', 'true')
       .send({ job: existingJob });
   }
-  
+
   // No existing key, proceed to create job
 }
 ```
@@ -981,7 +1006,7 @@ export async function createJobWithIdempotency(
   idempotencyKey: string,
   requestHash: string,
   jobData: NewJob,
-  idempotencyExpirationMs: number = 86400000  // 24 hours
+  idempotencyExpirationMs: number = 86400000 // 24 hours
 ): Promise<Job> {
   return await db.transaction(async (tx) => {
     // Check if idempotency key already exists
@@ -995,20 +1020,20 @@ export async function createJobWithIdempotency(
           gt(schema.idempotencyKeys.expiresAt, new Date())
         )
       );
-    
+
     if (existingKey) {
       // Return existing job
       const [existingJob] = await tx
         .select()
         .from(jobs)
         .where(eq(jobs.id, existingKey.jobId));
-      
+
       return existingJob;
     }
-    
+
     // Create new job
     const [job] = await tx.insert(jobs).values(jobData).returning();
-    
+
     // Create idempotency key
     const expiresAt = new Date(Date.now() + idempotencyExpirationMs);
     await tx.insert(schema.idempotencyKeys).values({
@@ -1020,7 +1045,7 @@ export async function createJobWithIdempotency(
       createdAt: new Date(),
       expiresAt,
     });
-    
+
     return job;
   });
 }
@@ -1093,18 +1118,18 @@ try {
   if (error.code === '23505') {  // PostgreSQL unique violation
     // Another request with same key just succeeded
     await sleep(50);  // Give it time to commit
-    
+
     const existingJob = await getJobByIdempotencyKey(
       request.user!.id,
       idempotencyKey
     );
-    
+
     return reply
       .status(200)
       .header('X-Idempotent-Replay', 'true')
       .send({ job: existingJob });
   }
-  
+
   throw error;  // Other errors
 }
 ```
@@ -1118,6 +1143,7 @@ try {
 ### Q11: What happens during retry storms?
 
 **Scenario:**
+
 ```
 1. Bad deployment causes all jobs to fail
 2. 10,000 jobs move to RETRY_SCHEDULED
@@ -1141,20 +1167,20 @@ export function calculateBackoff(
     factor = 2,
     jitterFactor = 0.1,
   } = options;
-  
+
   let delay: number;
-  
+
   switch (strategy) {
     case 'exponential':
       delay = Math.min(baseDelayMs * Math.pow(factor, attempt - 1), maxDelayMs);
       break;
     // ...
   }
-  
+
   // Add jitter to prevent thundering herd
   const jitter = delay * jitterFactor * (Math.random() * 2 - 1);
   delay = Math.max(0, delay + jitter);
-  
+
   return Math.floor(delay);
 }
 ```
@@ -1162,6 +1188,7 @@ export function calculateBackoff(
 **Jitter helps but doesn't prevent storm:**
 
 With 10,000 jobs:
+
 - Attempt 1 delay: 1000ms ± 10% = 900-1100ms
 - All 10,000 jobs retry within 200ms window
 - Still a storm!
@@ -1172,7 +1199,7 @@ With 10,000 jobs:
 // packages/queue/src/scheduler.ts:60-90
 async pollForDueJobs() {
   const dueJobs = await getDueJobs(this.batchSize);  // Default: 100
-  
+
   for (const job of dueJobs) {
     await enqueueJob(job.id, getQueueName(job));
     await updateJobStatus(job.id, 'QUEUED');
@@ -1191,6 +1218,7 @@ Scheduler processes retries slowly, preventing storm.
 **But what about workers?**
 
 Workers consume from Redis:
+
 - 10 workers × 10 concurrent jobs = 100 jobs processing simultaneously
 - Queue depth grows faster than workers can process
 - Workers don't crash but become slow
@@ -1198,6 +1226,7 @@ Workers consume from Redis:
 **Is this a problem?**
 
 Yes, if queue depth reaches millions:
+
 - Redis memory exhaustion
 - Increased latency for new jobs
 - Workers spend more time on failing jobs
@@ -1211,7 +1240,7 @@ class CircuitBreaker {
   private failureCount = 0;
   private lastFailureTime = 0;
   private state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
-  
+
   async execute(jobType: string, handler: () => Promise<any>) {
     if (this.state === 'OPEN') {
       // Check if enough time has passed
@@ -1221,25 +1250,25 @@ class CircuitBreaker {
         throw new CircuitBreakerOpenError();
       }
     }
-    
+
     try {
       const result = await handler();
-      
+
       if (this.state === 'HALF_OPEN') {
         this.reset();
       }
-      
+
       return result;
     } catch (error) {
       this.recordFailure();
       throw error;
     }
   }
-  
+
   private recordFailure() {
     this.failureCount++;
     this.lastFailureTime = Date.now();
-    
+
     if (this.failureCount >= 10) {
       this.state = 'OPEN';
       logger.error('Circuit breaker opened', {
@@ -1247,7 +1276,7 @@ class CircuitBreaker {
       });
     }
   }
-  
+
   private reset() {
     this.failureCount = 0;
     this.state = 'CLOSED';
@@ -1262,6 +1291,7 @@ class CircuitBreaker {
 ### Q12: How does priority avoid starvation?
 
 **Scenario:**
+
 ```
 Queue has:
 - 1,000,000 LOW priority jobs
@@ -1295,8 +1325,8 @@ export async function getNextAvailableJobs(
       )
     )
     .orderBy(
-      desc(jobs.priority),      // ✅ Priority first
-      asc(jobs.scheduledAt)     // Then FIFO
+      desc(jobs.priority), // ✅ Priority first
+      asc(jobs.scheduledAt) // Then FIFO
     )
     .limit(limit);
 }
@@ -1307,10 +1337,16 @@ export async function getNextAvailableJobs(
 ```typescript
 // packages/queue/src/consumer.ts:40-80
 const result = await redis.xreadgroup(
-  'GROUP', groupName, consumerName,
-  'COUNT', batchSize,
-  'BLOCK', blockMs,
-  'STREAMS', ...streams, ...ids  // ⚠️ FIFO order only!
+  'GROUP',
+  groupName,
+  consumerName,
+  'COUNT',
+  batchSize,
+  'BLOCK',
+  blockMs,
+  'STREAMS',
+  ...streams,
+  ...ids // ⚠️ FIFO order only!
 );
 ```
 
@@ -1347,14 +1383,19 @@ const streams = [
 // Consume CRITICAL first, then HIGH, etc.
 for (const stream of streams) {
   const messages = await redis.xreadgroup(
-    'GROUP', groupName, consumerName,
-    'COUNT', batchSize,
-    'NOBLOCK',  // Don't wait
-    'STREAMS', stream, '>'
+    'GROUP',
+    groupName,
+    consumerName,
+    'COUNT',
+    batchSize,
+    'NOBLOCK', // Don't wait
+    'STREAMS',
+    stream,
+    '>'
   );
-  
+
   if (messages && messages.length > 0) {
-    return messages;  // Process these first
+    return messages; // Process these first
   }
 }
 ```
@@ -1401,6 +1442,7 @@ Workers → Kafka (events)
 **Answer:** ✅ **PostgreSQL is the bottleneck**
 
 **At 10K jobs/sec:**
+
 - PostgreSQL handles: 10K INSERT + 10K UPDATE = 20K TPS
 - This is **at the limit** for single PostgreSQL instance
 - Connection pool exhaustion likely
@@ -1408,6 +1450,7 @@ Workers → Kafka (events)
 **How to scale beyond 10K jobs/sec:**
 
 **Option 1: Batch Inserts**
+
 ```typescript
 // Instead of 10K individual INSERTs
 for (const job of jobs) {
@@ -1424,6 +1467,7 @@ for (const batch of batches) {
 ```
 
 **Option 2: Read Replicas**
+
 ```typescript
 // Use read replica for queries (getNextAvailableJobs)
 // Use primary for writes (INSERT, UPDATE)
@@ -1439,6 +1483,7 @@ await primaryDb.update(jobs).set(...);
 ```
 
 **Option 3: Reduce PostgreSQL Updates**
+
 ```typescript
 // Don't update PostgreSQL on every lease renewal
 // Only on acquisition and completion
@@ -1456,6 +1501,7 @@ await primaryDb.update(jobs).set(...);
 ### Q14: How would you scale from 10K to 100K to 1M jobs/sec?
 
 **10K jobs/sec (Current Limits):**
+
 - ✅ Single PostgreSQL instance (at limit)
 - ✅ Single Redis instance
 - ✅ 10-20 workers
@@ -1466,15 +1512,17 @@ await primaryDb.update(jobs).set(...);
 **Changes Needed:**
 
 1. **PostgreSQL Sharding**
+
    ```typescript
    // Shard by queue name
    const shardId = hashCode(queueName) % numShards;
    const db = getDbShard(shardId);
-   
+
    await db.insert(jobs).values(job);
    ```
 
 2. **Redis Cluster**
+
    ```typescript
    // Redis Cluster automatically shards by key
    const redis = new Redis.Cluster([
@@ -1482,7 +1530,7 @@ await primaryDb.update(jobs).set(...);
      { host: 'redis-2', port: 6379 },
      { host: 'redis-3', port: 6379 },
    ]);
-   
+
    // Stream key includes {queue} for hash tag
    const streamKey = `taskflow:stream:{${queueName}}`;
    ```
@@ -1500,22 +1548,23 @@ await primaryDb.update(jobs).set(...);
 **Changes Needed:**
 
 1. **Remove PostgreSQL from Hot Path**
+
    ```typescript
    // Option A: Buffer in Redis, persist async
    await redis.xadd(streamKey, '*', 'data', JSON.stringify(job));
-   
+
    // Background process persists to PostgreSQL
    setInterval(async () => {
      const jobs = await consumeFromBuffer(1000);
-     await db.insert(jobs).values(jobs);  // Batch 1000
+     await db.insert(jobs).values(jobs); // Batch 1000
    }, 1000);
-   
+
    // Option B: Use Kafka as primary queue
    await producer.send({
      topic: queueName,
      messages: [{ value: JSON.stringify(job) }],
    });
-   
+
    // Workers consume from Kafka, persist to PostgreSQL after completion
    ```
 
@@ -1530,7 +1579,7 @@ await primaryDb.update(jobs).set(...);
    API → Kafka (primary queue)
    Workers → Kafka (consume)
    Workers → PostgreSQL (persist results only)
-   
+
    PostgreSQL no longer in hot path!
    ```
 
@@ -1545,10 +1594,12 @@ await primaryDb.update(jobs).set(...);
 **Answer:**
 
 **At-Least-Once Delivery:**
+
 - Job may be executed **one or more times**
 - Guaranteed to execute **at least once**
 
 **Exactly-Once Delivery:**
+
 - Job executed **exactly once**
 - Never duplicated
 
@@ -1571,11 +1622,13 @@ await primaryDb.update(jobs).set(...);
 **Why Exactly-Once is Hard:**
 
 **Exactly-once requires:**
+
 - Atomic operations across **all systems** (PostgreSQL + Redis + Kafka + Handler side effects)
 - Distributed transaction (2PC)
 - Or idempotent handlers + deduplication
 
 **TaskFlow doesn't have:**
+
 - ❌ Distributed transactions
 - ❌ Handler-level idempotency framework
 - ❌ Execution deduplication
@@ -1583,13 +1636,14 @@ await primaryDb.update(jobs).set(...);
 **To Achieve Exactly-Once:**
 
 **Option 1: Execution Tokens (from Q4)**
+
 ```typescript
 const executionToken = `exec:${jobId}:${attempt}`;
 
 // Before execution
 const existing = await getExecutionResult(executionToken);
 if (existing) {
-  return existing.result;  // Already executed
+  return existing.result; // Already executed
 }
 
 // Execute handler
@@ -1600,27 +1654,28 @@ await storeExecutionResult(executionToken, result);
 ```
 
 **Option 2: Idempotent Handlers**
+
 ```typescript
 // Handler checks if work already done
 async function sendEmailHandler(payload) {
   const { userId, emailId } = payload;
-  
+
   // Check if email already sent
   const existing = await db
     .select()
     .from(sent_emails)
     .where(eq(sent_emails.emailId, emailId));
-  
+
   if (existing) {
     return { sent: false, reason: 'already_sent' };
   }
-  
+
   // Send email
   await sendEmail(userId, emailId);
-  
+
   // Record sent
   await db.insert(sent_emails).values({ emailId, sentAt: new Date() });
-  
+
   return { sent: true };
 }
 ```
@@ -1632,6 +1687,7 @@ async function sendEmailHandler(payload) {
 ### Q16: What happens during a regional outage?
 
 **Scenario:**
+
 ```
 Multi-region deployment:
 - us-east-1: API, Workers, PostgreSQL primary
@@ -1643,6 +1699,7 @@ us-east-1 goes down completely.
 **Current Architecture:**
 
 TaskFlow has **no multi-region support**:
+
 - Single PostgreSQL instance (no replication configured)
 - Single Redis instance (no replication)
 - Single Kafka cluster (no cross-region)
@@ -1650,6 +1707,7 @@ TaskFlow has **no multi-region support**:
 **Answer:** ❌ **Complete outage** (no failover)
 
 **Impact:**
+
 - All APIs down (us-west-2 can't reach PostgreSQL)
 - All workers down (us-west-2 can't reach Redis)
 - No job processing
@@ -1658,6 +1716,7 @@ TaskFlow has **no multi-region support**:
 **To Support Regional Failover:**
 
 **Option 1: PostgreSQL Read Replica + Manual Promotion**
+
 ```yaml
 Primary: us-east-1 (read-write)
 Replica: us-west-2 (read-only)
@@ -1672,6 +1731,7 @@ Downtime: ~5-10 minutes
 ```
 
 **Option 2: Multi-Master PostgreSQL (BDR)**
+
 ```yaml
 Primary: us-east-1 (read-write)
 Primary: us-west-2 (read-write)
@@ -1682,6 +1742,7 @@ Downtime: ~0 seconds (automatic failover)
 ```
 
 **Option 3: Separate Deployments Per Region**
+
 ```yaml
 Region: us-east-1
 - PostgreSQL, Redis, Kafka, API, Workers (isolated)
@@ -1731,6 +1792,7 @@ Downtime: 0 (jobs in us-east-1 are lost, but us-west-2 continues)
 **Why Not Redis?**
 
 Redis is used for **ephemeral message delivery**:
+
 - Fast enqueue/dequeue (50K ops/sec)
 - Consumer groups for distributed consumption
 - No need for durability (messages acknowledged after processing)
@@ -1738,11 +1800,13 @@ Redis is used for **ephemeral message delivery**:
 **Trade-off:**
 
 ✅ **Pros:**
+
 - Strong guarantees (durability, consistency)
 - Rich querying (dashboard, filtering)
 - Audit trail (compliance, debugging)
 
 ❌ **Cons:**
+
 - Lower throughput (10K vs 50K ops/sec)
 - More complex (two systems to maintain)
 - Possible inconsistency (PostgreSQL vs Redis)
@@ -1787,6 +1851,7 @@ Redis is used for **ephemeral message delivery**:
 **Real-World Example:**
 
 **Kafka's "Exactly-Once" Semantics:**
+
 - Actually "effectively once" (within Kafka only)
 - Doesn't extend to external systems (database, API calls)
 - Requires idempotent producers + transactional consumers
@@ -1801,18 +1866,14 @@ Redis is used for **ephemeral message delivery**:
 ### Critical Issues Found
 
 **P0 (Must Fix):**
+
 1. **Message stuck in infinite loop** (Q3) - Workers can't XACK terminal jobs
 2. **Poor PostgreSQL failure handling** (Q7) - Messages lost on DB errors
 3. **Priority starvation** (Q12) - CRITICAL jobs behind 1M LOW jobs
 
-**P1 (Should Fix):**
-4. **Idempotency race condition** (Q10) - Concurrent requests get 500 instead of 200
-5. **Event loss on Kafka failure** (Q8) - Fire-and-forget events
-6. **No circuit breaker** (Q11) - Retry storms not prevented
+**P1 (Should Fix):** 4. **Idempotency race condition** (Q10) - Concurrent requests get 500 instead of 200 5. **Event loss on Kafka failure** (Q8) - Fire-and-forget events 6. **No circuit breaker** (Q11) - Retry storms not prevented
 
-**P2 (Nice to Have):**
-7. **Heartbeat delays** (Q6) - Monitoring inaccuracy
-8. **Redis recovery improvements** (Q1) - Better client messaging
+**P2 (Nice to Have):** 7. **Heartbeat delays** (Q6) - Monitoring inaccuracy 8. **Redis recovery improvements** (Q1) - Better client messaging
 
 ### Strengths Confirmed
 
@@ -1827,6 +1888,7 @@ Redis is used for **ephemeral message delivery**:
 **Question Q4 revealed Architecture Review was WRONG!**
 
 **Correct order:** PostgreSQL first, Redis second
+
 - Prevents job loss (most critical)
 - Accepts duplicate execution risk (handlers must be idempotent)
 
@@ -1841,11 +1903,13 @@ Redis is used for **ephemeral message delivery**:
 ### Production Readiness
 
 **After fixing P0 issues:**
+
 - ✅ Suitable for 10K-100K jobs/day
 - ✅ Correct for medium-scale production
 - ⚠️ Needs hardening for mission-critical use
 
 **Not suitable for (without changes):**
+
 - ❌ High-priority job guarantees (priority starvation)
 - ❌ Multi-region deployment (no failover)
 - ❌ >100K jobs/sec throughput

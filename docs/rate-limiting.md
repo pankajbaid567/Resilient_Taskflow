@@ -5,6 +5,7 @@
 Resilient TaskFlow implements **distributed API rate limiting** using Redis with a **sliding window algorithm**. This prevents API abuse, ensures fair resource allocation, and protects backend services from overload.
 
 **Key Features:**
+
 - Sliding window algorithm (accurate, no boundary bursts)
 - Distributed across API instances via Redis
 - Per-user and per-IP rate limiting
@@ -21,21 +22,23 @@ Resilient TaskFlow implements **distributed API rate limiting** using Redis with
 
 We evaluated three common rate limiting algorithms:
 
-| Algorithm | Accuracy | Memory | Complexity | Burst Protection |
-|-----------|----------|--------|------------|------------------|
-| **Fixed Window** | Low (burst at boundaries) | O(1) | Simple | ❌ No |
-| **Token Bucket** | Medium | O(1) | Medium | ✅ Yes |
-| **Sliding Window** | High | O(n) | Medium | ✅ Yes |
+| Algorithm          | Accuracy                  | Memory | Complexity | Burst Protection |
+| ------------------ | ------------------------- | ------ | ---------- | ---------------- |
+| **Fixed Window**   | Low (burst at boundaries) | O(1)   | Simple     | ❌ No            |
+| **Token Bucket**   | Medium                    | O(1)   | Medium     | ✅ Yes           |
+| **Sliding Window** | High                      | O(n)   | Medium     | ✅ Yes           |
 
 **Chosen: Sliding Window**
 
 **Why:**
+
 - **Accurate**: Counts requests in exact time windows, not discrete buckets
 - **No boundary bursts**: Unlike fixed windows (200 requests at 00:59, 200 at 01:01 = 400 in 2 seconds)
 - **Distributed-safe**: Redis sorted sets provide atomic operations
 - **Proven**: Used by GitHub, Stripe, Cloudflare
 
 **Trade-off:**
+
 - Slightly higher memory (O(n) where n = requests in window)
 - More Redis operations (ZADD, ZCOUNT, ZREMRANGEBYSCORE)
 
@@ -105,10 +108,10 @@ app.register(async (fastify) => {
 
 ```typescript
 interface RateLimitConfig {
-  maxRequests: number;         // Max requests in window
-  windowSeconds: number;        // Time window (seconds)
+  maxRequests: number; // Max requests in window
+  windowSeconds: number; // Time window (seconds)
   keyExtractor?: (req) => string; // Custom key (default: IP)
-  skip?: (req) => boolean;      // Skip rate limiting
+  skip?: (req) => boolean; // Skip rate limiting
 }
 ```
 
@@ -143,6 +146,7 @@ export const rateLimiters = {
 ### Key Extraction Strategies
 
 **1. IP-based (default)**:
+
 ```typescript
 // Respects X-Forwarded-For for proxies
 const key = extractIpAddress(request);
@@ -150,6 +154,7 @@ const key = extractIpAddress(request);
 ```
 
 **2. User-based**:
+
 ```typescript
 // Requires authentication
 const key = extractUserId(request);
@@ -157,11 +162,12 @@ const key = extractUserId(request);
 ```
 
 **3. Custom**:
+
 ```typescript
 // API key-based
-keyExtractor: (req) => req.headers['x-api-key'] || req.ip
+keyExtractor: (req) => req.headers['x-api-key'] || req.ip;
 // Endpoint-specific
-keyExtractor: (req) => `${req.user.id}:${req.routerPath}`
+keyExtractor: (req) => `${req.user.id}:${req.routerPath}`;
 ```
 
 ---
@@ -173,6 +179,7 @@ keyExtractor: (req) => `${req.user.id}:${req.routerPath}`
 **Status**: `200 OK`
 
 **Headers**:
+
 ```
 X-RateLimit-Limit: 100
 X-RateLimit-Remaining: 47
@@ -184,6 +191,7 @@ X-RateLimit-Reset: 1704451590000
 **Status**: `429 Too Many Requests`
 
 **Headers**:
+
 ```
 X-RateLimit-Limit: 100
 X-RateLimit-Remaining: 0
@@ -192,6 +200,7 @@ Retry-After: 25
 ```
 
 **Body**:
+
 ```json
 {
   "error": "Too Many Requests",
@@ -220,11 +229,13 @@ try {
 ```
 
 **Why Fail Open?**
+
 - Redis unavailability should NOT break the API entirely
 - Temporary rate limiting loss is better than full API outage
 - Alternative: Fail closed (deny all requests) → more conservative
 
 **Trade-off**:
+
 - Risk: Brief period without rate limiting during Redis outage
 - Benefit: API remains operational
 - Mitigation: Comprehensive monitoring + Redis HA
@@ -281,6 +292,7 @@ end
 ```
 
 **Trade-off**:
+
 - Eliminates race condition
 - Adds 1-2ms latency per request
 - More complex debugging
@@ -294,20 +306,22 @@ end
 ### Benchmarks
 
 **Environment**:
+
 - Redis: 6.2, local instance
 - API: 3 instances
 - Concurrent users: 100
 
-| Metric | Value |
-|--------|-------|
-| Rate limit overhead | 1-2 ms per request |
-| Redis operations | 4 per request (ZREMRANGEBYSCORE, ZCOUNT, ZADD, EXPIRE) |
-| Memory per user | ~8 KB for 100 req/min window |
-| Throughput | 10,000 req/sec (limited by Redis) |
+| Metric              | Value                                                  |
+| ------------------- | ------------------------------------------------------ |
+| Rate limit overhead | 1-2 ms per request                                     |
+| Redis operations    | 4 per request (ZREMRANGEBYSCORE, ZCOUNT, ZADD, EXPIRE) |
+| Memory per user     | ~8 KB for 100 req/min window                           |
+| Throughput          | 10,000 req/sec (limited by Redis)                      |
 
 ### Optimization
 
 **1. Reduce Redis Roundtrips**:
+
 ```typescript
 // Current: 4 separate commands
 await redis.zremrangebyscore(...)
@@ -327,6 +341,7 @@ await pipeline.exec();
 **Impact**: 4 roundtrips → 1 roundtrip (~3-4x faster)
 
 **2. Reduce ZREMRANGEBYSCORE Frequency**:
+
 ```typescript
 // Only cleanup every N requests (e.g., 10)
 if (Math.random() < 0.1) {
@@ -345,6 +360,7 @@ if (Math.random() < 0.1) {
 ### Production Tiers
 
 **Free tier** (strict limits):
+
 ```typescript
 const freeTierLimiter = createRateLimiter({
   maxRequests: 10,
@@ -355,6 +371,7 @@ const freeTierLimiter = createRateLimiter({
 ```
 
 **Premium tier** (higher limits):
+
 ```typescript
 const premiumTierLimiter = createRateLimiter({
   maxRequests: 1000,
@@ -365,6 +382,7 @@ const premiumTierLimiter = createRateLimiter({
 ```
 
 **Multiple tiers via dynamic config**:
+
 ```typescript
 const tieredLimiter = async (req, reply) => {
   const limits = {
@@ -381,24 +399,39 @@ const tieredLimiter = async (req, reply) => {
 ### Per-Endpoint Configuration
 
 **Job submission** (strict):
+
 ```typescript
-app.post('/api/v1/jobs', {
-  preHandler: rateLimiters.jobSubmission,
-}, jobRoutes.createJob);
+app.post(
+  '/api/v1/jobs',
+  {
+    preHandler: rateLimiters.jobSubmission,
+  },
+  jobRoutes.createJob
+);
 ```
 
 **Job retrieval** (lenient):
+
 ```typescript
-app.get('/api/v1/jobs/:id', {
-  preHandler: rateLimiters.read,
-}, jobRoutes.getJob);
+app.get(
+  '/api/v1/jobs/:id',
+  {
+    preHandler: rateLimiters.read,
+  },
+  jobRoutes.getJob
+);
 ```
 
 **Health checks** (very lenient):
+
 ```typescript
-app.get('/health', {
-  preHandler: rateLimiters.health,
-}, healthRoutes.health);
+app.get(
+  '/health',
+  {
+    preHandler: rateLimiters.health,
+  },
+  healthRoutes.health
+);
 ```
 
 ---
@@ -419,6 +452,7 @@ api_rate_limit_duration_seconds{quantile="0.5|0.95|0.99"}
 ```
 
 **Grafana Queries**:
+
 ```promql
 # Denial rate
 rate(api_rate_limit_hits_total{status="denied"}[5m])
@@ -433,6 +467,7 @@ histogram_quantile(0.95, api_rate_limit_duration_seconds)
 ### Logging
 
 **Allowed request**:
+
 ```json
 {
   "level": "debug",
@@ -446,6 +481,7 @@ histogram_quantile(0.95, api_rate_limit_duration_seconds)
 ```
 
 **Denied request**:
+
 ```json
 {
   "level": "warn",
@@ -460,6 +496,7 @@ histogram_quantile(0.95, api_rate_limit_duration_seconds)
 ```
 
 **Error**:
+
 ```json
 {
   "level": "error",
@@ -473,6 +510,7 @@ histogram_quantile(0.95, api_rate_limit_duration_seconds)
 ### Alerts
 
 **1. High denial rate**:
+
 ```yaml
 - alert: HighRateLimitDenials
   expr: |
@@ -480,16 +518,17 @@ histogram_quantile(0.95, api_rate_limit_duration_seconds)
     / rate(api_rate_limit_hits_total[5m]) > 0.2
   for: 5m
   annotations:
-    summary: "20%+ requests rate limited"
+    summary: '20%+ requests rate limited'
 ```
 
 **2. Rate limiter errors**:
+
 ```yaml
 - alert: RateLimiterErrors
   expr: rate(api_rate_limit_errors_total[5m]) > 10
   for: 2m
   annotations:
-    summary: "Rate limiter experiencing errors (Redis down?)"
+    summary: 'Rate limiter experiencing errors (Redis down?)'
 ```
 
 ---
@@ -499,6 +538,7 @@ histogram_quantile(0.95, api_rate_limit_duration_seconds)
 ### Unit Tests
 
 **Test scenarios**:
+
 1. ✅ Allow request under limit
 2. ✅ Deny request over limit
 3. ✅ Sliding window accuracy
@@ -510,6 +550,7 @@ histogram_quantile(0.95, api_rate_limit_duration_seconds)
 9. ✅ Fail open on Redis error
 
 **Example**:
+
 ```typescript
 describe('RateLimiter', () => {
   it('should allow requests under limit', async () => {
@@ -553,6 +594,7 @@ describe('RateLimiter', () => {
 ### Load Tests (k6)
 
 **Test concurrent burst**:
+
 ```javascript
 import http from 'k6/http';
 import { check } from 'k6';
@@ -570,12 +612,14 @@ export default function () {
 
   check(res, {
     'rate limited or allowed': (r) => [200, 429].includes(r.status),
-    'has rate limit headers': (r) => r.headers['X-RateLimit-Limit'] !== undefined,
+    'has rate limit headers': (r) =>
+      r.headers['X-RateLimit-Limit'] !== undefined,
   });
 }
 ```
 
 **Measure denial rate**:
+
 ```
 http_req_failed{status:429}........: 23.45% (2345 of 10000)
 http_req_duration..................: avg=15ms p95=45ms
@@ -592,6 +636,7 @@ http_req_duration..................: avg=15ms p95=45ms
 **Solutions**:
 
 **1. Redis Sentinel** (automatic failover):
+
 ```yaml
 # docker-compose.yml
 redis-sentinel:
@@ -600,6 +645,7 @@ redis-sentinel:
 ```
 
 **2. Redis Cluster** (sharding):
+
 ```typescript
 const redis = new Redis.Cluster([
   { host: 'redis-node-1', port: 6379 },
@@ -609,6 +655,7 @@ const redis = new Redis.Cluster([
 ```
 
 **3. Managed Redis** (AWS ElastiCache, GCP Memorystore):
+
 - Automatic failover
 - Multi-AZ replication
 - Backups
@@ -621,6 +668,7 @@ const redis = new Redis.Cluster([
 **Challenge**: Rate limits enforced per region
 
 **Problem**:
+
 ```
 User in US → API-US-EAST → Redis-US-EAST → 50/60 requests
 User in US → API-US-WEST → Redis-US-WEST → 50/60 requests
@@ -628,19 +676,24 @@ Total: 100 requests (limit breached)
 ```
 
 **Solution 1: Global Redis** (high latency):
+
 ```
 All API instances → Single Redis instance
 ```
+
 ❌ Adds 50-200ms latency for cross-region Redis calls.
 
 **Solution 2: Regional limits** (simpler):
+
 ```
 Limit = 100 req/min per region
 User distributed across regions gets higher effective limit
 ```
+
 ✅ Low latency, acceptable for most use cases.
 
 **Solution 3: Gossip protocol** (complex):
+
 - API instances share rate limit state via gossip
 - Eventually consistent
 - Complex implementation
@@ -650,19 +703,21 @@ User distributed across regions gets higher effective limit
 ### Kubernetes Deployment
 
 **ConfigMap** (rate limit config):
+
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: rate-limit-config
 data:
-  JOB_SUBMISSION_LIMIT: "50"
-  JOB_SUBMISSION_WINDOW: "60"
-  READ_LIMIT: "200"
-  READ_WINDOW: "60"
+  JOB_SUBMISSION_LIMIT: '50'
+  JOB_SUBMISSION_WINDOW: '60'
+  READ_LIMIT: '200'
+  READ_WINDOW: '60'
 ```
 
 **Deployment**:
+
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -673,17 +728,17 @@ spec:
   template:
     spec:
       containers:
-      - name: api
-        image: taskflow-api:latest
-        env:
-        - name: REDIS_URL
-          valueFrom:
-            secretKeyRef:
-              name: redis-secret
-              key: url
-        envFrom:
-        - configMapRef:
-            name: rate-limit-config
+        - name: api
+          image: taskflow-api:latest
+          env:
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: url
+          envFrom:
+            - configMapRef:
+                name: rate-limit-config
 ```
 
 ---
@@ -693,17 +748,20 @@ spec:
 ### 1. Token Bucket Algorithm
 
 **How it works**:
+
 - Bucket holds N tokens
 - Each request consumes 1 token
 - Tokens refill at rate R per second
 - If bucket empty → deny
 
 **Pros**:
+
 - Handles bursts gracefully
 - O(1) memory
 - Simple implementation
 
 **Cons**:
+
 - Less accurate for strict limits
 - Requires per-key state (tokens, lastRefill)
 
@@ -712,14 +770,17 @@ spec:
 ### 2. Fixed Window Algorithm
 
 **How it works**:
+
 - Count requests in 1-minute buckets
 - Bucket key: `rate-limit:user123:2024-01-05-10-05`
 
 **Pros**:
+
 - O(1) memory (single counter)
 - Fastest (single INCR command)
 
 **Cons**:
+
 - **Boundary burst problem**:
   - 100 requests at 10:04:59
   - 100 requests at 10:05:01
@@ -730,15 +791,18 @@ spec:
 ### 3. Leaky Bucket Algorithm
 
 **How it works**:
+
 - Requests enter queue (bucket)
 - Queue processes at fixed rate
 - If queue full → deny
 
 **Pros**:
+
 - Smooths traffic
 - Prevents bursts
 
 **Cons**:
+
 - Adds latency (queuing)
 - Complex implementation
 - Harder to explain to users
@@ -756,6 +820,7 @@ spec:
 **Future**: Single Lua script (atomic)
 
 **Impact**:
+
 - Eliminates 1-2 request over-limit breach
 - Adds 1-2ms latency
 
@@ -766,6 +831,7 @@ spec:
 **Current**: Strict limit (100 req/min)
 
 **Future**: Allow brief bursts
+
 ```typescript
 {
   maxRequests: 100,
@@ -783,11 +849,13 @@ spec:
 **Current**: Static limits per endpoint
 
 **Future**: Adjust limits based on system load
+
 ```typescript
 // Reduce limits when system overloaded
-const limit = systemLoad > 0.8
-  ? 50  // Reduced
-  : 100; // Normal
+const limit =
+  systemLoad > 0.8
+    ? 50 // Reduced
+    : 100; // Normal
 ```
 
 **Priority**: Low (requires comprehensive metrics).
@@ -795,6 +863,7 @@ const limit = systemLoad > 0.8
 ### 4. IP Geolocation-Based Limits
 
 **Future**: Stricter limits for high-risk regions
+
 ```typescript
 const limit = isHighRiskCountry(req.ip) ? 10 : 100;
 ```
@@ -820,6 +889,7 @@ const limit = isHighRiskCountry(req.ip) ? 10 : 100;
 ### Q: Why not use Nginx/API Gateway rate limiting?
 
 **A**: We need **application-level context**:
+
 - Per-user limits (requires auth)
 - Per-endpoint limits
 - Dynamic limits based on user tier
@@ -830,6 +900,7 @@ Nginx only supports IP-based limiting. API Gateway (AWS) supports key-based, but
 ### Q: How would you scale this to 1M req/sec?
 
 **A**:
+
 1. **Redis Cluster** (shard by user ID)
 2. **Approximate counting** (HyperLogLog for top 1% abusers)
 3. **Multi-tier limits** (strict for top abusers, lenient for normal users)
@@ -840,6 +911,7 @@ Current design: Optimized for 10K req/sec (sufficient for V1).
 ### Q: How do you test race conditions?
 
 **A**: Load tests with k6:
+
 - 100+ concurrent users
 - Same user ID
 - Measure over-limit breach frequency
@@ -852,6 +924,7 @@ Also unit tests with mock Redis to simulate timing issues.
 ## Summary
 
 **What We Built**:
+
 - Distributed rate limiting using Redis sliding window
 - Accurate, no boundary bursts
 - Per-user and per-IP limiting
@@ -860,17 +933,20 @@ Also unit tests with mock Redis to simulate timing issues.
 - Comprehensive monitoring
 
 **Key Guarantees**:
+
 - ✅ At least (maxRequests - 2) enforced (rare race)
 - ✅ Distributed across API instances
 - ✅ Works during Redis brief outage (fail open)
 - ✅ Low latency overhead (1-2ms)
 
 **Trade-offs**:
+
 - Small race condition acceptable (1-2 req over limit)
 - Fail open (not fail closed)
 - O(n) memory (sorted set)
 
-**Production Ready**:
+**Local implementation status (not a production-readiness claim)**:
+
 - Configurable per endpoint
 - User tier support
 - Monitoring/alerting

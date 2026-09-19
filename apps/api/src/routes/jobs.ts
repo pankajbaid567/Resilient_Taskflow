@@ -5,6 +5,7 @@ import {
   getJobForUser,
   getJobsForUser,
   getQueueByName,
+  retryDeadLetteredJobForUser,
   type JobWithQueue,
 } from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
@@ -56,7 +57,7 @@ function sendMissingJob(reply: FastifyReply, id: string): FastifyReply {
   });
 }
 
-/** Job submission, tenant-scoped reads, and cancellation. */
+/** Job submission, tenant-scoped reads, cancellation, and manual retry. */
 export function jobRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: SubmitJobRequest }>('/', async (request, reply) => {
     const validated = submitJobSchema.parse(request.body);
@@ -155,13 +156,15 @@ export function jobRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post<{ Params: { id: string } }>('/:id/retry', async (request, reply) => {
-    jobIdParamsSchema.parse(request.params);
-    return reply.status(501).send({
-      error: 'Not Implemented',
-      message: 'Manual job retry is not implemented',
-      statusCode: 501,
-      timestamp: new Date().toISOString(),
-    });
+    const { id } = jobIdParamsSchema.parse(request.params);
+    const replacement = await retryDeadLetteredJobForUser(id, request.user!.id);
+    if (!replacement) return sendMissingJob(reply, id);
+
+    logger.info(
+      { originalJobId: id, replacementJobId: replacement.job.id },
+      'Dead-lettered job manually retried'
+    );
+    return reply.status(201).send(serializeJob(replacement));
   });
 
   return Promise.resolve();

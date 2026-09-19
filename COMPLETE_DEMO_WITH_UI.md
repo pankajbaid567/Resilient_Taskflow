@@ -1,3 +1,5 @@
+> Historical snapshot only. Claims and numbers below are not current acceptance evidence; use the root README and executable gates.
+
 # TaskFlow Complete Demo - With UI Dashboard! 🎨
 
 ## Yes, There's a Frontend! 🎉
@@ -46,6 +48,7 @@ pnpm dev:api
 ```
 
 **Expected output:**
+
 ```
 ✓ Database connected
 ✓ Redis connected
@@ -60,6 +63,7 @@ pnpm dev:worker
 ```
 
 **Expected output:**
+
 ```
 ✓ Worker started successfully
 ✓ Job handlers initialized (2 types)
@@ -73,6 +77,7 @@ pnpm dev:dashboard
 ```
 
 **Expected output:**
+
 ```
   VITE v5.3.4  ready in 432 ms
 
@@ -95,9 +100,11 @@ This submits 4 test jobs that you can watch in the dashboard!
 ## 🎨 Dashboard Features
 
 ### 1. Dashboard Page (Home)
+
 **URL:** http://localhost:5173/
 
 Shows:
+
 - **Active Workers** - How many workers are running
 - **Total Jobs** - Jobs in system
 - **Success Rate** - % of successful jobs
@@ -106,9 +113,11 @@ Shows:
 - **System Health** - PostgreSQL, Redis, Kafka status
 
 ### 2. Jobs Page
+
 **URL:** http://localhost:5173/jobs
 
 Features:
+
 - **Search** - Find jobs by ID or type
 - **Filter** - By status (PENDING, PROCESSING, SUCCEEDED, FAILED)
 - **Sort** - By created date, priority, status
@@ -121,9 +130,11 @@ Features:
   - Worker ID
 
 ### 3. Workers Page
+
 **URL:** http://localhost:5173/workers
 
 Shows:
+
 - **Worker List** - All active workers
 - **Worker Status** - Health, uptime
 - **Jobs Processed** - Success/failure counts
@@ -131,18 +142,22 @@ Shows:
 - **Performance** - Average processing time
 
 ### 4. Queues Page
+
 **URL:** http://localhost:5173/queues
 
 Displays:
+
 - **Queue Depth** - Jobs waiting
 - **Priority Breakdown** - CRITICAL/HIGH/NORMAL/LOW counts
 - **Processing Rate** - Jobs/minute
 - **Success Rate** - By queue
 
 ### 5. Dead Letter Queue (DLQ)
+
 **URL:** http://localhost:5173/dlq
 
 Manage failed jobs:
+
 - **View Failed Jobs** - Jobs that exceeded max retries
 - **Error Details** - See why jobs failed
 - **Requeue** - Retry failed jobs manually
@@ -151,6 +166,7 @@ Manage failed jobs:
 ## 📸 What You'll See
 
 ### Dashboard Overview
+
 ```
 ┌────────────────────────────────────────────────────────────┐
 │  TaskFlow Dashboard                                        │
@@ -173,6 +189,7 @@ Manage failed jobs:
 ```
 
 ### Job Details Modal
+
 ```
 ┌────────────────────────────────────────┐
 │  Job Details - abc-123           [✕]   │
@@ -217,16 +234,16 @@ Manage failed jobs:
 
 ## 🌐 All URLs
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| **Dashboard** | http://localhost:5173 | React UI (Main page) |
-| **Jobs** | http://localhost:5173/jobs | Job browser |
-| **Workers** | http://localhost:5173/workers | Worker monitor |
-| **Queues** | http://localhost:5173/queues | Queue stats |
-| **DLQ** | http://localhost:5173/dlq | Failed jobs |
-| **API Docs** | http://localhost:3000/docs | Swagger UI |
-| **API Health** | http://localhost:3000/health | Health check |
-| **Metrics** | http://localhost:3000/metrics | Prometheus metrics |
+| Service        | URL                           | Description          |
+| -------------- | ----------------------------- | -------------------- |
+| **Dashboard**  | http://localhost:5173         | React UI (Main page) |
+| **Jobs**       | http://localhost:5173/jobs    | Job browser          |
+| **Workers**    | http://localhost:5173/workers | Worker monitor       |
+| **Queues**     | http://localhost:5173/queues  | Queue stats          |
+| **DLQ**        | http://localhost:5173/dlq     | Failed jobs          |
+| **API Docs**   | http://localhost:3000/docs    | Swagger UI           |
+| **API Health** | http://localhost:3000/health  | Health check         |
+| **Metrics**    | http://localhost:3000/metrics | Prometheus metrics   |
 
 ## 🎨 Dashboard Technology
 
@@ -363,7 +380,7 @@ docker ps | grep taskflow                  # Containers
 ✅ Jobs change status in real-time  
 ✅ Can click jobs to see details  
 ✅ Workers page shows active worker  
-✅ All navigation working  
+✅ All navigation working
 
 ---
 

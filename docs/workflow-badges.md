@@ -18,33 +18,39 @@ Replace `YOUR_USERNAME` with your GitHub username or organization name.
 ## Individual Badges
 
 ### CI Workflow
+
 ```markdown
 ![CI](https://github.com/YOUR_USERNAME/Resilient_TaskFlow/workflows/CI/badge.svg)
 ```
 
 Shows status of:
+
 - Linting
 - Type checking
 - Tests
 - Builds
 
 ### Docker Workflow
+
 ```markdown
 ![Docker Build & Push](https://github.com/YOUR_USERNAME/Resilient_TaskFlow/workflows/Docker%20Build%20%26%20Push/badge.svg)
 ```
 
 Shows status of:
+
 - Docker image builds
 - Multi-platform builds
 - GHCR pushes
 - Security scans
 
 ### Security Workflow
+
 ```markdown
 ![Security Scan](https://github.com/YOUR_USERNAME/Resilient_TaskFlow/workflows/Security%20Scan/badge.svg)
 ```
 
 Shows status of:
+
 - Dependency audits
 - CodeQL analysis
 - Secret scanning
@@ -53,11 +59,13 @@ Shows status of:
 - License compliance
 
 ### Release Workflow
+
 ```markdown
 ![Release](https://github.com/YOUR_USERNAME/Resilient_TaskFlow/workflows/Release/badge.svg)
 ```
 
 Shows status of:
+
 - Release builds
 - Docker image tagging
 - GitHub release creation
@@ -68,47 +76,56 @@ Shows status of:
 For more customization options, use shields.io:
 
 ### Version Badge
+
 ```markdown
 ![Version](https://img.shields.io/github/v/release/YOUR_USERNAME/Resilient_TaskFlow?label=version)
 ```
 
 ### License Badge
+
 ```markdown
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ```
 
 ### Language Badge
+
 ```markdown
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)
 ![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)
 ```
 
 ### Coverage Badge (with Codecov)
+
 ```markdown
 ![Coverage](https://codecov.io/gh/YOUR_USERNAME/Resilient_TaskFlow/branch/main/graph/badge.svg)
 ```
 
 ### Docker Pulls
+
 ```markdown
 ![Docker Pulls](https://img.shields.io/docker/pulls/YOUR_USERNAME/taskflow-api)
 ```
 
 ### Contributors
+
 ```markdown
 ![Contributors](https://img.shields.io/github/contributors/YOUR_USERNAME/Resilient_TaskFlow)
 ```
 
 ### Last Commit
+
 ```markdown
 ![Last Commit](https://img.shields.io/github/last-commit/YOUR_USERNAME/Resilient_TaskFlow)
 ```
 
 ### Issues
+
 ```markdown
 ![Issues](https://img.shields.io/github/issues/YOUR_USERNAME/Resilient_TaskFlow)
 ```
 
 ### Pull Requests
+
 ```markdown
 ![Pull Requests](https://img.shields.io/github/issues-pr/YOUR_USERNAME/Resilient_TaskFlow)
 ```
@@ -136,6 +153,7 @@ For more customization options, use shields.io:
 ## Badge Colors
 
 GitHub Actions workflow badges:
+
 - 🟢 Green: All checks passed
 - 🔴 Red: Some checks failed
 - 🟡 Yellow: In progress
@@ -158,6 +176,7 @@ Add query parameters for custom styling:
 ```
 
 Styles:
+
 - `flat` (default)
 - `flat-square`
 - `plastic`

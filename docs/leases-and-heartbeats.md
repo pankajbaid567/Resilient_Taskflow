@@ -11,6 +11,7 @@ TaskFlow uses a lease-based system to prevent duplicate job processing and detec
 A **lease** is a time-bound exclusive lock on a job that prevents other workers from processing it.
 
 **Key Properties:**
+
 - **Exclusive**: Only one worker can hold a lease at a time
 - **Time-bound**: Leases expire automatically after a duration
 - **Renewable**: Active workers periodically renew their leases
@@ -21,6 +22,7 @@ A **lease** is a time-bound exclusive lock on a job that prevents other workers 
 **Heartbeats** are periodic status updates that workers send to indicate they're alive and healthy.
 
 **Key Properties:**
+
 - **Periodic**: Sent every 10 seconds (configurable)
 - **Includes Statistics**: Current jobs, total processed, success/failure counts
 - **Enables Monitoring**: Dead workers detected by missing heartbeats
@@ -33,12 +35,12 @@ A **lease** is a time-bound exclusive lock on a job that prevents other workers 
 ```sql
 CREATE TABLE jobs (
   id UUID PRIMARY KEY,
-  
+
   -- Lease fields
   worker_id UUID,                    -- Which worker has the lease
   lease_id UUID,                     -- Unique lease identifier
   lease_expires_at TIMESTAMP,        -- When lease expires
-  
+
   -- Other fields...
   status VARCHAR(50),
   version INTEGER,                   -- Optimistic locking
@@ -46,8 +48,8 @@ CREATE TABLE jobs (
 );
 
 -- Index for lease expiration queries
-CREATE INDEX idx_jobs_lease_expires 
-  ON jobs(lease_expires_at) 
+CREATE INDEX idx_jobs_lease_expires
+  ON jobs(lease_expires_at)
   WHERE lease_expires_at IS NOT NULL;
 ```
 
@@ -61,24 +63,24 @@ CREATE TABLE workers (
   status VARCHAR(50) NOT NULL,
   concurrency INTEGER NOT NULL,
   current_jobs INTEGER DEFAULT 0,
-  
+
   -- Heartbeat fields
   last_heartbeat TIMESTAMP NOT NULL,
-  
+
   -- Statistics
   total_jobs_processed INTEGER DEFAULT 0,
   total_jobs_succeeded INTEGER DEFAULT 0,
   total_jobs_failed INTEGER DEFAULT 0,
-  
+
   -- Lifecycle
   created_at TIMESTAMP NOT NULL,
   stopped_at TIMESTAMP,
-  
+
   metadata JSONB
 );
 
 -- Index for heartbeat monitoring
-CREATE INDEX idx_workers_heartbeat 
+CREATE INDEX idx_workers_heartbeat
   ON workers(last_heartbeat, status);
 ```
 
@@ -94,13 +96,13 @@ const lease = await acquireJobLease(jobId, workerId, {
 
 // Database update:
 UPDATE jobs
-SET 
+SET
   worker_id = $workerId,
   lease_id = $leaseId,        -- New random UUID
   lease_expires_at = NOW() + INTERVAL '30 seconds',
   status = 'PROCESSING',
   version = version + 1       -- Optimistic locking
-WHERE 
+WHERE
   id = $jobId
   AND status = 'QUEUED'
   AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
@@ -109,6 +111,7 @@ RETURNING *;
 ```
 
 **Race Condition Prevention:**
+
 - Optimistic locking with `version` field
 - Only one UPDATE succeeds if multiple workers try simultaneously
 - Failed updates return no rows → worker knows it didn't get the lease
@@ -123,10 +126,10 @@ setInterval(async () => {
 
 // Database update:
 UPDATE jobs
-SET 
+SET
   lease_expires_at = NOW() + INTERVAL '30 seconds',
   version = version + 1
-WHERE 
+WHERE
   id = $jobId
   AND lease_id = $leaseId      -- Must match current lease
   AND lease_expires_at > NOW() -- Lease not expired
@@ -134,6 +137,7 @@ RETURNING *;
 ```
 
 **Why Renew at Half Duration?**
+
 - Network delays won't cause expiration
 - Provides buffer for temporary issues
 - Standard lease pattern (similar to Chubby, etcd)
@@ -146,7 +150,7 @@ await completeJob(jobId, result);
 
 // Database update:
 UPDATE jobs
-SET 
+SET
   status = 'SUCCEEDED',
   worker_id = NULL,
   lease_id = NULL,
@@ -169,11 +173,11 @@ WHERE status = 'PROCESSING'
 
 // Another worker can acquire:
 UPDATE jobs
-SET 
+SET
   worker_id = $newWorkerId,
   lease_id = $newLeaseId,      -- New lease ID
   lease_expires_at = NOW() + INTERVAL '30 seconds'
-WHERE 
+WHERE
   id = $jobId
   AND lease_expires_at < NOW() -- Lease expired
 RETURNING *;
@@ -216,7 +220,7 @@ setInterval(async () => {
 
 // Database update:
 UPDATE workers
-SET 
+SET
   last_heartbeat = NOW(),
   current_jobs = $currentJobs,
   total_jobs_processed = $totalProcessed,
@@ -436,20 +440,21 @@ class Worker {
 ```typescript
 const defaultConfig = {
   // Lease settings
-  leaseDurationMs: 30000,              // 30 seconds
-  leaseRenewalIntervalMs: 15000,       // 15 seconds (half of duration)
+  leaseDurationMs: 30000, // 30 seconds
+  leaseRenewalIntervalMs: 15000, // 15 seconds (half of duration)
 
   // Heartbeat settings
-  heartbeatIntervalMs: 10000,          // 10 seconds
+  heartbeatIntervalMs: 10000, // 10 seconds
 
   // Stale detection
-  staleThresholdMs: 60000,             // 60 seconds (2x lease duration)
+  staleThresholdMs: 60000, // 60 seconds (2x lease duration)
 };
 ```
 
 ### Tuning Guidelines
 
 **Short Jobs (< 5 seconds)**
+
 ```typescript
 {
   leaseDurationMs: 10000,              // 10 seconds
@@ -459,6 +464,7 @@ const defaultConfig = {
 ```
 
 **Long Jobs (> 1 minute)**
+
 ```typescript
 {
   leaseDurationMs: 120000,             // 2 minutes
@@ -468,6 +474,7 @@ const defaultConfig = {
 ```
 
 **High Availability**
+
 ```typescript
 {
   leaseDurationMs: 15000,              // 15 seconds (faster recovery)
@@ -594,6 +601,7 @@ try {
 ```
 
 **Differences:**
+
 - TaskFlow: PostgreSQL-based (durable, ACID)
 - BullMQ: Redis-based (fast, eventually consistent)
 - TaskFlow: Automatic expiration via timestamp
@@ -610,6 +618,7 @@ def process_job(self):
 ```
 
 **Differences:**
+
 - TaskFlow: Explicit leases with renewal
 - Celery: Implicit via worker state
 - TaskFlow: Database-backed durability
@@ -626,6 +635,7 @@ async function processJob() {
 ```
 
 **Differences:**
+
 - TaskFlow: Leases + heartbeats (dual system)
 - Temporal: Heartbeats for activity liveness
 - TaskFlow: Job-level leases
@@ -641,7 +651,7 @@ describe('Lease Management', () => {
     const lease = await acquireJobLease(jobId, workerId, {
       leaseDurationMs: 30000,
     });
-    
+
     expect(lease).toBeDefined();
     expect(lease.workerId).toBe(workerId);
     expect(lease.leaseExpiresAt).toBeInstanceOf(Date);
@@ -649,7 +659,7 @@ describe('Lease Management', () => {
 
   it('should prevent duplicate lease acquisition', async () => {
     await acquireJobLease(jobId, 'worker-1', {});
-    
+
     const result = await acquireJobLease(jobId, 'worker-2', {});
     expect(result).toBeNull(); // Worker 2 fails to acquire
   });
@@ -658,13 +668,9 @@ describe('Lease Management', () => {
     const lease = await acquireJobLease(jobId, workerId, {
       leaseDurationMs: 30000,
     });
-    
-    const renewed = await renewJobLease(
-      jobId,
-      lease.leaseId,
-      30000
-    );
-    
+
+    const renewed = await renewJobLease(jobId, lease.leaseId, 30000);
+
     expect(renewed).toBeDefined();
   });
 });
@@ -682,10 +688,11 @@ describe('Worker Heartbeats', () => {
     await sleep(25000);
 
     const workerRecord = await getWorkerById(worker.config.workerId);
-    const timeSinceHeartbeat = Date.now() - workerRecord.lastHeartbeat.getTime();
-    
+    const timeSinceHeartbeat =
+      Date.now() - workerRecord.lastHeartbeat.getTime();
+
     expect(timeSinceHeartbeat).toBeLessThan(15000);
-    
+
     await worker.stop();
   });
 });
@@ -716,7 +723,7 @@ TaskFlow's lease and heartbeat system provides:
 ✅ **Worker failure detection** via heartbeat timeouts  
 ✅ **Duplicate prevention** via exclusive leases  
 ✅ **Automatic recovery** via lease expiration  
-✅ **Graceful degradation** via stale detection  
+✅ **Graceful degradation** via stale detection
 
 This enables reliable distributed job processing with automatic failure recovery.
 

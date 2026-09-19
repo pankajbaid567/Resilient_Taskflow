@@ -32,6 +32,7 @@ export interface WorkerConfig {
   retryMaxDelayMs: number;
   beforeLease?: (message: ConsumedMessage) => Promise<void>;
   afterTerminalPersist?: (event: TerminalPersistedEvent) => Promise<void>;
+  onStopRequested?: () => void | Promise<void>;
 }
 
 export function getDefaultWorkerConfig(): WorkerConfig {

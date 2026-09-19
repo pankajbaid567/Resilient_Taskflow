@@ -9,7 +9,7 @@ import Fastify, {
   FastifyRequest,
 } from 'fastify';
 
-import { authenticate } from './middleware/auth';
+import { authenticate, requireAdmin } from './middleware/auth';
 import { errorHandler } from './middleware/error-handler';
 import { extractIdempotencyKey } from './middleware/idempotency';
 import { rateLimiters } from './middleware/rate-limiter';
@@ -185,13 +185,17 @@ export async function createApp(
   app.setErrorHandler(errorHandler);
 
   // Register routes
-  // Health checks (no auth or rate limiting)
+  // Liveness/readiness are intentionally public for orchestrator probes. Their
+  // payloads reveal no process or dependency details.
   await app.register(healthRoutes, { prefix: '/health' });
 
-  // Metrics endpoint (no auth, lenient rate limiting)
+  // Metrics expose operational and workload details, so only administrators
+  // may scrape them.
   await app.register(
     async (instance) => {
       instance.addHook('onRequest', rateLimiters.health);
+      instance.addHook('onRequest', authenticate);
+      instance.addHook('preHandler', requireAdmin);
       await instance.register(metricsRoutes);
     },
     { prefix: '/metrics' }

@@ -14,7 +14,7 @@ import {
 } from 'drizzle-orm';
 
 import { db } from '../client';
-import { jobDeliveries, jobs } from '../schema';
+import { jobDeliveries, jobs, queues } from '../schema';
 import type { JobDelivery } from '../schema';
 
 /**
@@ -120,9 +120,11 @@ export async function claimPendingDeliveries(
     const rows = await tx
       .select()
       .from(jobDeliveries)
+      .innerJoin(queues, eq(queues.name, jobDeliveries.queueName))
       .where(
         and(
           eq(jobDeliveries.status, DELIVERY_STATUSES.PENDING),
+          eq(queues.isActive, true),
           lte(jobDeliveries.availableAt, sql`clock_timestamp()`),
           claimable
         )
@@ -133,7 +135,8 @@ export async function claimPendingDeliveries(
 
     if (rows.length === 0) return [];
 
-    const ids = rows.map((r) => r.id);
+    const deliveryRows = rows.map((row) => row.job_deliveries);
+    const ids = deliveryRows.map((r) => r.id);
     const claimed = await tx
       .update(jobDeliveries)
       .set({
@@ -153,7 +156,7 @@ export async function claimPendingDeliveries(
     // UPDATE ... RETURNING has no ordering guarantee. Preserve the oldest-first
     // order selected under FOR UPDATE so dispatcher behavior is deterministic.
     const claimedById = new Map(claimed.map((row) => [row.id, row]));
-    return rows.flatMap((row) => {
+    return deliveryRows.flatMap((row) => {
       const updated = claimedById.get(row.id);
       return updated ? [updated] : [];
     });

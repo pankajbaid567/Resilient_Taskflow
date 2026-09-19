@@ -1,4 +1,4 @@
-import { asc, sql } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 
 import { db } from '../client';
 import { Queue, queues } from '../schema';
@@ -33,4 +33,18 @@ export async function listQueues(
       total: countRow?.total ?? 0,
     };
   });
+}
+
+/** Persist queue admission control. In-flight handlers are not interrupted. */
+export async function setQueueActive(
+  name: string,
+  isActive: boolean
+): Promise<Queue | undefined> {
+  const [queue] = await db
+    .update(queues)
+    .set({ isActive, updatedAt: sql`clock_timestamp()` })
+    .where(eq(queues.name, name))
+    .returning();
+
+  return queue;
 }

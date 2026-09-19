@@ -2,9 +2,13 @@
  * Performance profiling and optimization utilities
  */
 
+import { createLogger } from '@taskflow/logger';
+
 import { profiler } from './profiler.js';
 import { queryAnalyzer } from './query-analyzer.js';
 import { redisAnalyzer } from './redis-analyzer.js';
+
+const logger = createLogger({ component: 'PerformanceReport' });
 
 export {
   Profiler,
@@ -68,7 +72,7 @@ export function generatePerformanceReport(): string {
  * Log comprehensive performance report
  */
 export function logPerformanceReport(): void {
-  console.log(generatePerformanceReport());
+  logger.info(generatePerformanceReport());
 }
 
 /**

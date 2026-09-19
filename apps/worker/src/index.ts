@@ -148,7 +148,10 @@ async function main(): Promise<void> {
   const handlers = createHandlerRegistry();
   registerHandlers(handlers);
 
-  const runtimeConfig = createRuntimeConfig();
+  const runtimeConfig = {
+    ...createRuntimeConfig(),
+    onStopRequested: requestControlShutdown,
+  };
   const entryPointShutdownTimeoutMs =
     (runtimeConfig.shutdownTimeoutMs ?? 30_000) + 2_000;
   const schedulerIntervalMs = parseTestDelay(
@@ -220,6 +223,10 @@ async function main(): Promise<void> {
         process.exit(1);
       });
   };
+
+  function requestControlShutdown(): void {
+    requestShutdown('API_CONTROL');
+  }
 
   process.once('SIGTERM', () => requestShutdown('SIGTERM'));
   process.once('SIGINT', () => requestShutdown('SIGINT'));

@@ -107,7 +107,7 @@ export function createDeadLetterEntry(
     lastErrorMessage:
       typeof job.error === 'object' && job.error !== null
         ? JSON.stringify(job.error)
-        : String(job.error || 'Unknown error'),
+        : 'Unknown error',
     createdAt: job.createdAt,
     failedAt: job.failedAt || new Date(),
     metadata: {
@@ -154,9 +154,11 @@ export function calculateDLQStats(entries: DeadLetterEntry[]): DLQStats {
   for (const entry of entries) {
     // By reason
     const reason =
-      (entry.metadata?.deadLetterReason as DeadLetterReason) ||
-      'max_attempts_exceeded';
-    stats.byReason[reason] = (stats.byReason[reason] || 0) + 1;
+      entry.metadata === null
+        ? 'max_attempts_exceeded'
+        : ((entry.metadata.deadLetterReason as DeadLetterReason | undefined) ??
+          'max_attempts_exceeded');
+    stats.byReason[reason] += 1;
 
     // By job type
     stats.byJobType[entry.type] = (stats.byJobType[entry.type] || 0) + 1;

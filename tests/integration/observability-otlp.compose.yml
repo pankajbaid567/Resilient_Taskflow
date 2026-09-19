@@ -1,0 +1,13 @@
+services:
+  collector:
+    image: otel/opentelemetry-collector-contrib:0.109.0
+    command: ['--config=/etc/otelcol-contrib/config.yaml']
+    volumes:
+      - ./observability-otlp.config.yml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - '54318:4318'
+    healthcheck:
+      test: ['CMD', '/otelcol-contrib', 'components']
+      interval: 1s
+      timeout: 3s
+      retries: 30

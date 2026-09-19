@@ -39,6 +39,15 @@ export class IdempotencyConflictError extends Error {
   }
 }
 
+export class ManualRetryConflictError extends Error {
+  readonly statusCode = 409;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'ManualRetryConflictError';
+  }
+}
+
 async function resolveQueueName(
   tx: DatabaseTransaction,
   queueId: string
@@ -152,6 +161,95 @@ export async function getJobForUser(
     .limit(1);
 
   return result;
+}
+
+/**
+ * Create one new job from an owned dead-lettered job. The original remains
+ * immutable; the dead-letter marker, replacement job, lifecycle events, and
+ * delivery intent commit atomically.
+ */
+export async function retryDeadLetteredJobForUser(
+  jobId: string,
+  userId: string
+): Promise<JobWithQueue | undefined> {
+  return db.transaction(async (tx) => {
+    const [record] = await tx
+      .select({
+        original: jobs,
+        deadLetter: schema.deadLetterJobs,
+        queue: schema.queues,
+      })
+      .from(jobs)
+      .innerJoin(
+        schema.deadLetterJobs,
+        eq(schema.deadLetterJobs.originalJobId, jobs.id)
+      )
+      .innerJoin(schema.queues, eq(schema.queues.id, jobs.queueId))
+      .where(and(eq(jobs.id, jobId), eq(jobs.userId, userId)))
+      .limit(1)
+      .for('update');
+
+    if (!record) return undefined;
+    if (record.original.status !== JobStatus.DEAD_LETTERED) {
+      throw new ManualRetryConflictError(
+        `Job ${jobId} is not in DEAD_LETTERED state`
+      );
+    }
+    if (record.deadLetter.requeued) {
+      throw new ManualRetryConflictError(
+        `Job ${jobId} has already been manually retried`
+      );
+    }
+    if (!record.queue.isActive) {
+      throw new ManualRetryConflictError(
+        `Queue ${record.queue.name} is paused`
+      );
+    }
+
+    const originalMetadata =
+      record.original.metadata !== null &&
+      typeof record.original.metadata === 'object' &&
+      !Array.isArray(record.original.metadata)
+        ? record.original.metadata
+        : {};
+    const replacement = await createJobInTransaction(tx, {
+      userId,
+      queueId: record.original.queueId,
+      type: record.original.type,
+      payload: record.original.payload,
+      priority: record.original.priority,
+      maxAttempts: record.original.maxAttempts,
+      timeoutMs: record.original.timeoutMs,
+      scheduledAt: new Date(),
+      metadata: {
+        ...originalMetadata,
+        manuallyRetriedFromJobId: record.original.id,
+      },
+      tags: record.original.tags,
+    });
+
+    const updated = await tx
+      .update(schema.deadLetterJobs)
+      .set({
+        requeued: true,
+        requeuedAt: sql`clock_timestamp()`,
+        requeuedJobId: replacement.job.id,
+      })
+      .where(
+        and(
+          eq(schema.deadLetterJobs.id, record.deadLetter.id),
+          eq(schema.deadLetterJobs.requeued, false)
+        )
+      )
+      .returning({ id: schema.deadLetterJobs.id });
+    if (updated.length !== 1) {
+      throw new ManualRetryConflictError(
+        `Job ${jobId} was retried concurrently`
+      );
+    }
+
+    return replacement;
+  });
 }
 
 /** Tenant-scoped listing and count from one database snapshot. */

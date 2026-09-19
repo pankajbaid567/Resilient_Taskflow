@@ -278,6 +278,7 @@ export interface JobHandlerContext {
     type: string;
     attempts: number;
     maxAttempts: number;
+    metadata?: Record<string, unknown> | null;
   };
 
   /**

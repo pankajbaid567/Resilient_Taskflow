@@ -9,6 +9,7 @@ Idempotency ensures that submitting the same job multiple times has the same eff
 ### Problem Scenarios
 
 **1. Network Timeout Retries**
+
 ```
 Client → API: Submit job
 API → Client: [timeout, no response]
@@ -17,6 +18,7 @@ Client → API: Submit job again (duplicate!)
 ```
 
 **2. Duplicate API Calls**
+
 ```
 User clicks "Submit" button twice
 → Two identical requests sent
@@ -24,6 +26,7 @@ User clicks "Submit" button twice
 ```
 
 **3. Message Queue Retries**
+
 ```
 Worker processes job
 Worker crashes before acknowledging
@@ -32,12 +35,14 @@ Worker crashes before acknowledging
 ```
 
 ### Without Idempotency
+
 - Duplicate jobs flood the system
 - Same email sent multiple times
 - Same charge processed twice
 - Wasted resources on duplicate work
 
 ### With Idempotency
+
 - ✅ Same request = same result
 - ✅ Safe to retry on network errors
 - ✅ No duplicate processing
@@ -56,15 +61,16 @@ CREATE TABLE idempotency_keys (
   request_hash VARCHAR(64) NOT NULL,
   created_at TIMESTAMP NOT NULL,
   expires_at TIMESTAMP NOT NULL,
-  
+
   UNIQUE(user_id, idempotency_key)
 );
 
-CREATE INDEX idx_idempotency_keys_expires 
+CREATE INDEX idx_idempotency_keys_expires
   ON idempotency_keys(expires_at);
 ```
 
 **Key Fields:**
+
 - `idempotency_key`: Client-provided unique key
 - `job_id`: Associated job ID
 - `request_hash`: SHA-256 hash of request for replay detection
@@ -77,7 +83,7 @@ CREATE INDEX idx_idempotency_keys_expires
 ```bash
 curl -X POST http://localhost:3000/api/v1/jobs \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: test-api-key" \
+  -H "X-API-Key: $API_KEY" \
   -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000" \
   -d '{
     "type": "send-email",
@@ -103,7 +109,7 @@ curl -X POST http://localhost:3000/api/v1/jobs \
 # Same idempotency key, same request
 curl -X POST http://localhost:3000/api/v1/jobs \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: test-api-key" \
+  -H "X-API-Key: $API_KEY" \
   -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000" \
   -d '{
     "type": "send-email",
@@ -126,6 +132,7 @@ curl -X POST http://localhost:3000/api/v1/jobs \
 ```
 
 **Behavior:**
+
 - First request: Job created, returns 201
 - Subsequent requests: Existing job returned, returns 200
 - `X-Idempotent-Replay: true` header indicates replay
@@ -159,6 +166,7 @@ Hash: d4e5f6...  # Different hash
 ```
 
 **Hash Includes:**
+
 - HTTP method
 - URL path
 - Request body
@@ -188,32 +196,31 @@ function calculateRequestHash(request: FastifyRequest): string {
 
 ```javascript
 // UUIDv4
-"550e8400-e29b-41d4-a716-446655440000"
+'550e8400-e29b-41d4-a716-446655440000';
 
 // Timestamp + random
-"20240115-abc123"
-
+'20240115-abc123'
 // Request-based
-`${userId}-${timestamp}-${randomBytes}`
+`${userId}-${timestamp}-${randomBytes}`;
 
 // Client request ID
-request.headers['x-request-id']
+request.headers['x-request-id'];
 ```
 
 ### Bad Examples
 
 ```javascript
 // Too predictable
-"1", "2", "3"
+('1', '2', '3');
 
 // Not unique enough
-Date.now().toString()
+Date.now().toString();
 
 // Too short
-"a"
+('a');
 
 // Too long (>255 chars)
-"a".repeat(300)
+'a'.repeat(300);
 ```
 
 ## Expiration
@@ -251,7 +258,8 @@ export async function createJobWithIdempotency(
 ): Promise<Job> {
   return await db.transaction(async (tx) => {
     // 1. Check if key exists
-    const existing = await tx.select()
+    const existing = await tx
+      .select()
       .from(idempotencyKeys)
       .where(eq(idempotencyKeys.idempotencyKey, idempotencyKey));
 
@@ -278,6 +286,7 @@ export async function createJobWithIdempotency(
 ```
 
 **ACID Guarantees:**
+
 - ✅ Atomic: All-or-nothing
 - ✅ Consistent: Unique constraint prevents duplicates
 - ✅ Isolated: Concurrent requests don't interfere
@@ -288,20 +297,21 @@ export async function createJobWithIdempotency(
 ```
 Time    Request A              Request B
 ----    ---------              ---------
-t0      BEGIN TRANSACTION      
-t1      Check key (not found)  
+t0      BEGIN TRANSACTION
+t1      Check key (not found)
 t2                             BEGIN TRANSACTION
-t3      Insert job             
+t3      Insert job
 t4                             Check key (not found)
-t5      Insert idempotency key 
+t5      Insert idempotency key
 t6                             Insert job
-t7      COMMIT                 
+t7      COMMIT
 t8                             Insert idempotency key ← FAILS!
 t9                             ROLLBACK
 t10                            Retry → finds existing job
 ```
 
 **Database ensures:**
+
 - UNIQUE constraint on (user_id, idempotency_key)
 - Second insert fails
 - Transaction rolled back
@@ -316,7 +326,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 async function submitJob(jobData) {
   const idempotencyKey = uuidv4();
-  
+
   return fetch('/api/v1/jobs', {
     method: 'POST',
     headers: {
@@ -334,7 +344,7 @@ async function submitJob(jobData) {
 ```typescript
 async function submitJobWithRetry(jobData, maxRetries = 3) {
   const idempotencyKey = uuidv4();
-  
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const response = await fetch('/api/v1/jobs', {
@@ -345,11 +355,11 @@ async function submitJobWithRetry(jobData, maxRetries = 3) {
         },
         body: JSON.stringify(jobData),
       });
-      
+
       if (response.ok) {
         return await response.json();
       }
-      
+
       // Only retry on network errors, not 4xx
       if (response.status >= 400 && response.status < 500) {
         throw new Error(`Client error: ${response.status}`);
@@ -449,6 +459,7 @@ idempotent_keys_active{status}
 ### Alerting
 
 **High Replay Rate**
+
 ```
 idempotent_replay_rate > 0.3
 → Alert: >30% of requests are replays
@@ -456,6 +467,7 @@ idempotent_replay_rate > 0.3
 ```
 
 **High Conflict Rate**
+
 ```
 idempotent_conflict_rate > 0.01
 → Alert: >1% key conflicts
@@ -470,30 +482,27 @@ idempotent_conflict_rate > 0.01
 describe('Idempotency', () => {
   it('should return existing job on duplicate key', async () => {
     const key = 'test-key';
-    
+
     // First request
-    const job1 = await createJobWithIdempotency(
-      jobData, userId, key, hash
-    );
-    
+    const job1 = await createJobWithIdempotency(jobData, userId, key, hash);
+
     // Second request (duplicate)
-    const job2 = await createJobWithIdempotency(
-      jobData, userId, key, hash
-    );
-    
+    const job2 = await createJobWithIdempotency(jobData, userId, key, hash);
+
     expect(job1.id).toBe(job2.id);
   });
-  
+
   it('should reject different request with same key', async () => {
     const key = 'test-key';
-    
-    await createJobWithIdempotency(
-      jobData1, userId, key, hash1
-    );
-    
+
+    await createJobWithIdempotency(jobData1, userId, key, hash1);
+
     await expect(
       createJobWithIdempotency(
-        jobData2, userId, key, hash2  // Different hash
+        jobData2,
+        userId,
+        key,
+        hash2 // Different hash
       )
     ).rejects.toThrow('Idempotency key conflict');
   });
@@ -505,16 +514,16 @@ describe('Idempotency', () => {
 ```typescript
 it('should handle concurrent duplicate submissions', async () => {
   const key = 'concurrent-key';
-  
+
   // Submit 10 concurrent requests with same key
-  const promises = Array(10).fill(null).map(() =>
-    submitJob({ idempotencyKey: key, ...jobData })
-  );
-  
+  const promises = Array(10)
+    .fill(null)
+    .map(() => submitJob({ idempotencyKey: key, ...jobData }));
+
   const results = await Promise.all(promises);
-  
+
   // All should return same job ID
-  const jobIds = results.map(r => r.id);
+  const jobIds = results.map((r) => r.id);
   expect(new Set(jobIds).size).toBe(1);
 });
 ```
@@ -524,6 +533,7 @@ it('should handle concurrent duplicate submissions', async () => {
 ### Database Impact
 
 **Query:** Check if key exists
+
 ```sql
 SELECT * FROM idempotency_keys
 WHERE user_id = ? AND idempotency_key = ?
@@ -531,12 +541,14 @@ AND expires_at > NOW();
 ```
 
 **Index:** `UNIQUE(user_id, idempotency_key)`
+
 - O(log n) lookup
 - Minimal overhead
 
 ### Memory Impact
 
 **Storage per key:** ~200 bytes
+
 - UUID (36 bytes)
 - Job ID (36 bytes)
 - Hash (64 bytes)
@@ -544,6 +556,7 @@ AND expires_at > NOW();
 - Metadata (~50 bytes)
 
 **1M active keys:** ~200 MB
+
 - Acceptable for most systems
 
 ### Cleanup Strategy
@@ -574,7 +587,7 @@ function submitJob(key, data) {
   if (cache.has(key)) {
     return cache.get(key);
   }
-  
+
   const jobId = createJob(data);
   cache.set(key, jobId);
   return jobId;
@@ -582,6 +595,7 @@ function submitJob(key, data) {
 ```
 
 **Problems:**
+
 - ❌ Lost on restart
 - ❌ Not shared across instances
 - ❌ No persistence
@@ -602,6 +616,7 @@ await redis.setex(key, 86400, newJobId);
 ```
 
 **Trade-offs:**
+
 - ✅ Fast lookups
 - ✅ Automatic expiration (TTL)
 - ❌ Eventual consistency
@@ -611,6 +626,7 @@ await redis.setex(key, 86400, newJobId);
 ### Our Approach: PostgreSQL
 
 **Benefits:**
+
 - ✅ ACID guarantees
 - ✅ Atomic with job creation
 - ✅ Durable storage
@@ -619,6 +635,7 @@ await redis.setex(key, 86400, newJobId);
 - ⚠️ Slightly slower than Redis
 
 **Best of both worlds:**
+
 - Use PostgreSQL for idempotency keys (durability)
 - Use Redis for job delivery (performance)
 

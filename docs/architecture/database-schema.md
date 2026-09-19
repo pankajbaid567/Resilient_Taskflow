@@ -46,7 +46,7 @@ PostgreSQL serves as the authoritative source of truth for all durable job state
 │   workers    │              │ idempotency_ │
 └──────────────┘              │    keys      │
                               └──────────────┘
-                              
+
 ┌──────────────┐
 │dead_letter_  │
 │   jobs       │
@@ -71,7 +71,7 @@ CREATE TABLE users (
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  
+
   CONSTRAINT users_role_check CHECK (role IN ('user', 'admin', 'worker'))
 );
 
@@ -81,6 +81,7 @@ CREATE INDEX idx_users_is_active ON users(is_active);
 ```
 
 **Rationale:**
+
 - `api_key_hash` stores hashed API key for secure comparison
 - `role` enables RBAC
 - `rate_limit_per_minute` allows per-user rate limiting
@@ -104,7 +105,7 @@ CREATE TABLE queues (
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  
+
   CONSTRAINT queues_priority_check CHECK (priority >= 1 AND priority <= 10),
   CONSTRAINT queues_concurrency_check CHECK (concurrency_limit IS NULL OR concurrency_limit > 0),
   CONSTRAINT queues_timeout_check CHECK (default_timeout_ms > 0)
@@ -116,6 +117,7 @@ CREATE INDEX idx_queues_is_active ON queues(is_active);
 ```
 
 **Rationale:**
+
 - `priority` enables queue-level priority (1=LOW, 10=CRITICAL)
 - `concurrency_limit` for per-queue rate limiting
 - `max_retry_attempts` queue-specific retry policy
@@ -147,23 +149,23 @@ CREATE TYPE job_priority AS ENUM (
 
 CREATE TABLE jobs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  
+
   -- Ownership
   user_id UUID NOT NULL REFERENCES users(id),
   queue_id UUID NOT NULL REFERENCES queues(id),
-  
+
   -- Job Definition
   type VARCHAR(255) NOT NULL,
   payload JSONB NOT NULL,
   priority job_priority NOT NULL DEFAULT 'NORMAL',
-  
+
   -- Status
   status job_status NOT NULL DEFAULT 'CREATED',
-  
+
   -- Retry Configuration
   attempts INTEGER NOT NULL DEFAULT 0,
   max_attempts INTEGER NOT NULL DEFAULT 3,
-  
+
   -- Timing
   timeout_ms INTEGER NOT NULL DEFAULT 30000,
   scheduled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -171,23 +173,23 @@ CREATE TABLE jobs (
   started_at TIMESTAMPTZ,
   completed_at TIMESTAMPTZ,
   failed_at TIMESTAMPTZ,
-  
+
   -- Worker Lease
   worker_id UUID REFERENCES workers(id),
   lease_id UUID,
   lease_expires_at TIMESTAMPTZ,
-  
+
   -- Result
   result JSONB,
   error JSONB,
-  
+
   -- Metadata
   metadata JSONB,
   tags TEXT[],
-  
+
   -- Versioning
   version INTEGER NOT NULL DEFAULT 1,
-  
+
   CONSTRAINT jobs_attempts_check CHECK (attempts >= 0),
   CONSTRAINT jobs_max_attempts_check CHECK (max_attempts > 0),
   CONSTRAINT jobs_timeout_check CHECK (timeout_ms > 0),
@@ -220,6 +222,7 @@ CREATE INDEX idx_jobs_tags_gin ON jobs USING GIN(tags);
 ```
 
 **Rationale:**
+
 - `version` enables optimistic locking for concurrent updates
 - `lease_id` + `lease_expires_at` implement lease mechanism
 - `scheduled_at` supports delayed job execution
@@ -239,25 +242,25 @@ Records every execution attempt for debugging and analytics.
 CREATE TABLE job_attempts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   job_id UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
-  
+
   -- Attempt Info
   attempt_number INTEGER NOT NULL,
-  
+
   -- Execution
   worker_id UUID REFERENCES workers(id),
   started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   completed_at TIMESTAMPTZ,
   duration_ms INTEGER,
-  
+
   -- Result
   status job_status NOT NULL,
   error JSONB,
   error_message TEXT,
   stack_trace TEXT,
-  
+
   -- Context
   metadata JSONB,
-  
+
   CONSTRAINT job_attempts_attempt_number_check CHECK (attempt_number > 0),
   CONSTRAINT job_attempts_duration_check CHECK (duration_ms IS NULL OR duration_ms >= 0)
 );
@@ -269,6 +272,7 @@ CREATE INDEX idx_job_attempts_status ON job_attempts(status);
 ```
 
 **Rationale:**
+
 - Complete audit trail of all attempts
 - Enables debugging of intermittent failures
 - Analytics on failure patterns
@@ -282,25 +286,25 @@ Audit log of all job state transitions.
 CREATE TABLE job_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   job_id UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
-  
+
   -- Event
   event_type VARCHAR(50) NOT NULL,
   from_status job_status,
   to_status job_status NOT NULL,
-  
+
   -- Context
   worker_id UUID REFERENCES workers(id),
   user_id UUID REFERENCES users(id),
-  
+
   -- Timing
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  
+
   -- Details
   metadata JSONB,
-  
+
   CONSTRAINT job_events_type_check CHECK (
     event_type IN (
-      'created', 'queued', 'started', 'completed', 
+      'created', 'queued', 'started', 'completed',
       'failed', 'retried', 'cancelled', 'dead_lettered',
       'timeout', 'lease_acquired', 'lease_expired'
     )
@@ -314,6 +318,7 @@ CREATE INDEX idx_job_events_worker_id ON job_events(worker_id);
 ```
 
 **Rationale:**
+
 - Complete audit trail for compliance
 - Debugging state machine issues
 - Analytics on job lifecycle
@@ -328,34 +333,34 @@ CREATE TYPE worker_status AS ENUM ('STARTING', 'ACTIVE', 'STOPPING', 'STOPPED', 
 
 CREATE TABLE workers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  
+
   -- Identity
   worker_name VARCHAR(255) NOT NULL,
   hostname VARCHAR(255) NOT NULL,
   process_id INTEGER NOT NULL,
-  
+
   -- Configuration
   concurrency INTEGER NOT NULL DEFAULT 10,
   queues TEXT[] NOT NULL,
-  
+
   -- Status
   status worker_status NOT NULL DEFAULT 'STARTING',
   current_job_count INTEGER NOT NULL DEFAULT 0,
-  
+
   -- Health
   last_heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   stopped_at TIMESTAMPTZ,
-  
+
   -- Metrics
   total_jobs_processed INTEGER NOT NULL DEFAULT 0,
   total_jobs_succeeded INTEGER NOT NULL DEFAULT 0,
   total_jobs_failed INTEGER NOT NULL DEFAULT 0,
-  
+
   -- Metadata
   version VARCHAR(50),
   metadata JSONB,
-  
+
   CONSTRAINT workers_concurrency_check CHECK (concurrency > 0),
   CONSTRAINT workers_current_jobs_check CHECK (current_job_count >= 0),
   CONSTRAINT workers_job_counts_check CHECK (
@@ -370,6 +375,7 @@ CREATE INDEX idx_workers_hostname ON workers(hostname);
 ```
 
 **Rationale:**
+
 - Health monitoring via `last_heartbeat_at`
 - Worker discovery for monitoring dashboards
 - Metrics for worker performance analysis
@@ -382,21 +388,21 @@ Prevents duplicate job submissions.
 ```sql
 CREATE TABLE idempotency_keys (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  
+
   -- Key
   idempotency_key VARCHAR(255) NOT NULL,
   user_id UUID NOT NULL REFERENCES users(id),
-  
+
   -- Reference
   job_id UUID NOT NULL REFERENCES jobs(id),
-  
+
   -- Request fingerprint
   request_hash VARCHAR(64) NOT NULL,
-  
+
   -- Timing
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   expires_at TIMESTAMPTZ NOT NULL,
-  
+
   CONSTRAINT idempotency_keys_unique UNIQUE (user_id, idempotency_key)
 );
 
@@ -405,6 +411,7 @@ CREATE INDEX idx_idempotency_keys_job_id ON idempotency_keys(job_id);
 ```
 
 **Rationale:**
+
 - Prevents duplicate job creation
 - Scoped per user
 - TTL via `expires_at` for cleanup
@@ -417,30 +424,30 @@ Jobs that have permanently failed after max retry attempts.
 ```sql
 CREATE TABLE dead_letter_jobs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  
+
   -- Original Job Reference
   original_job_id UUID NOT NULL,
-  
+
   -- Job Data (snapshot at failure)
   user_id UUID NOT NULL REFERENCES users(id),
   queue_id UUID NOT NULL REFERENCES queues(id),
   type VARCHAR(255) NOT NULL,
   payload JSONB NOT NULL,
-  
+
   -- Failure Info
   attempts INTEGER NOT NULL,
   last_error JSONB,
   last_error_message TEXT,
-  
+
   -- Timing
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   failed_at TIMESTAMPTZ NOT NULL,
-  
+
   -- Resolution
   requeued BOOLEAN NOT NULL DEFAULT false,
   requeued_at TIMESTAMPTZ,
   requeued_job_id UUID REFERENCES jobs(id),
-  
+
   -- Metadata
   metadata JSONB
 );
@@ -453,6 +460,7 @@ CREATE INDEX idx_dead_letter_jobs_requeued ON dead_letter_jobs(requeued);
 ```
 
 **Rationale:**
+
 - Separate table for failed jobs
 - Enables manual inspection and requeue
 - Prevents cluttering main `jobs` table
@@ -473,7 +481,7 @@ RETURNING job_id;
 
 -- If no conflict, insert job
 INSERT INTO jobs (
-  user_id, queue_id, type, payload, priority, 
+  user_id, queue_id, type, payload, priority,
   max_attempts, timeout_ms, scheduled_at, status
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CREATED')
 RETURNING *;
@@ -501,7 +509,7 @@ LIMIT 100;
 
 ```sql
 UPDATE jobs
-SET 
+SET
   status = 'PROCESSING',
   worker_id = $1,
   lease_id = $2,
@@ -523,7 +531,7 @@ RETURNING *;
 
 ```sql
 UPDATE jobs
-SET 
+SET
   lease_expires_at = NOW() + INTERVAL '30 seconds',
   version = version + 1
 WHERE id = $1
@@ -539,7 +547,7 @@ RETURNING lease_expires_at;
 BEGIN;
 
 UPDATE jobs
-SET 
+SET
   status = 'SUCCEEDED',
   completed_at = NOW(),
   result = $1,
@@ -563,14 +571,14 @@ COMMIT;
 BEGIN;
 
 UPDATE jobs
-SET 
-  status = CASE 
+SET
+  status = CASE
     WHEN attempts < max_attempts THEN 'RETRY_SCHEDULED'
     ELSE 'DEAD_LETTERED'
   END,
   failed_at = NOW(),
   error = $1,
-  scheduled_at = CASE 
+  scheduled_at = CASE
     WHEN attempts < max_attempts THEN NOW() + (INTERVAL '1 second' * POW(2, attempts))
     ELSE scheduled_at
   END,
@@ -587,7 +595,7 @@ VALUES ($2, $4, $3, 'FAILED', $1, NOW(), $5);
 
 -- If dead lettered, copy to DLQ
 INSERT INTO dead_letter_jobs (
-  original_job_id, user_id, queue_id, type, payload, 
+  original_job_id, user_id, queue_id, type, payload,
   attempts, last_error, failed_at
 )
 SELECT id, user_id, queue_id, type, payload, attempts, error, failed_at
@@ -611,7 +619,7 @@ LIMIT 100;
 
 ```sql
 UPDATE workers
-SET 
+SET
   last_heartbeat_at = NOW(),
   current_job_count = $1,
   total_jobs_processed = $2,
@@ -624,7 +632,7 @@ RETURNING *;
 ### 9. Get Queue Statistics
 
 ```sql
-SELECT 
+SELECT
   q.name,
   COUNT(*) FILTER (WHERE j.status = 'QUEUED') as queued,
   COUNT(*) FILTER (WHERE j.status = 'PROCESSING') as processing,
@@ -671,7 +679,7 @@ DELETE FROM job_events WHERE created_at < NOW() - INTERVAL '90 days';
 DELETE FROM idempotency_keys WHERE expires_at < NOW();
 
 -- Clean up old job_attempts
-DELETE FROM job_attempts 
+DELETE FROM job_attempts
 WHERE job_id IN (
   SELECT id FROM jobs WHERE completed_at < NOW() - INTERVAL '30 days'
 );
@@ -688,12 +696,14 @@ WHERE job_id IN (
 ## Transaction Boundaries
 
 **Critical Transactions:**
+
 1. Job submission (INSERT job + idempotency key + event)
 2. State transitions (UPDATE job + INSERT event)
 3. Worker lease acquisition (SELECT FOR UPDATE + UPDATE)
 4. Retry with DLQ (UPDATE job + INSERT attempt + possibly INSERT dead_letter)
 
 **Non-Transactional:**
+
 1. Heartbeat updates (can tolerate occasional failure)
 2. Metrics queries (read-only)
 3. Log event publishing (eventual consistency acceptable)

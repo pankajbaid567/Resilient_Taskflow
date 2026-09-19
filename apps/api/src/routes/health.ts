@@ -1,6 +1,5 @@
 import { testConnection } from '@taskflow/database';
 import { testRedisConnection } from '@taskflow/queue';
-import { HealthCheck } from '@taskflow/types';
 import { FastifyInstance } from 'fastify';
 
 /**
@@ -14,8 +13,6 @@ export function healthRoutes(app: FastifyInstance): Promise<void> {
   app.get('/', async (_request, reply) => {
     return reply.send({
       status: 'healthy',
-      timestamp: new Date().toISOString(),
-      service: 'taskflow-api',
     });
   });
 
@@ -25,40 +22,18 @@ export function healthRoutes(app: FastifyInstance): Promise<void> {
    * Checks database and Redis connectivity
    */
   app.get('/ready', async (_request, reply) => {
-    const checks = {
-      postgres: false,
-      redis: false,
-      kafka: false, // TODO: Add Kafka check when implemented
-    };
-
     try {
-      // Check PostgreSQL
-      checks.postgres = await testConnection();
-
-      // Check Redis
-      checks.redis = await testRedisConnection();
-
-      // Determine overall status
-      const isHealthy = checks.postgres && checks.redis;
-      const status: HealthCheck['status'] = isHealthy
-        ? 'healthy'
-        : checks.kafka === false
-          ? 'degraded' // Kafka optional for now
-          : 'unhealthy';
-
-      const response: HealthCheck = {
-        status,
-        timestamp: new Date().toISOString(),
-        checks,
-      };
-
-      return reply.status(isHealthy ? 200 : 503).send(response);
-    } catch (error) {
+      const [postgresReady, redisReady] = await Promise.all([
+        testConnection(),
+        testRedisConnection(),
+      ]);
+      const isReady = postgresReady && redisReady;
+      return reply
+        .status(isReady ? 200 : 503)
+        .send({ status: isReady ? 'ready' : 'not_ready' });
+    } catch {
       return reply.status(503).send({
-        status: 'unhealthy',
-        timestamp: new Date().toISOString(),
-        checks,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        status: 'not_ready',
       });
     }
   });
@@ -70,9 +45,6 @@ export function healthRoutes(app: FastifyInstance): Promise<void> {
   app.get('/live', async (_request, reply) => {
     return reply.send({
       status: 'alive',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      memory: process.memoryUsage(),
     });
   });
 

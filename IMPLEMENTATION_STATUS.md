@@ -1,3 +1,5 @@
+> Historical snapshot only. Claims and numbers below are not current acceptance evidence; use the root README and executable gates.
+
 # TaskFlow Implementation Status
 
 **Date**: August 23, 2026  
@@ -6,6 +8,7 @@
 ## ✅ Completed Tasks (7/9)
 
 ### 1. ✅ P0 Security Fix - JWT Authentication
+
 - **File**: `apps/api/src/middleware/auth.ts`
 - **Changes**:
   - Removed hardcoded credentials
@@ -17,6 +20,7 @@
   - Detailed logging for validation failures
 
 ### 2. ✅ Worker Package Structure
+
 - **Created**:
   - `apps/worker/` - New worker application package
   - `apps/worker/src/types/index.ts` - Core type definitions (Job, JobHandler, JobResult, WorkerConfig, ActiveJob, WorkerStats, LeaseResult, StreamMessage)
@@ -25,6 +29,7 @@
   - `apps/worker/tsconfig.json` - TypeScript configuration
 
 ### 3. ✅ Job Processor Implementation
+
 - **File**: `apps/worker/src/processor.ts`
 - **Functions**:
   - `processJob()` - Executes handler with timeout
@@ -35,6 +40,7 @@
   - `stopHeartbeat()` - Cleanup after completion
 
 ### 4. ✅ Lease Manager Implementation
+
 - **File**: `apps/worker/src/lease-manager.ts`
 - **Functions**:
   - `acquireLease()` - Atomic lease acquisition using PostgreSQL optimistic locking
@@ -51,6 +57,7 @@
   - Race condition safe
 
 ### 5. ✅ Handler Registry & Example Handlers
+
 - **Files**:
   - `apps/worker/src/handlers/index.ts` - Registry system with `registerHandler()`, `getHandler()`
   - `apps/worker/src/handlers/send-email.handler.ts` - Email handler with idempotency checks
@@ -62,6 +69,7 @@
   - Error classification (permanent vs retryable)
 
 ### 6. ✅ Stale Recovery Implementation
+
 - **File**: `apps/worker/src/stale-recovery.ts`
 - **Functions**:
   - `startStaleRecovery()` - Background process initialization
@@ -75,6 +83,7 @@
   - No job loss guarantee
 
 ### 7. ✅ Main Worker Process
+
 - **File**: `apps/worker/src/index.ts`
 - **Features**:
   - XREADGROUP loop from Redis Streams
@@ -94,6 +103,7 @@
   7. Handle SIGTERM/SIGINT gracefully
 
 ### 8. ✅ Demo Script
+
 - **File**: `scripts/demo.ts`
 - **Features**:
   - End-to-end demonstration
@@ -104,6 +114,7 @@
   - Health check verification
 
 ### 9. ✅ Documentation
+
 - **File**: `QUICKSTART.md`
 - **Contents**:
   - Step-by-step setup guide
@@ -120,10 +131,12 @@
 ## ❌ Pending Tasks (2/9)
 
 ### 10. ❌ Critical Unit Tests (Task #7)
+
 **Status**: Not Started  
 **Required for**: Production readiness
 
 **Tests Needed**:
+
 - API Tests:
   - Job submission endpoint
   - Job status endpoint
@@ -131,7 +144,7 @@
   - JWT authentication
   - API key authentication (dev mode)
   - Validation errors
-  
+
 - Worker Tests:
   - Lease acquisition (success, race condition, already leased)
   - Lease renewal
@@ -146,10 +159,12 @@
 **Test Framework**: Vitest (already configured)
 
 ### 11. ❌ Integration Test (Task #8)
+
 **Status**: Not Started  
 **Required for**: Production readiness
 
 **Test Scenarios**:
+
 1. End-to-end job flow
    - Submit job → Worker picks up → Processes → Status updates → Success
 2. Retry flow
@@ -166,13 +181,16 @@
 ## 📦 Dependencies Status
 
 ### Installed
+
 - ✅ All root dependencies
 - ✅ Worker dependencies (`drizzle-orm` added)
 
 ### TypeScript Build Issue
+
 ⚠️ **Current blocker**: Worker doesn't type-check because workspace packages (`@taskflow/logger`, `@taskflow/database`, etc.) need to be built first OR we need TypeScript project references configured.
 
 **Options to fix**:
+
 1. **Build packages first**: `pnpm build` (builds all workspace packages)
 2. **Use tsx in dev mode**: `tsx` handles workspace resolution better than `tsc`
 3. **Add TypeScript project references**: Configure `tsconfig.json` with references
@@ -182,6 +200,7 @@
 ## 🚀 Running the System
 
 ### Prerequisites
+
 ```bash
 # 1. Start Docker daemon
 open -a Docker
@@ -191,6 +210,7 @@ docker ps
 ```
 
 ### Start Infrastructure
+
 ```bash
 # Start PostgreSQL, Redis, Kafka, Grafana, Prometheus
 docker-compose up -d
@@ -200,6 +220,7 @@ docker-compose ps
 ```
 
 ### Install & Setup
+
 ```bash
 # Install dependencies
 pnpm install
@@ -212,6 +233,7 @@ pnpm db:seed
 ```
 
 ### Start Services
+
 ```bash
 # Terminal 1: API Server
 pnpm dev:api
@@ -253,17 +275,20 @@ Demo completed successfully! 🎉
 ## 🐛 Known Issues
 
 ### 1. TypeScript Type Checking
+
 **Issue**: `pnpm typecheck` fails in `apps/worker` because workspace packages can't be resolved  
 **Impact**: Development only (doesn't affect runtime)  
 **Workaround**: Use `tsx` which handles workspace resolution  
 **Fix**: Build workspace packages first with `pnpm build` or add TypeScript project references
 
 ### 2. Docker Compose Warning
+
 **Issue**: `version` attribute is obsolete in docker-compose.yml  
 **Impact**: Warning only, no functionality impact  
 **Fix**: Remove `version: '3.8'` from docker-compose.yml
 
 ### 3. Dashboard Service Dependency
+
 **Issue**: Dashboard depends on undefined service "api"  
 **Impact**: Dashboard won't start (but API and worker work fine)  
 **Fix**: Either remove dashboard from docker-compose or add api service definition
@@ -271,12 +296,14 @@ Demo completed successfully! 🎉
 ## 📈 Implementation Statistics
 
 ### Code Written
+
 - **Files created**: 15
 - **Lines of code**: ~2,500+
 - **TypeScript**: 100%
 - **Test coverage**: 0% (tests not yet written)
 
 ### Files Modified/Created
+
 ```
 apps/api/src/middleware/auth.ts                    # JWT auth
 apps/worker/package.json                           # Dependencies
@@ -298,6 +325,7 @@ QUICKSTART.md                                      # Documentation
 ## 🎯 Next Steps
 
 ### Immediate (Before Demo)
+
 1. **Start Docker Desktop**
 2. **Run infrastructure**: `docker-compose up -d`
 3. **Install dependencies**: `pnpm install`
@@ -307,6 +335,7 @@ QUICKSTART.md                                      # Documentation
 7. **Run demo**: `pnpm demo`
 
 ### Short Term (Production Readiness)
+
 1. **Write unit tests** (Task #7)
    - API endpoint tests
    - Worker component tests
@@ -317,7 +346,7 @@ QUICKSTART.md                                      # Documentation
    - Retry scenarios
    - Stale recovery
    - Concurrency tests
-3. **Fix TypeScript build** 
+3. **Fix TypeScript build**
    - Add project references OR build packages
 4. **Load testing**
    - Run existing k6 tests
@@ -328,6 +357,7 @@ QUICKSTART.md                                      # Documentation
    - Update test coverage status
 
 ### Medium Term (Enhancement)
+
 1. **Add more job handlers**
    - Image processing
    - PDF generation
@@ -344,24 +374,29 @@ QUICKSTART.md                                      # Documentation
 ## 🎓 Key Design Decisions
 
 ### 1. JWT Authentication (jose library)
+
 - **Why**: Modern, secure, TypeScript-native
 - **Alternative considered**: jsonwebtoken (older, callback-based)
 
 ### 2. Worker Architecture (XREADGROUP → Lease → Execute → Update → XACK)
+
 - **Why**: Prevents job loss if PostgreSQL fails after XACK
 - **Critical**: XACK comes AFTER PostgreSQL update (Phase 26 finding)
 - **Trade-off**: Slight performance cost for reliability
 
 ### 3. Stale Recovery (Separate Background Process)
+
 - **Why**: Keeps main loop simple, independent cadence
 - **Alternative considered**: In-line checks (too complex)
 
 ### 4. Demo First, Tests Second
+
 - **Why**: Want to see system work immediately, validate approach
 - **Alternative considered**: Tests first (TDD) - rejected for portfolio demo purposes
 - **Production**: Tests would be written first
 
 ### 5. Optimistic Locking (version field)
+
 - **Why**: Race condition prevention without distributed locks
 - **Performance**: Single database roundtrip
 - **Scale**: Works across multiple workers
@@ -376,7 +411,7 @@ QUICKSTART.md                                      # Documentation
 
 ## 📝 Summary
 
-**Current State**: Worker implementation is **functionally complete** and **ready to run**. All core functionality implemented (lease management, job processing, stale recovery, handlers, demo script). 
+**Current State**: Worker implementation is **functionally complete** and **ready to run**. All core functionality implemented (lease management, job processing, stale recovery, handlers, demo script).
 
 **Blocking Issue**: TypeScript type checking fails due to workspace package resolution. **Not a runtime issue** - worker will run fine with `tsx`.
 
@@ -386,4 +421,4 @@ QUICKSTART.md                                      # Documentation
 
 **Quality**: Code follows best practices - error handling, logging, type safety, graceful shutdown, idempotency, race condition prevention.
 
-**Verdict**: ✅ **Ready for live demo**  |  ❌ **Not ready for production** (missing tests)
+**Verdict**: ✅ **Ready for live demo** | ❌ **Not ready for production** (missing tests)

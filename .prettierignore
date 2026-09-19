@@ -6,3 +6,4 @@ coverage
 pnpm-lock.yaml
 *.log
 .env*
+tests/load/**

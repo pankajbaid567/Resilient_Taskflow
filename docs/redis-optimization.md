@@ -84,33 +84,33 @@ import Redis from 'ioredis';
 const redis = new Redis({
   host: 'localhost',
   port: 6379,
-  
+
   // Connection pool settings
   maxRetriesPerRequest: 3,
   enableReadyCheck: true,
   enableOfflineQueue: true,
-  
+
   // Retry strategy
   retryStrategy: (times: number) => {
     if (times > 10) return null; // Stop retrying
     return Math.min(times * 100, 3000); // Exponential backoff
   },
-  
+
   // Reconnection
   reconnectOnError: (err) => {
     const targetErrors = ['READONLY', 'ECONNREFUSED'];
     return targetErrors.some((e) => err.message.includes(e));
   },
-  
+
   // Performance
   lazyConnect: false, // Connect immediately
   keepAlive: 30000, // Keep-alive interval
   family: 4, // IPv4
-  
+
   // Timeouts
   connectTimeout: 10000, // 10s connect timeout
   commandTimeout: 5000, // 5s command timeout
-  
+
   // Connection pool (for Cluster)
   // Not applicable for single Redis instance
 });
@@ -121,11 +121,13 @@ const redis = new Redis({
 **Formula**: `connections = (CPU cores * 2) + effective disk I/O`
 
 For most applications:
+
 - **Minimum**: 5 connections
 - **Recommended**: 10-20 connections
 - **Maximum**: 50 connections
 
 **Why not more?**
+
 - Redis is single-threaded
 - More connections = more overhead
 - Better to use pipelining
@@ -135,6 +137,7 @@ For most applications:
 ### 1. Use Pipelining for Batch Operations
 
 ❌ **Bad**: Multiple round trips
+
 ```typescript
 // 100 commands = 100 round trips
 for (let i = 0; i < 100; i++) {
@@ -143,6 +146,7 @@ for (let i = 0; i < 100; i++) {
 ```
 
 ✅ **Good**: Single round trip
+
 ```typescript
 // 100 commands = 1 round trip
 const pipeline = redis.pipeline();
@@ -157,6 +161,7 @@ await pipeline.exec();
 ### 2. Use MGET/MSET Instead of Multiple GET/SET
 
 ❌ **Bad**: N round trips
+
 ```typescript
 const values = [];
 for (const key of keys) {
@@ -165,6 +170,7 @@ for (const key of keys) {
 ```
 
 ✅ **Good**: 1 round trip
+
 ```typescript
 const values = await redis.mget(...keys);
 ```
@@ -172,11 +178,13 @@ const values = await redis.mget(...keys);
 ### 3. Use UNLINK Instead of DEL for Large Keys
 
 ❌ **Bad**: DEL blocks Redis
+
 ```typescript
 await redis.del('large-key'); // Blocks until deletion complete
 ```
 
 ✅ **Good**: UNLINK is non-blocking
+
 ```typescript
 await redis.unlink('large-key'); // Returns immediately
 ```
@@ -186,11 +194,13 @@ await redis.unlink('large-key'); // Returns immediately
 ### 4. Use SCAN Instead of KEYS
 
 ❌ **Bad**: KEYS blocks Redis
+
 ```typescript
 const keys = await redis.keys('user:*'); // Blocks entire server!
 ```
 
 ✅ **Good**: SCAN is non-blocking
+
 ```typescript
 const keys: string[] = [];
 let cursor = '0';
@@ -212,6 +222,7 @@ do {
 ### 5. Use Lua Scripts for Atomic Operations
 
 ❌ **Bad**: Multiple round trips, not atomic
+
 ```typescript
 const value = await redis.get('counter');
 const newValue = parseInt(value || '0') + 1;
@@ -220,6 +231,7 @@ await redis.expire('counter', 60);
 ```
 
 ✅ **Good**: Single atomic operation
+
 ```typescript
 const script = `
   local current = redis.call('INCRBY', KEYS[1], ARGV[1])
@@ -229,13 +241,7 @@ const script = `
   return current
 `;
 
-const newValue = await redis.eval(
-  script,
-  1,
-  'counter',
-  '1',
-  '60'
-);
+const newValue = await redis.eval(script, 1, 'counter', '1', '60');
 ```
 
 **Why**: Lua scripts are atomic and reduce round trips.
@@ -243,6 +249,7 @@ const newValue = await redis.eval(
 ### 6. Use Hash Commands for Related Data
 
 ❌ **Bad**: Multiple keys
+
 ```typescript
 await redis.set('user:123:name', 'John');
 await redis.set('user:123:email', 'john@example.com');
@@ -250,6 +257,7 @@ await redis.set('user:123:age', '30');
 ```
 
 ✅ **Good**: Single hash
+
 ```typescript
 await redis.hmset('user:123', {
   name: 'John',
@@ -263,12 +271,14 @@ await redis.hmset('user:123', {
 ### 7. Use SETEX Instead of SET + EXPIRE
 
 ❌ **Bad**: Two commands
+
 ```typescript
 await redis.set('session:abc', 'data');
 await redis.expire('session:abc', 3600);
 ```
 
 ✅ **Good**: One command
+
 ```typescript
 await redis.setex('session:abc', 3600, 'data');
 ```
@@ -276,12 +286,14 @@ await redis.setex('session:abc', 3600, 'data');
 ### 8. Use EXISTS for Checking Key Existence
 
 ❌ **Bad**: Fetch entire value
+
 ```typescript
 const value = await redis.get('key');
 const exists = value !== null;
 ```
 
 ✅ **Good**: Only check existence
+
 ```typescript
 const exists = (await redis.exists('key')) === 1;
 ```
@@ -289,16 +301,23 @@ const exists = (await redis.exists('key')) === 1;
 ### 9. Limit SMEMBERS/LRANGE/ZRANGE Results
 
 ❌ **Bad**: Return entire set
+
 ```typescript
 const members = await redis.smembers('large-set'); // Could be millions!
 ```
 
 ✅ **Good**: Use cursor-based iteration
+
 ```typescript
 const members: string[] = [];
 let cursor = '0';
 do {
-  const [nextCursor, batch] = await redis.sscan('large-set', cursor, 'COUNT', 100);
+  const [nextCursor, batch] = await redis.sscan(
+    'large-set',
+    cursor,
+    'COUNT',
+    100
+  );
   cursor = nextCursor;
   members.push(...batch);
 } while (cursor !== '0');
@@ -328,6 +347,7 @@ for (const [error, result] of results) {
 ### Key Naming Strategy
 
 Use hierarchical keys with colons:
+
 ```
 jobs:123:status
 jobs:123:payload
@@ -336,6 +356,7 @@ workers:456:heartbeat
 ```
 
 **Benefits**:
+
 - Easy to scan/delete by prefix
 - Clear ownership and relationships
 - Better memory locality
@@ -358,12 +379,14 @@ await redis.setex('cache:user:123', 300, userData);
 ### Memory Optimization
 
 **1. Use Hashes for Small Objects**
+
 ```typescript
 // Instead of: job:123:id, job:123:type, job:123:status
 // Use: HMSET job:123 id 123 type email status queued
 ```
 
 **2. Use Appropriate Data Structures**
+
 - **Strings**: Simple values, counters
 - **Hashes**: Objects with fields
 - **Lists**: Queues, recent items
@@ -371,6 +394,7 @@ await redis.setex('cache:user:123', 300, userData);
 - **Sorted Sets**: Leaderboards, time-series
 
 **3. Enable Compression**
+
 ```conf
 # In redis.conf
 hash-max-ziplist-entries 512
@@ -378,6 +402,7 @@ hash-max-ziplist-value 64
 ```
 
 **4. Monitor Memory Usage**
+
 ```bash
 # Check memory info
 redis-cli INFO memory
@@ -392,11 +417,13 @@ redis-cli MEMORY DOCTOR
 ### Eviction Policies
 
 For cache-like workloads:
+
 ```conf
 maxmemory-policy allkeys-lru  # Evict least recently used
 ```
 
 For job queue (no eviction):
+
 ```conf
 maxmemory-policy noeviction  # Return error when full
 ```
@@ -406,6 +433,7 @@ maxmemory-policy noeviction  # Return error when full
 ### Key Metrics
 
 **1. Latency**
+
 ```bash
 # Monitor latency
 redis-cli --latency
@@ -418,6 +446,7 @@ redis-cli --latency-history
 ```
 
 **2. Slow Log**
+
 ```bash
 # Get slow commands
 redis-cli SLOWLOG GET 10
@@ -430,6 +459,7 @@ redis-cli SLOWLOG RESET
 ```
 
 **3. Commands Stats**
+
 ```bash
 # Command statistics
 redis-cli INFO commandstats
@@ -440,11 +470,13 @@ redis-cli INFO commandstats
 ```
 
 **4. Memory Stats**
+
 ```bash
 redis-cli INFO memory
 ```
 
 **5. Client Connections**
+
 ```bash
 redis-cli INFO clients
 
@@ -491,6 +523,7 @@ redis-benchmark -t set,get -n 100000 -q -P 16
 **Symptoms**: Commands taking > 10ms
 
 **Investigation**:
+
 ```bash
 # Check slow log
 redis-cli SLOWLOG GET 10
@@ -503,12 +536,14 @@ redis-cli INFO commandstats | grep blocking
 ```
 
 **Common Causes**:
+
 1. **Slow commands**: KEYS, SMEMBERS on large sets
 2. **Persistence**: BGSAVE/BGREWRITEAOF causing I/O pressure
 3. **Memory pressure**: Swapping to disk
 4. **Network**: High latency between client and Redis
 
 **Fixes**:
+
 - Replace KEYS with SCAN
 - Use SSCAN instead of SMEMBERS
 - Increase memory or enable eviction
@@ -519,6 +554,7 @@ redis-cli INFO commandstats | grep blocking
 **Symptoms**: Memory > 80% of maxmemory
 
 **Investigation**:
+
 ```bash
 # Find biggest keys
 redis-cli --bigkeys
@@ -531,6 +567,7 @@ redis-cli INFO memory
 ```
 
 **Fixes**:
+
 - Set TTL on temporary keys
 - Enable eviction policy
 - Optimize data structures
@@ -541,6 +578,7 @@ redis-cli INFO memory
 **Symptoms**: Client connections timing out
 
 **Investigation**:
+
 ```bash
 # Check connection count
 redis-cli INFO clients
@@ -550,6 +588,7 @@ redis-cli INFO stats | grep rejected
 ```
 
 **Fixes**:
+
 - Increase maxclients in redis.conf
 - Fix connection leaks in application
 - Use connection pooling
@@ -559,6 +598,7 @@ redis-cli INFO stats | grep rejected
 **Symptoms**: Redis becomes unresponsive
 
 **Investigation**:
+
 ```bash
 # Check for long-running commands
 redis-cli CLIENT LIST
@@ -568,6 +608,7 @@ redis-cli SLOWLOG GET 10
 ```
 
 **Common Blocking Commands**:
+
 - `KEYS *` - Use SCAN instead
 - `SMEMBERS` on large sets - Use SSCAN
 - `FLUSHDB`/`FLUSHALL` - Use with caution
@@ -578,11 +619,13 @@ redis-cli SLOWLOG GET 10
 **Symptoms**: Redis using > 80% CPU
 
 **Causes**:
+
 1. Complex Lua scripts
 2. High command rate
 3. Persistence (BGSAVE/AOF)
 
 **Fixes**:
+
 - Optimize Lua scripts
 - Use pipelining to reduce command overhead
 - Adjust persistence settings
@@ -649,6 +692,6 @@ Before going to production:
 ✅ **Benchmark** before optimizing  
 ✅ **Connection pool** with 10-20 connections  
 ✅ **Lua scripts** for atomic operations  
-✅ **MGET/MSET** for batch reads/writes  
+✅ **MGET/MSET** for batch reads/writes
 
 Redis is fast, but you can make it 100x faster with proper usage patterns!

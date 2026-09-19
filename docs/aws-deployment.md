@@ -63,25 +63,28 @@ TaskFlow on AWS uses a fully managed, highly available architecture:
 ### Required Tools
 
 1. **AWS CLI** (v2.x)
+
    ```bash
    # Install AWS CLI
    curl "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o "AWSCLIV2.pkg"
    sudo installer -pkg AWSCLIV2.pkg -target /
-   
+
    # Configure credentials
    aws configure
    ```
 
 2. **Terraform** (>= 1.5.0)
+
    ```bash
    # Install via Homebrew
    brew install terraform
-   
+
    # Verify installation
    terraform version
    ```
 
 3. **Docker** (for building images)
+
    ```bash
    # Verify Docker is running
    docker --version
@@ -103,17 +106,18 @@ TaskFlow on AWS uses a fully managed, highly available architecture:
      - S3, CloudFront, Route53, ACM
 
 2. **S3 Backend for Terraform State**
+
    ```bash
    # Create S3 bucket for state
    aws s3api create-bucket \
      --bucket taskflow-terraform-state \
      --region us-east-1
-   
+
    # Enable versioning
    aws s3api put-bucket-versioning \
      --bucket taskflow-terraform-state \
      --versioning-configuration Status=Enabled
-   
+
    # Enable encryption
    aws s3api put-bucket-encryption \
      --bucket taskflow-terraform-state \
@@ -124,7 +128,7 @@ TaskFlow on AWS uses a fully managed, highly available architecture:
          }
        }]
      }'
-   
+
    # Create DynamoDB table for state locking
    aws dynamodb create-table \
      --table-name taskflow-terraform-locks \
@@ -135,6 +139,7 @@ TaskFlow on AWS uses a fully managed, highly available architecture:
    ```
 
 3. **ACM Certificate** (for HTTPS)
+
    ```bash
    # Request certificate for your domain
    aws acm request-certificate \
@@ -142,7 +147,7 @@ TaskFlow on AWS uses a fully managed, highly available architecture:
      --subject-alternative-names "*.yourdomain.com" \
      --validation-method DNS \
      --region us-east-1
-   
+
    # Note the Certificate ARN for later use
    ```
 
@@ -158,21 +163,21 @@ TaskFlow on AWS uses a fully managed, highly available architecture:
 
 ### Monthly Cost Breakdown (us-east-1)
 
-| Service | Configuration | Monthly Cost |
-|---------|--------------|--------------|
-| **ECS Fargate (API)** | 2 tasks × 0.5 vCPU, 1GB RAM | ~$30 |
-| **ECS Fargate (Workers)** | 3 tasks × 1 vCPU, 2GB RAM | ~$90 |
-| **RDS PostgreSQL** | db.t3.medium, Multi-AZ, 50GB | ~$150 |
-| **ElastiCache Redis** | 2 × cache.t3.medium | ~$120 |
-| **MSK** | 3 × kafka.t3.small brokers | ~$250 |
-| **Application Load Balancer** | Standard pricing | ~$25 |
-| **NAT Gateway** | 3 × NAT (high availability) | ~$100 |
-| **CloudWatch Logs** | ~10GB/month | ~$5 |
-| **CloudFront** | 1TB transfer | ~$85 |
-| **S3** | Static assets, logs | ~$5 |
-| **Data Transfer** | Outbound | ~$20 |
-| **Secrets Manager** | 10 secrets | ~$4 |
-| **Total** | | **~$884/month** |
+| Service                       | Configuration                | Monthly Cost    |
+| ----------------------------- | ---------------------------- | --------------- |
+| **ECS Fargate (API)**         | 2 tasks × 0.5 vCPU, 1GB RAM  | ~$30            |
+| **ECS Fargate (Workers)**     | 3 tasks × 1 vCPU, 2GB RAM    | ~$90            |
+| **RDS PostgreSQL**            | db.t3.medium, Multi-AZ, 50GB | ~$150           |
+| **ElastiCache Redis**         | 2 × cache.t3.medium          | ~$120           |
+| **MSK**                       | 3 × kafka.t3.small brokers   | ~$250           |
+| **Application Load Balancer** | Standard pricing             | ~$25            |
+| **NAT Gateway**               | 3 × NAT (high availability)  | ~$100           |
+| **CloudWatch Logs**           | ~10GB/month                  | ~$5             |
+| **CloudFront**                | 1TB transfer                 | ~$85            |
+| **S3**                        | Static assets, logs          | ~$5             |
+| **Data Transfer**             | Outbound                     | ~$20            |
+| **Secrets Manager**           | 10 secrets                   | ~$4             |
+| **Total**                     |                              | **~$884/month** |
 
 ### Cost Optimization Tips
 
@@ -303,18 +308,20 @@ terraform output cloudfront_domain_name
 ### Build and Push Docker Images
 
 1. **Build Images Locally**
+
    ```bash
    # Build API image
    docker build -t ghcr.io/YOUR_USERNAME/taskflow-api:latest -f apps/api/Dockerfile .
-   
+
    # Build Worker image
    docker build -t ghcr.io/YOUR_USERNAME/taskflow-worker:latest -f apps/worker/Dockerfile .
-   
+
    # Build Dashboard image
    docker build -t ghcr.io/YOUR_USERNAME/taskflow-dashboard:latest -f apps/dashboard/Dockerfile apps/dashboard
    ```
 
 2. **Authenticate to GitHub Container Registry**
+
    ```bash
    echo $GITHUB_TOKEN | docker login ghcr.io -u YOUR_USERNAME --password-stdin
    ```
@@ -329,11 +336,13 @@ terraform output cloudfront_domain_name
 ### Database Migration
 
 1. **Get RDS Endpoint**
+
    ```bash
    RDS_ENDPOINT=$(terraform output -raw rds_endpoint)
    ```
 
 2. **Create Bastion Host** (if needed for direct access)
+
    ```bash
    # Launch EC2 instance in public subnet with PostgreSQL client
    # Or use AWS Systems Manager Session Manager
@@ -349,12 +358,14 @@ terraform output cloudfront_domain_name
 ### Deploy Dashboard to S3/CloudFront
 
 1. **Build Dashboard**
+
    ```bash
    cd apps/dashboard
    pnpm run build
    ```
 
 2. **Upload to S3**
+
    ```bash
    aws s3 sync dist/ s3://taskflow-prod-dashboard/ --delete
    ```
@@ -390,6 +401,7 @@ aws ecs update-service \
 ### DNS Configuration
 
 1. **Get Load Balancer DNS**
+
    ```bash
    terraform output alb_dns_name
    ```
@@ -410,7 +422,7 @@ aws ecs update-service \
          }
        }]
      }'
-   
+
    # Dashboard (CloudFront)
    aws route53 change-resource-record-sets \
      --hosted-zone-id YOUR_ZONE_ID \
@@ -535,11 +547,12 @@ aws elasticache create-snapshot \
    - Configured in Terraform with min/max capacity
 
 2. **Vertical Scaling**
+
    ```bash
    # Update instance types in terraform.tfvars
    rds_instance_class = "db.t3.large"
    redis_node_type    = "cache.t3.large"
-   
+
    # Apply changes
    terraform plan
    terraform apply
@@ -559,11 +572,13 @@ aws elasticache create-snapshot \
 ### ECS Tasks Not Starting
 
 1. **Check task logs**
+
    ```bash
    aws logs tail /ecs/taskflow-prod-api --follow
    ```
 
 2. **Verify secrets are accessible**
+
    ```bash
    aws secretsmanager get-secret-value \
      --secret-id taskflow-prod-secrets
@@ -578,6 +593,7 @@ aws elasticache create-snapshot \
 ### Database Connection Issues
 
 1. **Test connectivity from ECS task**
+
    ```bash
    # Run one-off task with psql
    aws ecs run-task \
@@ -588,6 +604,7 @@ aws elasticache create-snapshot \
    ```
 
 2. **Check RDS security group inbound rules**
+
    ```bash
    aws ec2 describe-security-groups \
      --group-ids sg-xxxxx \
@@ -602,6 +619,7 @@ aws elasticache create-snapshot \
 ### High CPU/Memory Usage
 
 1. **Check CloudWatch metrics**
+
    ```bash
    aws cloudwatch get-metric-statistics \
      --namespace AWS/ECS \
@@ -655,6 +673,7 @@ aws s3api get-object \
 ### Application Rollback
 
 1. **Rollback to Previous Docker Image**
+
    ```bash
    # Update task definition with previous image
    aws ecs register-task-definition \
@@ -664,7 +683,7 @@ aws s3api get-object \
        "image": "ghcr.io/YOUR_USERNAME/taskflow-api:v1.2.3",
        ...
      }]'
-   
+
    # Update service
    aws ecs update-service \
      --cluster taskflow-prod-cluster \
@@ -681,6 +700,7 @@ aws s3api get-object \
 ### Infrastructure Rollback
 
 1. **Using Terraform**
+
    ```bash
    # Rollback to previous state
    terraform plan -target=module.ecs
@@ -688,6 +708,7 @@ aws s3api get-object \
    ```
 
 2. **Using Git**
+
    ```bash
    # Checkout previous version
    git checkout v1.2.3
@@ -702,7 +723,7 @@ aws s3api get-object \
    aws rds restore-db-instance-from-db-snapshot \
      --db-instance-identifier taskflow-prod-postgres-restored \
      --db-snapshot-identifier taskflow-manual-20240115
-   
+
    # ElastiCache: Create from snapshot
    aws elasticache create-replication-group \
      --replication-group-id taskflow-prod-redis-restored \
@@ -746,6 +767,7 @@ aws s3api get-object \
 ## Support
 
 For issues or questions:
+
 - GitHub Issues: https://github.com/YOUR_USERNAME/Resilient_TaskFlow/issues
 - Documentation: https://github.com/YOUR_USERNAME/Resilient_TaskFlow/tree/main/docs
 - AWS Support: https://console.aws.amazon.com/support/

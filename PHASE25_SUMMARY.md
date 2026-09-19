@@ -1,11 +1,15 @@
+> Historical snapshot only. Claims and numbers below are not current acceptance evidence; use the root README and executable gates.
+
 # Phase 25: Architecture Review - Complete ✅
 
 ## Overview
+
 Conducted comprehensive principal-engineer-level architecture review of the entire TaskFlow distributed task queue system, analyzing correctness, reliability, scalability, security, and operational concerns.
 
 ## Review Methodology
 
 ### Analysis Framework
+
 ```
 1. Core Architecture Components
    ├─ API design and endpoints
@@ -41,21 +45,22 @@ Conducted comprehensive principal-engineer-level architecture review of the enti
 
 ## Overall Assessment
 
-| Category | Rating | Notes |
-|----------|--------|-------|
+| Category                | Rating     | Notes                            |
+| ----------------------- | ---------- | -------------------------------- |
 | **Architecture Design** | ⭐⭐⭐⭐⭐ | Excellent separation of concerns |
-| **Correctness** | ⭐⭐⭐ | Good with P0 issues |
-| **Reliability** | ⭐⭐⭐⭐ | Very good error handling |
-| **Scalability** | ⭐⭐⭐ | Good (10K-100K jobs/day) |
-| **Security** | ⭐⭐ | NOT production-ready |
-| **Observability** | ⭐⭐⭐⭐ | Very good foundation |
-| **Operations** | ⭐⭐⭐ | Good with gaps |
+| **Correctness**         | ⭐⭐⭐     | Good with P0 issues              |
+| **Reliability**         | ⭐⭐⭐⭐   | Very good error handling         |
+| **Scalability**         | ⭐⭐⭐     | Good (10K-100K jobs/day)         |
+| **Security**            | ⭐⭐       | NOT production-ready             |
+| **Observability**       | ⭐⭐⭐⭐   | Very good foundation             |
+| **Operations**          | ⭐⭐⭐     | Good with gaps                   |
 
 ## Critical Findings Summary
 
 ### Priority 0 (Critical - Blocking Production)
 
 **P0-1: Duplicate Execution on Worker Crash (RACE-6)**
+
 - **Issue**: Worker marks job SUCCEEDED in PostgreSQL, crashes before Redis XACK
 - **Impact**: Job re-executed by another worker (duplicate side effects)
 - **Root Cause**: PostgreSQL and Redis operations not atomic
@@ -63,18 +68,21 @@ Conducted comprehensive principal-engineer-level architecture review of the enti
 - **Code**: `packages/worker/src/worker.ts:400-450`
 
 **P0-2: Hardcoded Authentication Credentials**
+
 - **Issue**: `test-api-key` and `valid-jwt-token` hardcoded in auth middleware
 - **Impact**: Anyone can authenticate, no user isolation, security breach
 - **Fix**: Implement proper API key database lookup and JWT validation
 - **Code**: `apps/api/src/middleware/auth.ts:98-145`
 
 **P0-3: Lease Expiry Sweeper Not Running**
+
 - **Issue**: `getJobsWithExpiredLeases()` function exists but never called
 - **Impact**: Jobs with expired leases stuck forever, worker deadlock
 - **Fix**: Implement background sweeper (runs every 30s)
 - **Code**: `packages/database/src/repositories/job.repository.ts:450-470`
 
 **P0-4: Queue Metadata Not Integrated**
+
 - **Issue**: `queues` table exists with config, but API hardcodes `'default-queue-id'`
 - **Impact**: Queue configuration ignored, cannot configure dynamically
 - **Fix**: Read queue config from database, apply per-queue limits
@@ -83,26 +91,31 @@ Conducted comprehensive principal-engineer-level architecture review of the enti
 ### Priority 1 (Serious - High Impact)
 
 **P1-1: No Rate Limiting on Job Submission**
+
 - **Issue**: Rate limiter middleware exists but not applied to POST /api/v1/jobs
 - **Impact**: DoS vulnerability, API/Redis/PostgreSQL exhaustion
 - **Fix**: Apply rate limiter to job submission (100 jobs/min/user)
 
 **P1-2: Priority Queue Not in Redis**
+
 - **Issue**: Priority stored in PostgreSQL, but Redis delivers FIFO
 - **Impact**: Critical jobs delayed behind low-priority jobs
 - **Fix**: Separate Redis streams per priority OR use sorted sets
 
 **P1-3: No Transactional Event Publishing**
+
 - **Issue**: Job state updates and Kafka events are separate operations
 - **Impact**: Events lost if Kafka down, inconsistent state
 - **Fix**: Implement outbox pattern for transactional guarantees
 
 **P1-4: Idempotency Key Cleanup Not Scheduled**
+
 - **Issue**: `cleanupExpiredIdempotencyKeys()` exists but never called
 - **Impact**: Table grows unbounded, query slowdown
 - **Fix**: Schedule cleanup every hour
 
 **P1-5: Scheduler Not Distributed-Safe**
+
 - **Issue**: No distributed lock, multiple scheduler instances race
 - **Impact**: Duplicate job enqueues (3x if 3 replicas)
 - **Fix**: Use Redlock or PostgreSQL advisory locks
@@ -123,6 +136,7 @@ Conducted comprehensive principal-engineer-level architecture review of the enti
 ## Identified Race Conditions
 
 ### RACE-6 (P0 - Most Critical)
+
 ```
 Timeline:
 1. Worker A executes job successfully
@@ -135,6 +149,7 @@ Timeline:
 ```
 
 ### Other Races Identified
+
 - **RACE-1**: Duplicate execution (lease acquisition window) - MEDIUM
 - **RACE-2**: Cancellation during completion - LOW (handled by state machine)
 - **RACE-3**: Scheduler vs API enqueue - LOW (duplicate XADD is idempotent)
@@ -145,6 +160,7 @@ Timeline:
 ## Architecture Strengths (Keep These)
 
 ### Excellent Design Decisions
+
 1. **PostgreSQL as Source of Truth** - No eventual consistency issues
 2. **Redis Streams with Consumer Groups** - Distributed consumption, automatic load balancing
 3. **Lease-Based Coordination** - Prevents duplicate execution (with known RACE-6 exception)
@@ -157,6 +173,7 @@ Timeline:
 10. **Observability Built-In** - Prometheus, logging, OpenTelemetry support
 
 ### Code Quality Indicators
+
 - ✅ Clean separation of concerns (packages structure)
 - ✅ Proper TypeScript usage with strict types
 - ✅ Comprehensive error handling and logging
@@ -167,19 +184,23 @@ Timeline:
 ## Security Vulnerabilities
 
 ### Critical (MUST FIX)
+
 1. **Hardcoded credentials** - test-api-key, admin-api-key, valid-jwt-token
 2. **No JWT validation** - Token not verified, no signature check
 3. **No rate limiting** - Job submission unprotected
 
 ### High
+
 4. **Secrets in docker-compose** - Passwords in plaintext
 5. **Weak authorization** - Owner checks but test users bypass
 
 ### Medium
+
 6. **No audit log** - Sensitive operations not tracked
 7. **No input size limits** - Large payloads can DoS
 
 ### Good Security Practices Present
+
 - ✅ SQL injection protection (parameterized queries via Drizzle)
 - ✅ Input validation (Zod schemas)
 - ✅ HTTPS support in infrastructure
@@ -187,6 +208,7 @@ Timeline:
 ## Scalability Analysis
 
 ### Current Limits (Estimated)
+
 ```
 Throughput:        ~10,000 jobs/minute
 Latency (p95):     <500ms (without backpressure)
@@ -196,21 +218,24 @@ Database Size:     Unbounded (no retention policy)
 ```
 
 ### Bottlenecks Identified
+
 1. **Redis Single Core** - CPU-bound at ~50K ops/sec
 2. **PostgreSQL Connections** - Default 10/instance, 3 API + 5 workers = 80/100 max
 3. **Priority Queue** - FIFO in Redis, priority only in PostgreSQL
 4. **No Partitioning** - Jobs table will grow indefinitely
 
 ### Horizontal Scaling Strategy
+
 ```
 API Servers:    ✅ Stateless, scale freely
-Workers:        ✅ Stateless, scale freely  
+Workers:        ✅ Stateless, scale freely
 PostgreSQL:     ⚠️  Single instance (needs read replicas)
 Redis:          ⚠️  Single instance (needs cluster for >50K ops/sec)
 Scheduler:      ❌ Must be single instance (needs distributed lock)
 ```
 
 ### Suitable For
+
 - ✅ Internal tools (10K-100K jobs/day)
 - ✅ MVP/prototyping
 - ✅ Medium-scale production
@@ -222,6 +247,7 @@ Scheduler:      ❌ Must be single instance (needs distributed lock)
 ### NOT READY ❌
 
 **Blockers (MUST fix before any deployment):**
+
 1. P0-1: RACE-6 duplicate execution
 2. P0-2: Hardcoded authentication
 3. P0-3: Lease expiry sweeper not running
@@ -231,11 +257,13 @@ Scheduler:      ❌ Must be single instance (needs distributed lock)
 **Estimated Effort to Unblock:** 3-5 days (one engineer)
 
 ### Ready For (After P0 Fixes)
+
 - ✅ Internal tools and services (low-criticality)
 - ✅ MVP and prototyping (with monitoring)
 - ✅ Medium-scale production (10K-100K jobs/day)
 
 ### NOT Ready For (Without Further Hardening)
+
 - ❌ Financial transactions (duplicate execution risk)
 - ❌ Mission-critical systems (availability concerns)
 - ❌ High-throughput workloads (>100K jobs/day)
@@ -244,6 +272,7 @@ Scheduler:      ❌ Must be single instance (needs distributed lock)
 ## Recommendations
 
 ### Immediate Actions (This Week)
+
 ```
 Priority  Task                              Effort    Impact
 --------  --------------------------------  --------  ------------------
@@ -257,6 +286,7 @@ Total: 5 days (one engineer, working in parallel: 3 days)
 ```
 
 ### Short-Term (Next Sprint)
+
 ```
 P1-2      Priority queues in Redis          2 days
 P1-3      Outbox pattern for events         3 days
@@ -269,6 +299,7 @@ Total: 10 days (2 weeks for one engineer)
 ```
 
 ### Medium-Term (Next Quarter)
+
 ```
 P2-1      Connection pool configuration     1 day
 P2-2      Redis Cluster evaluation          3 days
@@ -285,6 +316,7 @@ Total: 18 days (4 weeks for one engineer)
 ## Test Coverage Assessment
 
 ### Current State
+
 - **Unit Tests**: ⭐⭐⭐⭐ (Assumed good based on structure)
 - **Integration Tests**: ⭐⭐ (Limited, missing race conditions)
 - **Load Tests**: ⭐⭐⭐⭐ (k6 tests exist in tests/load/)
@@ -292,6 +324,7 @@ Total: 18 days (4 weeks for one engineer)
 - **End-to-End Tests**: ⭐ (Missing)
 
 ### Critical Gaps
+
 1. No tests for RACE-6 duplicate execution
 2. No tests for worker crash recovery
 3. No tests for lease expiry behavior
@@ -300,6 +333,7 @@ Total: 18 days (4 weeks for one engineer)
 6. No tests for event publishing failures
 
 ### Recommended Test Suite
+
 ```typescript
 // Integration Tests (Missing)
 - RACE-6: Worker crash before XACK
@@ -326,6 +360,7 @@ Total: 18 days (4 weeks for one engineer)
 ## Key Metrics from Review
 
 ### Code Statistics
+
 - **Lines Analyzed**: ~15,000 lines TypeScript
 - **Files Reviewed**: 50+ core files
 - **Modules Examined**: 11 packages
@@ -351,6 +386,7 @@ After P0/P1 fixes:     8.4/10 (A-)
 ## Engineering Quality Assessment
 
 ### Demonstrates
+
 - ✅ **Strong distributed systems knowledge** (lease-based coordination, consumer groups)
 - ✅ **Production-grade thinking** (graceful shutdown, health checks, observability)
 - ✅ **Comprehensive feature set** (retry, dead letter, scheduler, events)
@@ -358,6 +394,7 @@ After P0/P1 fixes:     8.4/10 (A-)
 - ✅ **TypeScript expertise** (strict types, Zod validation)
 
 ### Needs Improvement
+
 - ⚠️ **More rigorous testing** (race conditions, chaos scenarios)
 - ⚠️ **Security awareness** (hardcoded credentials, missing validation)
 - ⚠️ **Operational hardening** (alerting, runbooks, rollback)
@@ -368,6 +405,7 @@ After P0/P1 fixes:     8.4/10 (A-)
 This project would perform **VERY WELL** in senior/staff backend interviews:
 
 **Strengths for Interviews:**
+
 1. ✅ Demonstrates distributed systems knowledge (race conditions, consistency)
 2. ✅ Shows production awareness (observability, graceful shutdown)
 3. ✅ Can discuss trade-offs (eventual consistency, at-least-once delivery)
@@ -375,6 +413,7 @@ This project would perform **VERY WELL** in senior/staff backend interviews:
 5. ✅ Has concrete examples of architectural decisions
 
 **Talking Points:**
+
 - "Why PostgreSQL as source of truth vs Redis?"
 - "How do you prevent duplicate execution?"
 - "What happens if a worker crashes mid-job?"
@@ -384,6 +423,7 @@ This project would perform **VERY WELL** in senior/staff backend interviews:
 - "What are the scalability limits?"
 
 **Weaknesses to Address:**
+
 - Be honest about RACE-6 bug (shows self-awareness)
 - Explain security gaps as "MVP shortcuts, not production-ready"
 - Discuss how you would fix each P0/P1 issue
@@ -391,6 +431,7 @@ This project would perform **VERY WELL** in senior/staff backend interviews:
 ## Documentation Created
 
 ### Architecture Review Document
+
 - **File**: `docs/ARCHITECTURE_REVIEW.md`
 - **Length**: 500+ lines
 - **Sections**:
@@ -405,6 +446,7 @@ This project would perform **VERY WELL** in senior/staff backend interviews:
   9. Appendix: Priority Matrix
 
 ### Key Features
+
 - ✅ Code-specific findings with line numbers
 - ✅ Before/after fix examples
 - ✅ Effort estimates for each fix
@@ -417,6 +459,7 @@ This project would perform **VERY WELL** in senior/staff backend interviews:
 ## Lessons Learned
 
 ### What This Project Did Right
+
 1. **Chose correct architecture pattern** (not trying to reinvent the wheel)
 2. **Comprehensive schema design** (thought through all use cases)
 3. **Good separation of concerns** (API/Worker/Queue/Events distinct)
@@ -424,6 +467,7 @@ This project would perform **VERY WELL** in senior/staff backend interviews:
 5. **Implemented graceful failure handling** (not optimistic-only)
 
 ### What Could Be Better
+
 1. **Security should be first-class** (not "TODO in production")
 2. **Test race conditions early** (harder to add later)
 3. **Distributed systems need distributed locks** (scheduler learned this)
@@ -431,6 +475,7 @@ This project would perform **VERY WELL** in senior/staff backend interviews:
 5. **Event publishing needs transactional guarantees** (outbox pattern)
 
 ### Key Takeaways for Future Projects
+
 1. **Always test failure scenarios** (especially crash recovery)
 2. **Never hardcode credentials** (even for "temporary" dev)
 3. **Design for horizontal scaling from day one** (distributed locks)

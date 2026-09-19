@@ -50,6 +50,7 @@ Resilient TaskFlow chaos testing follows Netflix's chaos engineering principles:
 ### Our Approach
 
 **Controlled chaos in test environment**:
+
 - Run against dedicated test infrastructure
 - Automate failure injection
 - Monitor system behavior
@@ -57,6 +58,7 @@ Resilient TaskFlow chaos testing follows Netflix's chaos engineering principles:
 - Document findings
 
 **Never in production** (for this project):
+
 - Chaos testing is done in isolated test environments
 - Production chaos requires mature monitoring and runbooks
 
@@ -107,17 +109,20 @@ Before running chaos tests:
 **Scenario**: Worker process crashes mid-job execution
 
 **Expected Behavior**:
+
 - Job lease expires (30s)
 - Job returns to queue
 - Another worker picks it up
 - Job completes successfully
 
 **Command**:
+
 ```bash
 pnpm chaos worker-crash
 ```
 
 **What Happens**:
+
 1. Worker container killed
 2. Jobs in PROCESSING state stuck with expired lease
 3. After 30s, leases expire
@@ -125,6 +130,7 @@ pnpm chaos worker-crash
 5. Workers complete jobs
 
 **Verification**:
+
 ```sql
 -- Check for stuck jobs
 SELECT id, status, worker_id, lease_expires_at
@@ -136,6 +142,7 @@ AND lease_expires_at < NOW();
 ```
 
 **Metrics to Watch**:
+
 - `taskflow_worker_failures_total` - Increments
 - `taskflow_jobs_current{status="queued"}` - Temporarily increases
 - `taskflow_worker_lease_acquisition_failures_total` - May spike
@@ -145,17 +152,20 @@ AND lease_expires_at < NOW();
 **Scenario**: Database restarts during operation
 
 **Expected Behavior**:
+
 - Active connections fail
 - Connection pool reconnects automatically
 - Queued operations retry
 - No data loss
 
 **Command**:
+
 ```bash
 pnpm chaos postgres-restart
 ```
 
 **What Happens**:
+
 1. PostgreSQL container restarts (~2-5s)
 2. All connections severed
 3. Workers/API retry with backoff
@@ -163,6 +173,7 @@ pnpm chaos postgres-restart
 5. Operations resume
 
 **Verification**:
+
 ```bash
 # Check connection pool recovery
 docker logs taskflow-api | grep "database connection"
@@ -172,6 +183,7 @@ docker logs taskflow-api | grep "database connection"
 ```
 
 **Metrics to Watch**:
+
 - `taskflow_db_connection_pool_size` - Drops to 0, then recovers
 - `taskflow_db_queries_total` - Dips during restart
 
@@ -180,6 +192,7 @@ docker logs taskflow-api | grep "database connection"
 **Scenario**: Redis crashes, all streams lost
 
 **Expected Behavior**:
+
 - Redis Streams data lost (ephemeral)
 - PostgreSQL remains source of truth
 - QUEUED jobs re-enqueued from DB
@@ -187,11 +200,13 @@ docker logs taskflow-api | grep "database connection"
 - Processing resumes
 
 **Command**:
+
 ```bash
 pnpm chaos redis-restart
 ```
 
 **What Happens**:
+
 1. Redis container restarts
 2. All stream data lost
 3. Recovery process:
@@ -201,6 +216,7 @@ pnpm chaos redis-restart
 4. Workers resume processing
 
 **Verification**:
+
 ```bash
 # Check stream recreation
 docker exec taskflow-redis redis-cli XLEN taskflow:queue:default
@@ -210,6 +226,7 @@ docker exec taskflow-redis redis-cli XINFO GROUPS taskflow:queue:default
 ```
 
 **Metrics to Watch**:
+
 - `taskflow_queue_depth` - Drops to 0, then refills
 - `taskflow_redis_commands_total` - Drops during restart
 
@@ -218,17 +235,20 @@ docker exec taskflow-redis redis-cli XINFO GROUPS taskflow:queue:default
 **Scenario**: Kafka unavailable
 
 **Expected Behavior**:
+
 - Job processing continues
 - Events fail to publish
 - Errors logged (not thrown)
 - System remains available
 
 **Command**:
+
 ```bash
 pnpm chaos kafka-restart
 ```
 
 **What Happens**:
+
 1. Kafka container restarts
 2. Event publishing fails
 3. Jobs complete successfully anyway (fire-and-forget)
@@ -236,6 +256,7 @@ pnpm chaos kafka-restart
 5. Kafka recovers, events resume
 
 **Verification**:
+
 ```bash
 # Check event publish failures
 docker logs taskflow-worker-1 | grep "event publish failed"
@@ -244,6 +265,7 @@ docker logs taskflow-worker-1 | grep "event publish failed"
 ```
 
 **Metrics to Watch**:
+
 - `taskflow_event_publish_failures_total` - Increases
 - `taskflow_jobs_completed_total` - Continues growing (unaffected)
 
@@ -252,17 +274,20 @@ docker logs taskflow-worker-1 | grep "event publish failed"
 **Scenario**: API server restarts with inflight requests
 
 **Expected Behavior**:
+
 - Graceful shutdown (SIGTERM)
 - Inflight requests complete (up to 30s)
 - New requests rejected during shutdown
 - Clean restart
 
 **Command**:
+
 ```bash
 pnpm chaos api-restart
 ```
 
 **What Happens**:
+
 1. API receives SIGTERM
 2. Stop accepting new connections
 3. Wait for inflight requests (max 30s)
@@ -270,6 +295,7 @@ pnpm chaos api-restart
 5. Restart
 
 **Verification**:
+
 ```bash
 # Check graceful shutdown
 docker logs taskflow-api | grep "graceful shutdown"
@@ -278,6 +304,7 @@ docker logs taskflow-api | grep "graceful shutdown"
 ```
 
 **Metrics to Watch**:
+
 - `taskflow_http_requests_total` - Brief drop
 - `process_uptime_seconds` - Resets to 0
 
@@ -286,17 +313,20 @@ docker logs taskflow-api | grep "graceful shutdown"
 **Scenario**: Worker network partition (can't reach DB/Redis)
 
 **Expected Behavior**:
+
 - Worker can't renew leases
 - Leases expire
 - Other workers claim jobs
 - Partitioned worker eventually gives up
 
 **Command**:
+
 ```bash
 pnpm chaos network-partition
 ```
 
 **What Happens**:
+
 1. Worker container paused (network effectively down)
 2. Worker can't send heartbeats
 3. Worker can't renew leases
@@ -305,6 +335,7 @@ pnpm chaos network-partition
 6. Partition heals, worker reconnects
 
 **Verification**:
+
 ```bash
 # Check lease expirations
 docker logs taskflow-worker-1 | grep "lease renewal failed"
@@ -313,6 +344,7 @@ docker logs taskflow-worker-1 | grep "lease renewal failed"
 ```
 
 **Metrics to Watch**:
+
 - `taskflow_worker_lease_renewals_total` - Stops for partitioned worker
 - `taskflow_worker_heartbeats_total` - Stops
 
@@ -323,17 +355,20 @@ docker logs taskflow-worker-1 | grep "lease renewal failed"
 **Scenario**: Redis hits maxmemory limit
 
 **Expected Behavior**:
+
 - Eviction policy activates
 - Non-critical data evicted (rate limit keys)
 - Critical data protected (job queue)
 - System continues functioning
 
 **Command**:
+
 ```bash
 pnpm chaos redis-memory-pressure
 ```
 
 **What Happens**:
+
 1. Fill Redis to 90% capacity
 2. Eviction policy: `allkeys-lru`
 3. Old keys evicted first
@@ -341,6 +376,7 @@ pnpm chaos redis-memory-pressure
 5. Core queue functionality preserved
 
 **Verification**:
+
 ```bash
 # Check Redis memory
 docker exec taskflow-redis redis-cli INFO memory
@@ -354,16 +390,19 @@ docker exec taskflow-redis redis-cli INFO stats | grep evicted
 **Scenario**: All DB connections in use
 
 **Expected Behavior**:
+
 - New queries wait for available connection
 - Timeout if wait exceeds limit
 - No crashes, graceful degradation
 
 **Command**:
+
 ```bash
 pnpm chaos db-connection-exhaustion
 ```
 
 **What Happens**:
+
 1. Acquire all connections in pool
 2. New queries blocked
 3. Queries timeout or wait
@@ -371,12 +410,14 @@ pnpm chaos db-connection-exhaustion
 5. Queue drains
 
 **Verification**:
+
 ```bash
 # Check connection pool state
 docker logs taskflow-api | grep "connection pool"
 ```
 
 **Metrics to Watch**:
+
 - `taskflow_db_connection_pool_size{state="used"}` - Maxes out
 - `taskflow_db_query_duration_seconds` - Increases
 
@@ -387,12 +428,14 @@ docker logs taskflow-api | grep "connection pool"
 **Scenario**: Job with invalid payload
 
 **Expected Behavior**:
+
 - Worker detects invalid payload
 - Job moves to DLQ
 - Error logged with details
 - Other jobs unaffected
 
 **Test Code**:
+
 ```typescript
 const job = createJob({
   payload: null, // Invalid
@@ -407,12 +450,14 @@ const job = createJob({
 **Scenario**: Job type not registered
 
 **Expected Behavior**:
+
 - Worker detects missing handler
 - Job fails with clear error
 - Moves to DLQ or retries (config)
 - Error logged
 
 **Test Code**:
+
 ```typescript
 const job = createJob({
   type: 'unknown-job-type',
@@ -426,17 +471,20 @@ const job = createJob({
 **Scenario**: Multiple services fail sequentially
 
 **Expected Behavior**:
+
 - Each failure handled independently
 - System doesn't amplify failures
 - Recovery happens incrementally
 - No thundering herd
 
 **Command**:
+
 ```bash
 pnpm chaos cascading-failure
 ```
 
 **What Happens**:
+
 1. Redis fails → Jobs can't enqueue
 2. API fails → No new jobs submitted
 3. Workers fail → No processing
@@ -446,12 +494,14 @@ pnpm chaos cascading-failure
    - Workers up → Resume processing
 
 **Verification**:
+
 ```bash
 # Monitor recovery sequence
 docker-compose logs -f --tail=100
 ```
 
 **Metrics to Watch**:
+
 - All service metrics recover sequentially
 - No spikes/storms during recovery
 
@@ -460,17 +510,20 @@ docker-compose logs -f --tail=100
 **Scenario**: Everything fails simultaneously
 
 **Expected Behavior**:
+
 - All containers killed
 - Auto-recovery after 10s
 - Services restart in correct order
 - Jobs resume from last known state
 
 **Command**:
+
 ```bash
 pnpm chaos total-failure
 ```
 
 **What Happens**:
+
 1. All containers killed
 2. 10-second blackout
 3. Docker restarts containers
@@ -479,6 +532,7 @@ pnpm chaos total-failure
 6. System fully operational
 
 **Verification**:
+
 ```bash
 # Watch recovery
 docker-compose ps
@@ -572,19 +626,23 @@ A chaos test **fails** if:
 During chaos tests, watch Grafana:
 
 **System Overview**:
+
 - Queue Depth - Should recover to normal
 - Active Workers - Should stabilize
 - Success Rate - Should return to baseline
 
 **Job Throughput**:
+
 - Should dip during failure
 - Should recover within 1-2 minutes
 
 **Latency**:
+
 - P95/P99 may spike temporarily
 - Should return to baseline
 
 **Worker Health**:
+
 - Worker Failures - Should increment
 - Worker Activity - Should recover
 
@@ -593,6 +651,7 @@ During chaos tests, watch Grafana:
 Key log patterns to verify:
 
 **Worker Crash**:
+
 ```
 [ERROR] Worker heartbeat failed
 [INFO] Lease expired for job-123
@@ -600,6 +659,7 @@ Key log patterns to verify:
 ```
 
 **Database Restart**:
+
 ```
 [ERROR] Database connection lost
 [INFO] Retrying connection (attempt 1/5)
@@ -607,9 +667,10 @@ Key log patterns to verify:
 ```
 
 **Redis Restart**:
+
 ```
 [ERROR] Redis connection lost
-[INFO] Recreating consumer group: taskflow-workers
+[INFO] Recreating consumer group: taskflow:workers
 [INFO] Re-enqueuing 42 jobs from database
 ```
 
@@ -640,6 +701,7 @@ docker exec taskflow-postgres psql -U taskflow -d taskflow -c \
 ### Manual Verification
 
 1. **Submit test job**:
+
 ```bash
 curl -X POST http://localhost:3000/api/v1/jobs \
   -H "Content-Type: application/json" \
@@ -648,6 +710,7 @@ curl -X POST http://localhost:3000/api/v1/jobs \
 ```
 
 2. **Verify completion**:
+
 ```bash
 # Check job status
 curl http://localhost:3000/api/v1/jobs/{job-id} \
@@ -655,6 +718,7 @@ curl http://localhost:3000/api/v1/jobs/{job-id} \
 ```
 
 3. **Check metrics**:
+
 ```bash
 curl http://localhost:3000/metrics | grep taskflow_jobs
 ```
@@ -679,6 +743,7 @@ For mature production systems, follow these principles:
 ### Production Tools
 
 For real production chaos engineering:
+
 - **Chaos Mesh** - Kubernetes-native chaos engineering
 - **Pumba** - Docker chaos testing
 - **Gremlin** - Commercial chaos engineering platform
@@ -727,6 +792,7 @@ For real production chaos engineering:
 
 **Issue**: Jobs stuck in PROCESSING
 **Fix**: Manually reset leases:
+
 ```sql
 UPDATE jobs SET status = 'QUEUED', worker_id = NULL, lease_id = NULL
 WHERE status = 'PROCESSING' AND lease_expires_at < NOW();
@@ -734,12 +800,14 @@ WHERE status = 'PROCESSING' AND lease_expires_at < NOW();
 
 **Issue**: Redis streams not recreating
 **Fix**: Manually recreate consumer group:
+
 ```bash
 docker exec taskflow-redis redis-cli XGROUP CREATE taskflow:queue:default taskflow-workers 0 MKSTREAM
 ```
 
 **Issue**: Workers not picking up jobs
 **Fix**: Restart workers:
+
 ```bash
 docker-compose restart taskflow-worker-1
 ```
@@ -804,6 +872,6 @@ Chaos testing validates that Resilient TaskFlow's failure handling works in prac
 ✅ **Service restarts** - Automatic reconnection and recovery  
 ✅ **Network issues** - Graceful degradation and retry  
 ✅ **Resource limits** - Backpressure and eviction policies  
-✅ **Data issues** - DLQ and error handling  
+✅ **Data issues** - DLQ and error handling
 
 Run chaos tests regularly to maintain confidence in system resilience.

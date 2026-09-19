@@ -1,3 +1,5 @@
+> Historical snapshot only. Claims and numbers below are not current acceptance evidence; use the root README and executable gates.
+
 # TaskFlow Final Portfolio Audit
 
 **Date:** January 2024  
@@ -14,12 +16,14 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 ### Overall Portfolio Grade: **B+ (8.5/10)**
 
 **Standout Strengths:**
+
 - 🎯 **World-class documentation** (2500+ lines across 4 comprehensive docs)
 - 🏗️ **Deep systems thinking** (architecture review, adversarial testing, benchmarking)
 - 📊 **Production awareness** (honest about limitations, P0 issues documented)
 - 🔧 **Real engineering** (not another CRUD app, infrastructure-level thinking)
 
 **Critical Weakness:**
+
 - ❌ **Worker implementation incomplete** (0% - only Dockerfile exists)
 - ⚠️ **Cannot run end-to-end** (API works, but no workers to process jobs)
 
@@ -42,24 +46,24 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 
 ## Scoring Summary
 
-| Dimension | Score | Grade | Assessment |
-|-----------|-------|-------|------------|
-| **Engineering Depth** | 9/10 | A | Exceptional architecture analysis, deep understanding |
-| **Backend Depth** | 7/10 | B- | Good API design, missing worker implementation |
-| **Distributed Systems** | 9/10 | A | Strong consistency model, failure analysis, benchmarking |
-| **Scalability** | 8/10 | B+ | Bottleneck analysis, worker scaling, performance data |
-| **Reliability** | 6/10 | C | Good patterns, but P0 bugs documented |
-| **Testing** | 3/10 | D | Test stubs exist, no real tests |
-| **Observability** | 8/10 | B+ | Metrics, logging, tracing ready, Grafana dashboards |
-| **DevOps** | 9/10 | A | Terraform, Docker, CI/CD ready, AWS architecture |
-| **Code Quality** | 7/10 | B- | Clean API code, hardcoded auth, missing worker |
-| **Resume Value** | 9/10 | A | Strong differentiator, not CRUD, systems-level |
-| **Interview Value** | 8/10 | B+ | Great for design discussions, less for live coding |
+| Dimension               | Score | Grade | Assessment                                               |
+| ----------------------- | ----- | ----- | -------------------------------------------------------- |
+| **Engineering Depth**   | 9/10  | A     | Exceptional architecture analysis, deep understanding    |
+| **Backend Depth**       | 7/10  | B-    | Good API design, missing worker implementation           |
+| **Distributed Systems** | 9/10  | A     | Strong consistency model, failure analysis, benchmarking |
+| **Scalability**         | 8/10  | B+    | Bottleneck analysis, worker scaling, performance data    |
+| **Reliability**         | 6/10  | C     | Good patterns, but P0 bugs documented                    |
+| **Testing**             | 3/10  | D     | Test stubs exist, no real tests                          |
+| **Observability**       | 8/10  | B+    | Metrics, logging, tracing ready, Grafana dashboards      |
+| **DevOps**              | 9/10  | A     | Terraform, Docker, CI/CD ready, AWS architecture         |
+| **Code Quality**        | 7/10  | B-    | Clean API code, hardcoded auth, missing worker           |
+| **Resume Value**        | 9/10  | A     | Strong differentiator, not CRUD, systems-level           |
+| **Interview Value**     | 8/10  | B+    | Great for design discussions, less for live coding       |
 
 **Overall Average:** **7.5/10** (B+)
 
 **Weighted Score (Documentation Impact):** **8.5/10** (A-)  
-*Weighs documentation/architecture thinking higher for senior/systems roles*
+_Weighs documentation/architecture thinking higher for senior/systems roles_
 
 ---
 
@@ -70,29 +74,35 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 **Perspective:** Looking for **systems thinking**, **scale awareness**, and **production rigor**.
 
 **Initial Reaction:**
+
 > "This is not your typical portfolio project. The architecture review alone shows more depth than most candidates with 2-3 YOE. The honest documentation of race conditions and failure scenarios is exactly what we look for."
 
 **Strengths:**
+
 - ✅ **Systems design depth** - PostgreSQL vs Redis trade-offs understood
 - ✅ **Scale thinking** - Benchmarked to 10K jobs/min, identified bottlenecks
 - ✅ **Production awareness** - P0 issues documented, not hidden
 - ✅ **Documentation quality** - 2500+ lines of technical depth
 
 **Concerns:**
+
 - ❌ **Incomplete implementation** - Worker code at 0%
 - ❌ **Low test coverage** - No real tests
 - ⚠️ **Cannot demo live** - Can start API but no job processing
 
 **Scoring:**
+
 - Engineering Depth: **9/10** (exceptional for portfolio)
 - Backend Depth: **7/10** (good API, missing core)
 - Testing: **3/10** (critical gap)
 - Code Quality: **7/10** (good where it exists)
 
 **Recommendation:**
+
 > "**Phone screen: Yes.** This shows architectural maturity beyond their YOE. In the interview, I'd focus on the design decisions and ask them to defend trade-offs. The incomplete implementation is acceptable for a portfolio project if they can articulate why."
 
 **Would advance to onsite?** **Yes**, if candidate demonstrates:
+
 1. Understanding of documented race conditions
 2. Ability to discuss PostgreSQL vs Redis trade-offs
 3. Awareness of scalability bottlenecks
@@ -107,29 +117,35 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 **Perspective:** Looking for **ownership**, **delivery**, **customer obsession**, **dive deep**.
 
 **Initial Reaction:**
+
 > "I appreciate the depth of documentation, but Amazon values 'bias for action' and 'deliver results'. A project that's 80% documentation and 20% code raises questions about execution. That said, the documentation itself is a deliverable."
 
 **Strengths:**
+
 - ✅ **Ownership** - Comprehensive project, not a tutorial follow-along
 - ✅ **Dive deep** - 500+ line architecture review shows depth
 - ✅ **Think big** - Designed for 10K jobs/min, AWS deployment
 - ✅ **Customer obsession** - API documentation, OpenAPI spec
 
 **Concerns:**
+
 - ❌ **Deliver results** - Worker not implemented (cannot process jobs)
 - ❌ **Bias for action** - Spent 4 phases on docs, 0 on core worker
 - ⚠️ **Insist on highest standards** - Hardcoded credentials in code
 
 **Scoring:**
+
 - Engineering Depth: **9/10** (dive deep ✅)
 - Backend Depth: **6/10** (execution gap)
 - Reliability: **5/10** (documented issues, not fixed)
 - DevOps: **9/10** (AWS Terraform strong)
 
 **Recommendation:**
+
 > "**Phone screen: Maybe.** I'd want to understand why they prioritized documentation over implementation. If they can demonstrate strong coding ability in the interview and explain this as a strategic choice (e.g., design-first approach), then acceptable."
 
 **Would advance to onsite?** **Conditional**, if candidate:
+
 1. Passes coding screen strongly (proves execution ability)
 2. Explains documentation-first as intentional strategy
 3. Shows working API code is production-quality
@@ -144,26 +160,31 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 **Perspective:** Looking for **technical excellence**, **collaboration**, **growth mindset**.
 
 **Initial Reaction:**
+
 > "Microsoft values breadth across the stack. This project shows excellent backend understanding (API, database, queue, events) and strong DevOps skills (Terraform, Docker). The infrastructure-as-code is particularly impressive."
 
 **Strengths:**
+
 - ✅ **Technical breadth** - TypeScript, PostgreSQL, Redis, Kafka, AWS, Terraform
 - ✅ **Documentation** - Strong communication skills (critical for collaboration)
 - ✅ **Growth mindset** - Honest about limitations, roadmap to fix
 - ✅ **Cloud skills** - Azure-equivalent AWS knowledge
 
 **Concerns:**
+
 - ⚠️ **Worker incomplete** - Core logic missing
 - ⚠️ **No C#/.NET** - Microsoft stack preferred but not required
 - ⚠️ **Testing gaps** - Test-driven development not demonstrated
 
 **Scoring:**
+
 - Engineering Depth: **9/10** (strong)
 - Backend Depth: **7/10** (good)
 - DevOps: **9/10** (excellent)
 - Code Quality: **7/10** (good structure)
 
 **Recommendation:**
+
 > "**Phone screen: Yes.** This candidate demonstrates strong fundamentals and communication skills. Microsoft values engineers who can design systems AND explain them clearly. The documentation quality suggests they'd excel in design reviews and cross-team collaboration."
 
 **Would advance to onsite?** **Yes**, this is exactly the kind of project that sparks good design discussions.
@@ -177,9 +198,11 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 **Perspective:** Looking for **versatility**, **fast execution**, **cost awareness**, **pragmatism**.
 
 **Initial Reaction:**
+
 > "This shows a solid understanding of production systems, which is rare in junior candidates. The AWS cost estimates ($884/month) show business awareness. But for a startup, I need someone who can ship features quickly."
 
 **Strengths:**
+
 - ✅ **Full-stack thinking** - API, database, infrastructure, monitoring
 - ✅ **Cost awareness** - Estimated AWS costs, capacity planning
 - ✅ **Modern stack** - TypeScript, Node.js, PostgreSQL (our stack!)
@@ -187,11 +210,13 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - ✅ **Self-documenting** - Can onboard team members with this documentation
 
 **Concerns:**
+
 - ❌ **Slow execution** - 4 phases on docs, worker still at 0%
 - ❌ **Over-engineering?** - Do we need Kafka for 1000 jobs/day?
 - ⚠️ **Testing culture** - No tests = will break in production
 
 **Scoring:**
+
 - Engineering Depth: **9/10** (impressive)
 - Backend Depth: **7/10** (good but incomplete)
 - Scalability: **8/10** (good thinking)
@@ -199,9 +224,11 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - Resume Value: **9/10** (stands out)
 
 **Recommendation:**
+
 > "**Interview: Yes.** For a senior role (3-5 YOE), this demonstrates strong architectural thinking that would be valuable for mentoring juniors and designing our queue system. For a junior role (0-2 YOE), I'd want to see faster execution but the depth is impressive."
 
 **Would hire?** **Yes for mid-level**, if they can:
+
 1. Complete worker implementation in 1-2 weeks (proof of execution)
 2. Demonstrate pragmatism (when to use Kafka vs simple Redis)
 3. Write tests (non-negotiable for us)
@@ -215,9 +242,11 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 **Perspective:** Evaluating **API design**, **database modeling**, **error handling**, **security**.
 
 **Initial Reaction:**
+
 > "The API design is solid. Fastify setup with proper middleware, rate limiting with sliding window, idempotency, structured error responses. This candidate understands production backend engineering."
 
 **Strengths:**
+
 - ✅ **REST API design** - Proper HTTP methods, status codes, headers
 - ✅ **Middleware chain** - Auth, rate limiting, logging, error handling
 - ✅ **Database schema** - Proper indexes, optimistic locking, versioning
@@ -227,18 +256,21 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - ✅ **Security basics** - Helmet, CORS, request validation
 
 **Concerns:**
+
 - ❌ **Hardcoded credentials** - `test-api-key`, `valid-jwt-token` in code
 - ❌ **No input sanitization** - Zod only, no payload size limits
 - ❌ **N+1 queries** - Potential in job listing endpoints
 - ⚠️ **Worker missing** - Cannot evaluate full system
 
 **Scoring:**
+
 - Backend Depth: **8/10** (strong API design)
 - Code Quality: **7/10** (good patterns, some issues)
 - Security: **5/10** (basics good, critical issues)
 - Observability: **8/10** (good logging, metrics)
 
 **Interview Questions I'd Ask:**
+
 1. "Why PostgreSQL as source of truth instead of Redis?"
 2. "Walk me through the race condition you documented (RACE-6)"
 3. "How would you implement exactly-once delivery?"
@@ -246,6 +278,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 5. "What happens if PostgreSQL goes down during job submission?"
 
 **Expected Answers:**
+
 - Strong understanding of consistency vs availability trade-offs
 - Can articulate the worker crash scenario clearly
 - Knows exactly-once requires distributed transactions (complex)
@@ -253,6 +286,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - Should describe graceful degradation or circuit breaker
 
 **Recommendation:**
+
 > "**Hire for backend role: Likely yes**, if they can answer design questions well and demonstrate coding ability. The documented issues show self-awareness, which is valuable."
 
 **Backend Fit:** **8/10** (strong fundamentals, good production awareness)
@@ -264,9 +298,11 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 **Perspective:** Evaluating **consistency models**, **failure handling**, **consensus**, **scalability**.
 
 **Initial Reaction:**
+
 > "Wow. This is one of the best portfolio projects I've seen for demonstrating distributed systems understanding. The adversarial review that stress-tests failure scenarios is exactly how we think about systems at scale."
 
 **Strengths:**
+
 - ✅ **Consistency model** - Clearly documented (at-least-once, not exactly-once)
 - ✅ **Failure analysis** - 18 adversarial scenarios tested
 - ✅ **Race condition awareness** - RACE-6 documented with sequence diagram
@@ -277,17 +313,20 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - ✅ **Benchmarking** - Real performance numbers, not guesses
 
 **Concerns:**
+
 - ⚠️ **Two-phase commit not implemented** - Documented but not fixed
 - ⚠️ **No distributed tracing** - Hard to debug across components
 - ⚠️ **Single-region only** - No multi-region failover
 
 **Scoring:**
+
 - Distributed Systems: **9/10** (exceptional for portfolio)
 - Scalability: **8/10** (good analysis)
 - Reliability: **7/10** (patterns understood, not all implemented)
 - Engineering Depth: **10/10** (honestly, this is grad-level thinking)
 
 **Interview Questions I'd Ask:**
+
 1. "Explain the CAP theorem trade-offs in your design" (CP system, sacrifices availability)
 2. "How would you implement exactly-once delivery?" (2PC, Kafka Streams, idempotency)
 3. "What's the maximum throughput before PostgreSQL becomes bottleneck?" (10K jobs/min)
@@ -295,6 +334,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 5. "What happens if Redis loses data after XADD but before PostgreSQL commit?" (Job lost, need transaction coordinator)
 
 **Expected Answers:**
+
 - Should explain PostgreSQL = CP (consistent, not available during partition)
 - Knows 2PC is expensive, might suggest idempotency instead
 - Already documented bottleneck at 10K jobs/min
@@ -302,6 +342,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - Acknowledges this is a known issue (job loss scenario)
 
 **Recommendation:**
+
 > "**Hire for distributed systems role: Strong yes**, with caveat that implementation is incomplete. In the interview, I'd focus on design discussions and ask them to extend the system (e.g., add multi-region support). The depth of thinking is already there."
 
 **Distributed Systems Fit:** **9/10** (rare to see this level of analysis in portfolio)
@@ -315,6 +356,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 **What This Measures:** Breadth and depth of engineering thinking beyond writing code.
 
 **Evidence:**
+
 - ✅ **Architecture Review** (500+ lines) - Principal engineer-level analysis
 - ✅ **Adversarial Review** (500+ lines) - 18 failure scenarios tested
 - ✅ **Benchmark Report** (600+ lines) - Performance analysis with real numbers
@@ -323,10 +365,12 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - ✅ **Bottleneck analysis** - PostgreSQL TPS, Redis single-threaded, worker scaling
 
 **Why 9/10 (not 10/10):**
+
 - Missing: Actual implementation of complex parts (worker, consensus)
 - Missing: Real-world battle scars (this is theoretical, not production-tested)
 
 **Comparison:**
+
 - **Typical portfolio:** 1-2 page README
 - **This project:** 2500+ lines of technical analysis
 - **Grade:** **A** (top 5% of portfolios)
@@ -339,6 +383,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 
 **Evidence:**
 ✅ **Strong:**
+
 - REST API design (proper HTTP methods, status codes)
 - Middleware chain (auth, rate limiting, logging, error handling)
 - Database schema (indexes, foreign keys, optimistic locking)
@@ -347,17 +392,20 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - OpenAPI documentation
 
 ⚠️ **Gaps:**
+
 - Worker implementation incomplete (0%)
 - Hardcoded authentication credentials
 - No input sanitization beyond Zod
 - Potential N+1 queries
 
 **Why 7/10:**
+
 - API server is solid (8/10)
 - Worker missing entirely (0/10)
 - Average: 4/10, but weighted toward "demonstrates capability" → 7/10
 
 **Comparison:**
+
 - **Junior candidate expectation:** 6/10 (basic CRUD API)
 - **This project:** 7/10 (production patterns, but incomplete)
 - **Grade:** **B-** (above average but gaps)
@@ -370,6 +418,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 
 **Evidence:**
 ✅ **Exceptional:**
+
 - Consistency model documented (at-least-once with caveats)
 - Failure analysis (Redis down, PostgreSQL down, worker crash, network partition)
 - Race condition documented (RACE-6 with sequence diagram)
@@ -379,18 +428,21 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - Benchmark data (10K jobs/min peak, PostgreSQL bottleneck)
 
 ⚠️ **Not Covered:**
+
 - Multi-region failover
 - Split-brain scenarios
 - Consensus algorithms (Raft, Paxos)
 - Vector clocks / causal ordering
 
 **Why 9/10:**
+
 - Demonstrates deep understanding of failure modes
 - Honest about limitations (not exactly-once)
 - Trade-offs clearly explained
 - Missing: Multi-datacenter complexity
 
 **Comparison:**
+
 - **Typical portfolio:** Calls system "distributed" because it has Redis
 - **This project:** Actually analyzes consistency, failure modes, race conditions
 - **Grade:** **A** (top 2% of portfolios)
@@ -403,6 +455,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 
 **Evidence:**
 ✅ **Strong:**
+
 - Worker scaling analysis (1/3/5/10/20 workers tested)
 - Perfect linear scaling identified (1-10 workers)
 - Diminishing returns identified (10-20 workers)
@@ -412,17 +465,20 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - Capacity planning (cost per 1M jobs calculated)
 
 ⚠️ **Gaps:**
+
 - No actual load test execution (theoretical numbers)
 - No database sharding implementation
 - No Redis Cluster setup
 - No auto-scaling configuration
 
 **Why 8/10:**
+
 - Thinking is excellent (9/10)
 - Execution is theoretical (7/10)
 - Average weighted toward thinking: 8/10
 
 **Comparison:**
+
 - **Typical portfolio:** "Can scale horizontally" (no proof)
 - **This project:** Analyzed scaling to 10 workers, identified bottleneck, proposed solutions
 - **Grade:** **B+** (strong analysis, needs execution)
@@ -435,6 +491,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 
 **Evidence:**
 ✅ **Good Patterns:**
+
 - At-least-once delivery guarantee
 - Idempotent submission (prevents duplicate jobs from clients)
 - Worker recovery (stale job reclamation)
@@ -443,6 +500,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - Graceful shutdown (completes in-flight jobs)
 
 ❌ **Critical Issues:**
+
 - P0: Race condition allows duplicate execution (RACE-6)
 - P0: Hardcoded credentials (security vulnerability)
 - P0: Redis messages not acknowledged (memory leak)
@@ -452,11 +510,13 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - P1: No backpressure (unbounded queue growth)
 
 **Why 6/10:**
+
 - Design patterns are good (8/10)
 - Critical bugs documented but not fixed (4/10)
 - Average: 6/10
 
 **Comparison:**
+
 - **Typical portfolio:** No failure testing
 - **This project:** Documented 6 P0 issues honestly
 - **Grade:** **C** (patterns understood, execution incomplete)
@@ -469,22 +529,26 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 
 **Evidence:**
 ✅ **Exists:**
+
 - Test infrastructure (Vitest configured)
 - Test stubs (test files exist)
 - Load test framework (k6 scripts written)
 
 ❌ **Missing:**
+
 - No unit tests (0 actual tests)
 - No integration tests (0 actual tests)
 - No E2E tests (0 actual tests)
 - Load tests not executed (scripts exist, not run)
 
 **Why 3/10 (not 0/10):**
+
 - Infrastructure exists (+2)
 - Load test scripts written (+1)
 - No actual tests (-7)
 
 **Comparison:**
+
 - **Typical portfolio:** No tests (0/10)
 - **Good portfolio:** 50-70% unit coverage (7/10)
 - **This project:** Test-ready but not tested (3/10)
@@ -498,6 +562,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 
 **Evidence:**
 ✅ **Strong:**
+
 - Prometheus metrics (jobs/sec, latency, queue depth, worker utilization)
 - Grafana dashboards (4 dashboards designed)
 - Structured logging (Pino with JSON output)
@@ -507,17 +572,20 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - Rate limit headers (X-RateLimit-*)
 
 ⚠️ **Gaps:**
+
 - OpenTelemetry not connected to backend (Jaeger/Tempo)
 - No APM integration (Sentry, Datadog)
 - No error reporting
 - No alerting rules defined
 
 **Why 8/10:**
+
 - Metrics and logging excellent (9/10)
 - Tracing and APM missing (6/10)
 - Average: 7.5/10 → 8/10
 
 **Comparison:**
+
 - **Typical portfolio:** console.log() everywhere (2/10)
 - **Good portfolio:** Basic logging + metrics (6/10)
 - **This project:** Production-grade observability stack (8/10)
@@ -531,6 +599,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 
 **Evidence:**
 ✅ **Excellent:**
+
 - Infrastructure as Code (Terraform)
 - AWS architecture (VPC, RDS, ElastiCache, MSK, ECS, ALB)
 - Multi-AZ deployment (high availability)
@@ -541,17 +610,20 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - GitHub Actions ready (CI/CD structure)
 
 ⚠️ **Gaps:**
+
 - No actual CI/CD pipelines (YAML files don't exist)
 - No deployment automation (manual terraform apply)
 - No blue-green deployment
 - No canary releases
 
 **Why 9/10:**
+
 - Infrastructure code complete (10/10)
 - CI/CD not implemented (7/10)
 - Weighted toward IaC: 9/10
 
 **Comparison:**
+
 - **Typical portfolio:** "Deploy to Heroku" (3/10)
 - **Good portfolio:** Docker + basic deployment (6/10)
 - **This project:** Production AWS architecture (9/10)
@@ -565,6 +637,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 
 **Evidence:**
 ✅ **Good:**
+
 - Clear structure (apps, packages separation)
 - TypeScript strict mode
 - Proper abstractions (repository pattern, middleware)
@@ -573,17 +646,20 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - Good naming (mostly)
 
 ❌ **Issues:**
+
 - Hardcoded credentials (critical)
 - Magic numbers (30000, 10000)
 - Some inconsistent naming
 - Worker code missing entirely
 
 **Why 7/10:**
+
 - API code quality: 8/10
 - Worker code: 0/10 (doesn't exist)
 - Weighted average: 7/10
 
 **Comparison:**
+
 - **Typical portfolio:** Inconsistent, no linting (5/10)
 - **Good portfolio:** Clean, tested, linted (8/10)
 - **This project:** Good where it exists, incomplete (7/10)
@@ -597,6 +673,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 
 **Evidence:**
 ✅ **Strong Differentiator:**
+
 - Not another CRUD app (stands out)
 - Infrastructure-level project (systems engineering)
 - Distributed systems depth (rare)
@@ -606,6 +683,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - Honest about limitations (maturity)
 
 **Keywords Covered:**
+
 - TypeScript, Node.js, PostgreSQL, Redis, Kafka ✅
 - Distributed systems, async processing, queues ✅
 - Docker, Terraform, AWS, ECS ✅
@@ -613,10 +691,12 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - REST APIs, rate limiting, authentication ✅
 
 **Why 9/10:**
+
 - Exceptional differentiation (10/10)
 - Implementation incomplete hurts slightly (-1)
 
 **Comparison:**
+
 - **Typical portfolio:** CRUD app #47 (3/10)
 - **Good portfolio:** Full-stack app with auth (6/10)
 - **Excellent portfolio:** Distributed cache, URL shortener (7/10)
@@ -631,6 +711,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 
 **Evidence:**
 ✅ **Great for:**
+
 - System design discussions (deep material)
 - Trade-off explanations (CP vs AP, PostgreSQL vs Redis)
 - Failure scenario discussions (RACE-6, worker crash)
@@ -638,6 +719,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - Architecture discussions (dual-source design)
 
 ⚠️ **Less Useful for:**
+
 - Live coding (worker not implemented)
 - Debugging exercises (cannot run end-to-end)
 - Code walkthrough (API only, worker missing)
@@ -645,36 +727,42 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 **Interview Scenarios:**
 
 **Scenario 1: System Design Round**
+
 - **Value: 10/10** - Can reference actual design decisions
 - "Walk me through your task queue design"
 - "How did you ensure at-least-once delivery?"
 - "What are the scalability bottlenecks?"
 
 **Scenario 2: Architecture Review**
+
 - **Value: 10/10** - Already documented
 - "What happens if Redis goes down?"
 - "How do you prevent duplicate execution?"
 - "Why PostgreSQL as source of truth?"
 
 **Scenario 3: Coding Round**
+
 - **Value: 5/10** - Cannot show worker implementation
 - "Implement the job processor"
 - "Add retry logic"
 - "Handle worker crash recovery"
 
 **Scenario 4: Behavioral Round**
+
 - **Value: 9/10** - Great for STAR stories
 - "Tell me about a complex technical problem you solved"
 - "Describe a time you identified a critical bug"
 - "How do you approach system design?"
 
 **Why 8/10:**
+
 - Design discussions: 10/10
 - Coding demonstrations: 5/10
 - Behavioral stories: 9/10
 - Weighted average: 8/10
 
 **Comparison:**
+
 - **Typical portfolio:** Nothing to discuss (2/10)
 - **Good portfolio:** Can walk through features (6/10)
 - **This project:** Deep design discussions (8/10)
@@ -687,18 +775,21 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 ### 1. Documentation Excellence (Top 1%)
 
 **2500+ lines of technical documentation:**
+
 - README.md (900 lines)
 - ARCHITECTURE_REVIEW.md (500 lines)
 - ADVERSARIAL_REVIEW.md (500 lines)
 - BENCHMARK_REPORT.md (600 lines)
 
 **Why This Matters:**
+
 - Shows **communication skills** (critical for senior roles)
 - Demonstrates **systems thinking** (not just coding)
 - Proves **production awareness** (failure scenarios, trade-offs)
 - Provides **interview material** (design discussions)
 
 **Recruiter Impact:**
+
 > "Most candidates can't explain their design decisions. This candidate has already written 2500 lines explaining them. That's rare."
 
 ---
@@ -706,6 +797,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 ### 2. Systems Engineering Depth (Top 2%)
 
 **Rare for portfolio projects:**
+
 - Race condition analysis (RACE-6 with sequence diagram)
 - Consistency model (at-least-once, not exactly-once)
 - Failure scenarios (18 adversarial tests)
@@ -713,11 +805,13 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - Scalability testing (worker scaling 1-20)
 
 **Why This Matters:**
+
 - Most portfolios are **CRUD apps** (create, read, update, delete)
 - This is **infrastructure-level** (queue, coordination, consistency)
 - Shows ability to **think about scale** (not just features)
 
 **Recruiter Impact:**
+
 > "This is not a typical bootcamp project. This shows graduate-level distributed systems thinking."
 
 ---
@@ -725,17 +819,20 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 ### 3. Production Awareness (Top 5%)
 
 **Honest documentation of limitations:**
+
 - 6 P0 issues clearly documented
 - Trade-offs explained (at-least-once vs exactly-once)
 - Bottlenecks identified (PostgreSQL at 10K jobs/min)
 - Cost estimated ($884/month AWS)
 
 **Why This Matters:**
+
 - Shows **maturity** (not hiding problems)
 - Demonstrates **debugging mindset** (found issues)
 - Proves **production thinking** (not just happy path)
 
 **Recruiter Impact:**
+
 > "The fact that they documented the race condition instead of hiding it shows integrity and depth of understanding. I trust this candidate more than someone with a 'perfect' portfolio."
 
 ---
@@ -743,16 +840,19 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 ### 4. Modern Tech Stack (Hiring Market Aligned)
 
 **Technologies:**
+
 - TypeScript, Node.js, PostgreSQL, Redis, Kafka
 - Docker, Terraform, AWS, ECS
 - Prometheus, Grafana, OpenTelemetry
 
 **Why This Matters:**
+
 - Matches **Indian backend market** (TypeScript, Node, PostgreSQL, Redis)
 - Shows **DevOps skills** (Terraform, Docker, AWS)
 - Demonstrates **observability** (Prometheus, Grafana)
 
 **Recruiter Impact:**
+
 > "This tech stack maps directly to our requirements. We use TypeScript, PostgreSQL, Redis, and AWS. This candidate would onboard quickly."
 
 ---
@@ -760,6 +860,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 ### 5. Infrastructure as Code (Top 10%)
 
 **Complete Terraform setup:**
+
 - VPC with multi-AZ subnets
 - RDS PostgreSQL (Multi-AZ, encrypted)
 - ElastiCache Redis (replication, failover)
@@ -768,11 +869,13 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 - ALB (load balancing)
 
 **Why This Matters:**
+
 - Most portfolios: "Deploy to Heroku" (3/10)
 - This project: Production AWS architecture (9/10)
 - Shows **infrastructure thinking** (not just app code)
 
 **Recruiter Impact:**
+
 > "Platform engineering teams would be interested in this candidate. The Terraform alone is more than most candidates with 2-3 YOE."
 
 ---
@@ -784,6 +887,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 **Status:** 0% complete (only Dockerfile exists)
 
 **Impact:**
+
 - ❌ Cannot run end-to-end demo
 - ❌ Cannot process jobs (API accepts, but nothing happens)
 - ❌ Cannot validate architecture decisions
@@ -792,11 +896,13 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 **Severity:** **CRITICAL** for Amazon-style "deliver results" culture
 
 **Mitigation:**
+
 - Complete worker implementation (4-6 weeks)
 - Or clearly state "design-focused portfolio" upfront
 - Or record video demo showing API + mock worker
 
 **Recruiter Reaction:**
+
 - Google: "Acceptable for design discussions"
 - Amazon: "Red flag for delivery culture"
 - Microsoft: "Okay if depth is strong elsewhere"
@@ -809,6 +915,7 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 **Status:** Test infrastructure exists, 0 actual tests
 
 **Impact:**
+
 - ❌ Cannot prove correctness
 - ❌ No TDD demonstration
 - ❌ Production deployment risky
@@ -817,12 +924,14 @@ TaskFlow is evaluated from six recruiter perspectives: Google SDE, Amazon SDE, M
 **Severity:** **HIGH** for quality-focused roles
 
 **Mitigation:**
+
 - Add 20-30 unit tests (1-2 days)
 - Add 5-10 integration tests (2-3 days)
 - Add 1-2 E2E tests (1 day)
 - Target: 50-70% coverage minimum
 
 **Recruiter Reaction:**
+
 - All companies: "Testing is non-negotiable for production code"
 
 ---
@@ -837,6 +946,7 @@ if (token === 'valid-jwt-token') { ... }
 ```
 
 **Impact:**
+
 - ❌ Security vulnerability
 - ❌ Cannot demo with real users
 - ❌ Shows lack of security awareness (or poor prioritization)
@@ -844,11 +954,13 @@ if (token === 'valid-jwt-token') { ... }
 **Severity:** **HIGH** for security-conscious companies
 
 **Mitigation:**
+
 - Implement proper JWT validation (1-2 days)
 - Or database-backed API keys (2-3 days)
 - Add prominent warning in README
 
 **Recruiter Reaction:**
+
 - Security teams: "Red flag - security basics missing"
 - Others: "Acceptable for portfolio if documented"
 
@@ -859,6 +971,7 @@ if (token === 'valid-jwt-token') { ... }
 **Problem:** API works, but no workers = jobs never complete
 
 **Impact:**
+
 - ❌ Cannot show to recruiters
 - ❌ Cannot record demo video
 - ❌ Cannot verify architecture works
@@ -867,6 +980,7 @@ if (token === 'valid-jwt-token') { ... }
 **Severity:** **MEDIUM** for presentation
 
 **Mitigation:**
+
 - Implement basic worker (1-2 weeks)
 - Or record video with mock worker
 - Or create detailed walkthrough document
@@ -878,6 +992,7 @@ if (token === 'valid-jwt-token') { ... }
 **Problem:** 80% documentation, 20% implementation
 
 **Impact:**
+
 - ⚠️ "Can they execute or just design?"
 - ⚠️ Amazon-style companies penalize
 - ⚠️ May seem like academic exercise
@@ -885,11 +1000,13 @@ if (token === 'valid-jwt-token') { ... }
 **Severity:** **LOW-MEDIUM** depending on company culture
 
 **Mitigation:**
+
 - Complete worker implementation
 - Emphasize this was intentional (design-first approach)
 - Show strong coding skills in interview
 
 **Recruiter Reaction:**
+
 - Design-heavy roles: "Perfect, exactly what we need"
 - Execution-heavy roles: "Concerning, need proof of delivery"
 
@@ -906,6 +1023,7 @@ Ranked by **portfolio impact** (not just technical correctness).
 **Effort:** 4-6 weeks
 
 **Impact:** **10/10**
+
 - Unlocks end-to-end demo (massive credibility boost)
 - Proves execution ability (addresses #1 weakness)
 - Validates architecture (does the design actually work?)
@@ -913,6 +1031,7 @@ Ranked by **portfolio impact** (not just technical correctness).
 - Completes the story (no longer "incomplete")
 
 **Why This Matters:**
+
 - Transforms project from "80% docs" to "complete system"
 - Removes biggest objection from execution-focused companies
 - Allows recording demo video for recruiters
@@ -920,10 +1039,12 @@ Ranked by **portfolio impact** (not just technical correctness).
 **Priority:** **CRITICAL**
 
 **Recruiter Impact:**
+
 - Amazon: 6/10 → 9/10 (delivery demonstrated)
 - All others: +1-2 points (completeness)
 
 **Implementation Checklist:**
+
 ```
 [ ] Job processor (fetch from Redis, execute handler)
 [ ] Lease manager (acquire, renew, release)
@@ -944,6 +1065,7 @@ Ranked by **portfolio impact** (not just technical correctness).
 **Effort:** 1-2 weeks
 
 **Impact:** **9/10**
+
 - Demonstrates testing discipline (professional practice)
 - Proves correctness (does it actually work?)
 - Shows TDD understanding (test-first mindset)
@@ -951,6 +1073,7 @@ Ranked by **portfolio impact** (not just technical correctness).
 - Unlocks CI/CD (tests gate deployment)
 
 **Why This Matters:**
+
 - Testing is **non-negotiable** for production code
 - Most portfolios have 0 tests (easy differentiation)
 - Shows professional software engineering practices
@@ -958,11 +1081,13 @@ Ranked by **portfolio impact** (not just technical correctness).
 **Priority:** **HIGH**
 
 **Test Coverage Targets:**
+
 - Unit tests: 70% (focus on business logic)
 - Integration tests: Key paths (API → DB, Worker → Redis)
 - E2E tests: 1-2 smoke tests (submit job → complete)
 
 **Implementation Checklist:**
+
 ```
 [ ] API route tests (20-30 tests)
 [ ] Middleware tests (10-15 tests)
@@ -973,6 +1098,7 @@ Ranked by **portfolio impact** (not just technical correctness).
 ```
 
 **Recruiter Impact:**
+
 - All companies: +2 points (professional practices)
 - Testing score: 3/10 → 8/10
 
@@ -985,12 +1111,14 @@ Ranked by **portfolio impact** (not just technical correctness).
 **Effort:** 2-3 days
 
 **Impact:** **7/10**
+
 - Removes security red flag (basic hygiene)
 - Enables real user testing (no longer test-only)
 - Shows security awareness (important for trust)
 - Relatively quick win (2-3 days)
 
 **Why This Matters:**
+
 - Hardcoded credentials are **embarrassing** in interviews
 - Security teams will reject outright
 - Easy to fix, high perception improvement
@@ -998,7 +1126,9 @@ Ranked by **portfolio impact** (not just technical correctness).
 **Priority:** **HIGH**
 
 **Options:**
+
 1. **JWT with jose** (recommended)
+
    ```typescript
    import { jwtVerify } from 'jose';
    const { payload } = await jwtVerify(token, secret);
@@ -1012,6 +1142,7 @@ Ranked by **portfolio impact** (not just technical correctness).
    ```
 
 **Recruiter Impact:**
+
 - Security-conscious companies: Blocker removed
 - Code quality score: 7/10 → 8/10
 
@@ -1024,12 +1155,14 @@ Ranked by **portfolio impact** (not just technical correctness).
 **Effort:** 4-6 hours (1 day)
 
 **Impact:** **8/10**
+
 - Makes portfolio **shareable** (send to recruiters)
 - Shows **communication skills** (critical for senior roles)
 - Provides **interview prep** (practice explaining design)
 - Works even if worker incomplete (can mock)
 
 **Why This Matters:**
+
 - Recruiters won't read 2500 lines of docs
 - Video is **scannable** (watch 2x speed)
 - Shows **presentation skills** (valuable for collaboration)
@@ -1037,37 +1170,40 @@ Ranked by **portfolio impact** (not just technical correctness).
 **Priority:** **MEDIUM** (high impact for low effort)
 
 **Content Structure:**
+
 ```
 1. Introduction (1 min)
    - What is TaskFlow?
    - Why this project exists
-   
+
 2. Architecture (3-4 min)
    - Draw diagram on whiteboard
    - Explain PostgreSQL as truth + Redis for delivery
    - Explain worker lease coordination
-   
+
 3. Demo (2-3 min)
    - Show API submitting job
    - Show Grafana metrics
    - Show database records
    - (Mock worker if not complete)
-   
+
 4. Failure Scenarios (2 min)
    - Explain RACE-6
    - Walk through Redis down scenario
-   
+
 5. Conclusion (1 min)
    - Key learnings
    - What's next
 ```
 
 **Tools:**
+
 - Loom (screen recording)
 - OBS (if you want picture-in-picture)
 - Excalidraw (draw architecture)
 
 **Recruiter Impact:**
+
 - Resume value: 9/10 → 10/10 (shareable)
 - Interview value: 8/10 → 9/10 (practiced explanation)
 
@@ -1080,12 +1216,14 @@ Ranked by **portfolio impact** (not just technical correctness).
 **Effort:** 1-2 days
 
 **Impact:** **6/10**
+
 - Validates benchmark report (real data vs theory)
 - Proves system works under load (credibility)
 - Identifies actual bottlenecks (may differ from theory)
 - Provides real graphs for documentation
 
 **Why This Matters:**
+
 - Benchmark report currently says "expected" results
 - Real data is more credible than theory
 - Performance engineering teams care about this
@@ -1093,10 +1231,12 @@ Ranked by **portfolio impact** (not just technical correctness).
 **Priority:** **MEDIUM** (depends on worker completion)
 
 **Prerequisites:**
+
 - Worker must be implemented (cannot test without)
 - Or run tests against API only (measure submission rate)
 
 **Implementation:**
+
 ```bash
 # 1. Start full stack
 docker-compose up -d
@@ -1115,6 +1255,7 @@ pnpm load:mixed      # 5 minutes
 ```
 
 **Recruiter Impact:**
+
 - Scalability score: 8/10 → 9/10 (real data)
 - Engineering depth: 9/10 → 9.5/10 (validated)
 
@@ -1122,15 +1263,16 @@ pnpm load:mixed      # 5 minutes
 
 ### Improvement Priority Matrix
 
-| Improvement | Impact | Effort | Priority | Order |
-|-------------|--------|--------|----------|-------|
-| **Complete Worker** | 10/10 | 4-6 weeks | Critical | **#1** |
-| **Add Tests** | 9/10 | 1-2 weeks | High | **#2** |
-| **Fix Auth** | 7/10 | 2-3 days | High | **#3** |
-| **Demo Video** | 8/10 | 1 day | Medium | **#4** |
-| **Load Tests** | 6/10 | 1-2 days | Medium | **#5** |
+| Improvement         | Impact | Effort    | Priority | Order  |
+| ------------------- | ------ | --------- | -------- | ------ |
+| **Complete Worker** | 10/10  | 4-6 weeks | Critical | **#1** |
+| **Add Tests**       | 9/10   | 1-2 weeks | High     | **#2** |
+| **Fix Auth**        | 7/10   | 2-3 days  | High     | **#3** |
+| **Demo Video**      | 8/10   | 1 day     | Medium   | **#4** |
+| **Load Tests**      | 6/10   | 1-2 days  | Medium   | **#5** |
 
 **Recommended Sequence:**
+
 1. Complete worker (unlocks everything else)
 2. Add tests (proves correctness)
 3. Fix auth (removes red flag)
@@ -1148,30 +1290,35 @@ How does TaskFlow compare to other portfolio projects?
 ### Typical Portfolio Projects
 
 **1. CRUD App (Todo, Blog, E-commerce)**
+
 - **Engineering Depth:** 2/10
 - **Resume Value:** 3/10
 - **Interview Value:** 2/10
 - **Differentiation:** None (everyone has these)
 
 **2. Full-Stack App with Auth (MERN/PERN)**
+
 - **Engineering Depth:** 4/10
 - **Resume Value:** 5/10
 - **Interview Value:** 5/10
 - **Differentiation:** Low (common)
 
 **3. Real-Time App (Chat, Notifications)**
+
 - **Engineering Depth:** 5/10
 - **Resume Value:** 6/10
 - **Interview Value:** 6/10
 - **Differentiation:** Medium (somewhat unique)
 
 **4. Distributed System (Cache, URL Shortener)**
+
 - **Engineering Depth:** 7/10
 - **Resume Value:** 8/10
 - **Interview Value:** 8/10
 - **Differentiation:** High (uncommon)
 
 **5. TaskFlow (Distributed Task Queue)**
+
 - **Engineering Depth:** 9/10 ⬆️ **Top 2%**
 - **Resume Value:** 9/10 ⬆️ **Top 5%**
 - **Interview Value:** 8/10 ⬆️ **Top 10%**
@@ -1179,17 +1326,17 @@ How does TaskFlow compare to other portfolio projects?
 
 ### Comparison Table
 
-| Project Type | Typical | Good | Excellent | **TaskFlow** |
-|--------------|---------|------|-----------|--------------|
-| **Lines of Code** | 500-1K | 2-5K | 5-10K | 1.5K API ⚠️ |
-| **Documentation** | README | 1-2 pages | 5-10 pages | **2500+ lines** ✅ |
-| **Tech Stack** | 3-4 | 5-7 | 8-10 | **15+** ✅ |
-| **Tests** | 0 | 20-50 | 100+ | **0** ❌ |
-| **Architecture Depth** | None | Basic | Diagrams | **500+ line review** ✅ |
-| **Failure Analysis** | None | None | Basic | **18 scenarios** ✅ |
-| **Benchmarking** | None | None | Basic | **600-line report** ✅ |
-| **Infrastructure** | Heroku | Docker | Docker + K8s | **Terraform AWS** ✅ |
-| **Completeness** | 90% | 90% | 100% | **30%** ❌ |
+| Project Type           | Typical | Good      | Excellent    | **TaskFlow**            |
+| ---------------------- | ------- | --------- | ------------ | ----------------------- |
+| **Lines of Code**      | 500-1K  | 2-5K      | 5-10K        | 1.5K API ⚠️             |
+| **Documentation**      | README  | 1-2 pages | 5-10 pages   | **2500+ lines** ✅      |
+| **Tech Stack**         | 3-4     | 5-7       | 8-10         | **15+** ✅              |
+| **Tests**              | 0       | 20-50     | 100+         | **0** ❌                |
+| **Architecture Depth** | None    | Basic     | Diagrams     | **500+ line review** ✅ |
+| **Failure Analysis**   | None    | None      | Basic        | **18 scenarios** ✅     |
+| **Benchmarking**       | None    | None      | Basic        | **600-line report** ✅  |
+| **Infrastructure**     | Heroku  | Docker    | Docker + K8s | **Terraform AWS** ✅    |
+| **Completeness**       | 90%     | 90%       | 100%         | **30%** ❌              |
 
 **Verdict:** TaskFlow is **top 5% for depth**, **bottom 30% for completeness**.
 
@@ -1200,6 +1347,7 @@ How does TaskFlow compare to other portfolio projects?
 ### For Job Applications
 
 **Target Companies:**
+
 1. ✅ **Design-heavy roles** (Google, Microsoft, Meta)
    - Emphasize architecture review and failure analysis
    - Use as conversation starter for system design rounds
@@ -1218,6 +1366,7 @@ How does TaskFlow compare to other portfolio projects?
    - Need strong execution story to compensate
 
 **Resume Bullet Points:**
+
 ```
 • Designed and implemented distributed task queue handling 10K jobs/min with at-least-once delivery guarantees, achieving linear scaling to 10 workers
 
@@ -1233,6 +1382,7 @@ How does TaskFlow compare to other portfolio projects?
 ### For Interviews
 
 **Preparation:**
+
 1. **Deep dive your own docs** - Recruiters will ask about documented issues
 2. **Practice explaining trade-offs** - "Why PostgreSQL over Redis as source of truth?"
 3. **Prepare RACE-6 explanation** - Draw sequence diagram on whiteboard
@@ -1240,6 +1390,7 @@ How does TaskFlow compare to other portfolio projects?
 5. **Be honest about incompleteness** - "Focused on design depth, implementation next"
 
 **Interview Questions You Should Expect:**
+
 1. "Walk me through your architecture"
 2. "What happens if Redis goes down?"
 3. "How do you prevent duplicate execution?"
@@ -1247,6 +1398,7 @@ How does TaskFlow compare to other portfolio projects?
 5. "What's the maximum throughput before bottleneck?"
 
 **Red Flag Questions (Be Ready):**
+
 1. "Why did you spend 4 phases on documentation but not finish the worker?"
    - **Good Answer:** "I wanted to demonstrate systems thinking and design depth. The documentation shows I can analyze complex systems and communicate trade-offs, which is critical for senior roles. I can complete the implementation in 4-6 weeks."
    - **Bad Answer:** "I ran out of time" (sounds like poor planning)
@@ -1258,16 +1410,19 @@ How does TaskFlow compare to other portfolio projects?
 ### For Portfolio Presentation
 
 **Lead with:**
+
 1. **"Not another CRUD app"** - This is infrastructure-level
 2. **"2500+ lines of technical analysis"** - Shows depth
 3. **"Honest about limitations"** - 6 P0 issues documented
 
 **Address upfront:**
+
 - "Worker implementation in progress (70% architecture, 30% code)"
 - "Focused on demonstrating systems thinking and design depth"
 - "Can complete worker implementation in 4-6 weeks"
 
 **Don't:**
+
 - ❌ Claim it's production-ready (be honest)
 - ❌ Hide the incompleteness (acknowledge it)
 - ❌ Apologize excessively (own the choice)
@@ -1279,31 +1434,34 @@ How does TaskFlow compare to other portfolio projects?
 ### Final Verdict: **B+ (8.5/10) Portfolio**
 
 **This project is exceptional in ways that matter for senior roles:**
+
 - ✅ Systems thinking (top 2%)
 - ✅ Documentation depth (top 1%)
 - ✅ Production awareness (top 5%)
 - ✅ Technical breadth (15+ technologies)
 
 **But has gaps that matter for execution-focused roles:**
+
 - ❌ Worker incomplete (0%)
 - ❌ No tests (critical gap)
 - ⚠️ Cannot demo end-to-end
 
 ### Company-Specific Recommendations
 
-| Company Type | Recommendation | Probability | Caveat |
-|--------------|----------------|-------------|--------|
-| **Google** | ✅ Apply | High | Strong for L3/L4 system design |
-| **Microsoft** | ✅ Apply | High | Good cultural fit |
-| **Amazon** | ⚠️ Conditional | Medium | Need strong execution story |
-| **Meta** | ✅ Apply | Medium-High | Infrastructure teams |
-| **Startup (Seed)** | ❌ Wait | Low | Need fast delivery |
-| **Startup (Series A+)** | ✅ Apply | Medium | Platform teams value depth |
-| **Indian Service Cos** | ✅ Apply | High | Strong tech stack match |
+| Company Type            | Recommendation | Probability | Caveat                         |
+| ----------------------- | -------------- | ----------- | ------------------------------ |
+| **Google**              | ✅ Apply       | High        | Strong for L3/L4 system design |
+| **Microsoft**           | ✅ Apply       | High        | Good cultural fit              |
+| **Amazon**              | ⚠️ Conditional | Medium      | Need strong execution story    |
+| **Meta**                | ✅ Apply       | Medium-High | Infrastructure teams           |
+| **Startup (Seed)**      | ❌ Wait        | Low         | Need fast delivery             |
+| **Startup (Series A+)** | ✅ Apply       | Medium      | Platform teams value depth     |
+| **Indian Service Cos**  | ✅ Apply       | High        | Strong tech stack match        |
 
 ### Next Steps (Prioritized)
 
 **Immediate (Before Applications):**
+
 1. ✅ Keep documentation (it's excellent)
 2. 🔧 Complete worker implementation (4-6 weeks)
 3. 🔧 Add 50-100 tests (1-2 weeks)
@@ -1311,16 +1469,19 @@ How does TaskFlow compare to other portfolio projects?
 5. 📹 Record demo video (1 day)
 
 **Timeline to "Application-Ready":**
+
 - Minimum viable: 6-8 weeks (worker + basic tests)
 - Fully complete: 8-10 weeks (worker + tests + auth + video)
 
 **You Can Apply Now If:**
+
 - Targeting design-heavy roles (Google, Microsoft, Meta)
 - Have strong coding interview skills (compensates for incomplete impl)
 - Can articulate why documentation-first was intentional
 - Willing to complete worker during trial/onboarding
 
 **Wait Before Applying If:**
+
 - Targeting execution-heavy startups
 - Cannot explain incompleteness confidently
 - Coding interview skills are weak (need portfolio to compensate)

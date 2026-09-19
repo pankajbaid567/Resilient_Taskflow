@@ -1,3 +1,5 @@
+> Historical snapshot only. Claims and numbers below are not current acceptance evidence; use the root README and executable gates.
+
 # TaskFlow Performance Benchmark Report
 
 **Version:** 1.0  
@@ -14,6 +16,7 @@ This report presents comprehensive performance benchmarks for the TaskFlow distr
 ### Key Findings
 
 **Performance Characteristics:**
+
 - **Peak Throughput**: ~10,000 jobs/minute (167 jobs/sec) with 10 workers
 - **Latency (P95)**: <500ms for job submission, <5s for job completion
 - **Scalability**: Linear scaling from 1 to 10 workers
@@ -21,6 +24,7 @@ This report presents comprehensive performance benchmarks for the TaskFlow distr
 - **Error Rate**: <1% under normal load, <5% during spike conditions
 
 **System Limits:**
+
 - **Maximum Sustained Load**: 10,000 jobs/minute
 - **Maximum Queue Depth**: ~1,000 jobs before backlog
 - **Worker Scaling**: 1-20 workers (diminishing returns after 10)
@@ -48,6 +52,7 @@ This report presents comprehensive performance benchmarks for the TaskFlow distr
 ### Testing Framework
 
 **k6 Load Testing Tool:**
+
 ```javascript
 // Example test structure (tests/load/sustained-load.test.js)
 export const options = {
@@ -55,17 +60,17 @@ export const options = {
     sustained_load: {
       executor: 'ramping-vus',
       stages: [
-        { duration: '1m', target: 10 },   // Ramp up
-        { duration: '3m', target: 50 },   // Increase load
-        { duration: '3m', target: 50 },   // Sustain
-        { duration: '2m', target: 0 },    // Ramp down
+        { duration: '1m', target: 10 }, // Ramp up
+        { duration: '3m', target: 50 }, // Increase load
+        { duration: '3m', target: 50 }, // Sustain
+        { duration: '2m', target: 0 }, // Ramp down
       ],
     },
   },
   thresholds: {
-    'http_req_duration': ['p(95)<500', 'p(99)<1000'],
-    'http_req_failed': ['rate<0.01'],
-    'queue_depth': ['value<1000'],
+    http_req_duration: ['p(95)<500', 'p(99)<1000'],
+    http_req_failed: ['rate<0.01'],
+    queue_depth: ['value<1000'],
   },
 };
 ```
@@ -80,6 +85,7 @@ export const options = {
 ### Metrics Collected
 
 **Application Metrics:**
+
 - Job submission rate (jobs/sec)
 - Job completion rate (jobs/sec)
 - Queue depth over time
@@ -87,11 +93,13 @@ export const options = {
 - Job success/failure rate
 
 **Performance Metrics:**
+
 - HTTP request duration (P50, P95, P99)
 - Job processing time (P50, P95, P99)
 - Time-to-completion (end-to-end)
 
 **Resource Metrics:**
+
 - CPU usage per component
 - Memory usage (RSS, heap)
 - Network I/O
@@ -101,6 +109,7 @@ export const options = {
 ### Test Environment
 
 **Hardware:**
+
 ```
 CPU:    4 cores (Intel/AMD x64)
 RAM:    16 GB
@@ -109,6 +118,7 @@ Network: 1 Gbps local network
 ```
 
 **Software Stack:**
+
 ```
 OS:         macOS/Linux
 Node.js:    v20.11.0
@@ -118,6 +128,7 @@ Kafka:      3.5.1 (Redpanda, Docker)
 ```
 
 **Configuration:**
+
 ```yaml
 # docker-compose.yml
 services:
@@ -147,6 +158,7 @@ services:
 ### Running Benchmarks
 
 **Prerequisites:**
+
 ```bash
 # 1. Ensure system resources available
 docker stats  # Check current usage
@@ -161,6 +173,7 @@ curl http://localhost:3000/health
 ```
 
 **Execution:**
+
 ```bash
 # Run all benchmarks
 pnpm load:all
@@ -173,6 +186,7 @@ pnpm load:scaling      # Worker scaling test
 ```
 
 **Results Location:**
+
 ```
 results/
 ├── sustained-load-YYYYMMDD-HHMMSS.html   # HTML report
@@ -191,6 +205,7 @@ results/
 **Objective:** Measure steady-state performance under constant load
 
 **Configuration:**
+
 - Duration: 9 minutes
 - Pattern: Ramp up (1m) → Increase (3m) → Sustain (3m) → Ramp down (2m)
 - Peak Load: 50 virtual users
@@ -198,6 +213,7 @@ results/
 - Payload Size: Small (100-500 bytes)
 
 **Expected Behavior:**
+
 - Queue depth remains stable
 - Latency stays consistent (no degradation)
 - No memory leaks
@@ -208,6 +224,7 @@ results/
 **Objective:** Test system resilience to sudden traffic spikes
 
 **Configuration:**
+
 - Duration: 3 minutes
 - Pattern: Baseline (1m) → 10x Spike (1m) → Recovery (1m)
 - Baseline: 10 VUs → Spike: 100 VUs → Recovery: 10 VUs
@@ -215,6 +232,7 @@ results/
 - Payload Size: Medium (500-2KB)
 
 **Expected Behavior:**
+
 - System handles spike without crashing
 - Error rate <5% during spike
 - Queue backlog clears within recovery period
@@ -225,9 +243,10 @@ results/
 **Objective:** Test priority handling and job type distribution
 
 **Configuration:**
+
 - Duration: 5 minutes
 - Virtual Users: 30 (constant)
-- Job Types: 
+- Job Types:
   - 40% `process-data` (CPU-intensive)
   - 30% `send-email` (I/O-intensive)
   - 20% `generate-report` (memory-intensive)
@@ -239,6 +258,7 @@ results/
   - 10% LOW
 
 **Expected Behavior:**
+
 - CRITICAL jobs complete first
 - No priority starvation (LOW jobs eventually process)
 - Balanced worker utilization
@@ -249,12 +269,14 @@ results/
 **Objective:** Measure performance gains from horizontal scaling
 
 **Configuration:**
+
 - Duration: 15 minutes (3 min per worker count)
 - Worker Counts: 1, 3, 5, 10, 20
 - Load: Constant 100 jobs/min submission rate
 - Job Type: Uniform `test-job` (1 second execution time)
 
 **Expected Behavior:**
+
 - Linear scaling from 1-10 workers
 - Diminishing returns after 10 workers
 - Queue depth decreases with more workers
@@ -272,22 +294,23 @@ results/
 
 #### API Performance
 
-| Metric | Value | Target | Status |
-|--------|-------|--------|--------|
-| **Request Rate** | 83 req/s | >10 req/s | ✅ Pass |
-| **Total Requests** | 44,820 | - | - |
-| **Success Rate** | 99.7% | >99% | ✅ Pass |
-| **Failed Requests** | 120 (0.3%) | <1% | ✅ Pass |
+| Metric              | Value      | Target    | Status  |
+| ------------------- | ---------- | --------- | ------- |
+| **Request Rate**    | 83 req/s   | >10 req/s | ✅ Pass |
+| **Total Requests**  | 44,820     | -         | -       |
+| **Success Rate**    | 99.7%      | >99%      | ✅ Pass |
+| **Failed Requests** | 120 (0.3%) | <1%       | ✅ Pass |
 
 #### Latency Distribution
 
-| Metric | P50 | P90 | P95 | P99 | Max |
-|--------|-----|-----|-----|-----|-----|
-| **HTTP Request** | 42ms | 95ms | 180ms | 420ms | 980ms |
+| Metric             | P50  | P90  | P95   | P99   | Max   |
+| ------------------ | ---- | ---- | ----- | ----- | ----- |
+| **HTTP Request**   | 42ms | 95ms | 180ms | 420ms | 980ms |
 | **Job Submission** | 38ms | 88ms | 165ms | 390ms | 850ms |
-| **Job Completion** | 2.1s | 3.8s | 4.5s | 8.2s | 15.3s |
+| **Job Completion** | 2.1s | 3.8s | 4.5s  | 8.2s  | 15.3s |
 
 **Analysis:**
+
 - ✅ P95 latency <500ms (target met)
 - ✅ P99 latency <1000ms (target met)
 - ⚠️ Some requests exceeded 1s (0.1% of requests)
@@ -295,30 +318,32 @@ results/
 
 #### Queue Metrics
 
-| Metric | Min | Avg | Max | Target |
-|--------|-----|-----|-----|--------|
-| **Queue Depth** | 5 | 145 | 680 | <1000 |
-| **CRITICAL Queue** | 0 | 8 | 45 | - |
-| **HIGH Queue** | 1 | 22 | 98 | - |
-| **NORMAL Queue** | 3 | 98 | 450 | - |
-| **LOW Queue** | 1 | 17 | 87 | - |
+| Metric             | Min | Avg | Max | Target |
+| ------------------ | --- | --- | --- | ------ |
+| **Queue Depth**    | 5   | 145 | 680 | <1000  |
+| **CRITICAL Queue** | 0   | 8   | 45  | -      |
+| **HIGH Queue**     | 1   | 22  | 98  | -      |
+| **NORMAL Queue**   | 3   | 98  | 450 | -      |
+| **LOW Queue**      | 1   | 17  | 87  | -      |
 
 **Analysis:**
+
 - ✅ Queue depth stayed well below 1000 threshold
 - ✅ Queue cleared during ramp-down phase
 - ✅ No runaway queue growth
 
 #### Worker Performance
 
-| Metric | Value |
-|--------|-------|
-| **Active Workers** | 3 |
-| **Jobs Processed** | 44,700 |
-| **Average Processing Time** | 1.2s |
-| **Worker Utilization** | 78% |
-| **Jobs Per Worker** | 14,900 |
+| Metric                      | Value  |
+| --------------------------- | ------ |
+| **Active Workers**          | 3      |
+| **Jobs Processed**          | 44,700 |
+| **Average Processing Time** | 1.2s   |
+| **Worker Utilization**      | 78%    |
+| **Jobs Per Worker**         | 14,900 |
 
 **Analysis:**
+
 - ✅ Workers processing consistently
 - ✅ No worker crashes or hangs
 - ⚠️ 78% utilization suggests could handle more load with current workers
@@ -332,18 +357,21 @@ results/
 #### Spike Response
 
 **Phase 1: Baseline (30s)**
+
 - Request Rate: 8 req/s
 - Queue Depth: 15-25 jobs
 - Latency P95: 180ms
 - Error Rate: 0%
 
 **Phase 2: Spike (1 minute)**
+
 - Request Rate: 85 req/s (10.6x increase)
 - Queue Depth: Peak 1,850 jobs
 - Latency P95: 890ms (4.9x increase)
 - Error Rate: 2.3%
 
 **Phase 3: Recovery (30s)**
+
 - Request Rate: 9 req/s (back to baseline)
 - Queue Depth: Decreased from 1850 → 320
 - Latency P95: 320ms (recovering)
@@ -351,14 +379,15 @@ results/
 
 #### Performance Degradation
 
-| Metric | Baseline | During Spike | Impact | Target |
-|--------|----------|--------------|--------|--------|
-| **Latency P95** | 180ms | 890ms | 4.9x | <1000ms |
-| **Latency P99** | 420ms | 1780ms | 4.2x | <2000ms |
-| **Error Rate** | 0% | 2.3% | +2.3% | <5% |
-| **Queue Depth** | 20 | 1850 | 92.5x | <2000 |
+| Metric          | Baseline | During Spike | Impact | Target  |
+| --------------- | -------- | ------------ | ------ | ------- |
+| **Latency P95** | 180ms    | 890ms        | 4.9x   | <1000ms |
+| **Latency P99** | 420ms    | 1780ms       | 4.2x   | <2000ms |
+| **Error Rate**  | 0%       | 2.3%         | +2.3%  | <5%     |
+| **Queue Depth** | 20       | 1850         | 92.5x  | <2000   |
 
 **Analysis:**
+
 - ✅ System remained operational during spike
 - ✅ Error rate stayed under 5% threshold
 - ✅ No cascading failures or crash
@@ -367,12 +396,12 @@ results/
 
 #### Recovery Metrics
 
-| Metric | Value | Analysis |
-|--------|-------|----------|
-| **Time to Normal Latency** | 45s | Fast recovery |
-| **Queue Drain Rate** | 51 jobs/sec | Good throughput |
-| **Jobs Remaining After 30s** | 320 | 17% of peak |
-| **Worker Crashes** | 0 | Stable |
+| Metric                       | Value       | Analysis        |
+| ---------------------------- | ----------- | --------------- |
+| **Time to Normal Latency**   | 45s         | Fast recovery   |
+| **Queue Drain Rate**         | 51 jobs/sec | Good throughput |
+| **Jobs Remaining After 30s** | 320         | 17% of peak     |
+| **Worker Crashes**           | 0           | Stable          |
 
 ### 3. Mixed Workload Test Results
 
@@ -382,28 +411,30 @@ results/
 
 #### Job Type Distribution
 
-| Job Type | Count | Avg Duration | P95 Duration | Success Rate |
-|----------|-------|--------------|--------------|--------------|
-| **process-data** | 3,600 | 1.5s | 2.8s | 99.8% |
-| **send-email** | 2,700 | 0.8s | 1.5s | 99.9% |
-| **generate-report** | 1,800 | 3.2s | 5.1s | 98.9% |
-| **webhook-callback** | 900 | 0.5s | 1.2s | 99.7% |
+| Job Type             | Count | Avg Duration | P95 Duration | Success Rate |
+| -------------------- | ----- | ------------ | ------------ | ------------ |
+| **process-data**     | 3,600 | 1.5s         | 2.8s         | 99.8%        |
+| **send-email**       | 2,700 | 0.8s         | 1.5s         | 99.9%        |
+| **generate-report**  | 1,800 | 3.2s         | 5.1s         | 98.9%        |
+| **webhook-callback** | 900   | 0.5s         | 1.2s         | 99.7%        |
 
 **Analysis:**
+
 - ✅ All job types processed successfully
 - ⚠️ `generate-report` has slightly lower success rate (memory-intensive)
 - ✅ No job type blocking others
 
 #### Priority Performance
 
-| Priority | Count | Time to Start | Completion Time | Success Rate |
-|----------|-------|---------------|-----------------|--------------|
-| **CRITICAL** | 450 | 0.3s | 1.8s | 100% |
-| **HIGH** | 1,350 | 1.2s | 2.5s | 99.9% |
-| **NORMAL** | 6,300 | 3.8s | 5.2s | 99.6% |
-| **LOW** | 900 | 12.5s | 14.3s | 99.2% |
+| Priority     | Count | Time to Start | Completion Time | Success Rate |
+| ------------ | ----- | ------------- | --------------- | ------------ |
+| **CRITICAL** | 450   | 0.3s          | 1.8s            | 100%         |
+| **HIGH**     | 1,350 | 1.2s          | 2.5s            | 99.9%        |
+| **NORMAL**   | 6,300 | 3.8s          | 5.2s            | 99.6%        |
+| **LOW**      | 900   | 12.5s         | 14.3s           | 99.2%        |
 
 **Analysis:**
+
 - ✅ CRITICAL jobs started almost immediately
 - ✅ Priority ordering respected (CRITICAL < HIGH < NORMAL < LOW)
 - ⚠️ LOW priority jobs waited 12.5s avg (starvation risk at higher loads)
@@ -411,13 +442,14 @@ results/
 
 #### Worker Load Distribution
 
-| Worker | Jobs Processed | CPU Avg | Memory Avg | Crashes |
-|--------|----------------|---------|------------|---------|
-| Worker 1 | 3,100 | 65% | 185MB | 0 |
-| Worker 2 | 2,950 | 62% | 178MB | 0 |
-| Worker 3 | 2,950 | 63% | 182MB | 0 |
+| Worker   | Jobs Processed | CPU Avg | Memory Avg | Crashes |
+| -------- | -------------- | ------- | ---------- | ------- |
+| Worker 1 | 3,100          | 65%     | 185MB      | 0       |
+| Worker 2 | 2,950          | 62%     | 178MB      | 0       |
+| Worker 3 | 2,950          | 63%     | 182MB      | 0       |
 
 **Analysis:**
+
 - ✅ Load evenly distributed across workers (±5%)
 - ✅ No single worker overloaded
 - ✅ Memory usage stable (no leaks)
@@ -429,12 +461,14 @@ results/
 ### Test Configuration
 
 **Methodology:**
+
 - Fixed load: 100 jobs/min (constant submission rate)
 - Job type: `test-job` (1 second execution time)
 - Duration: 3 minutes per worker count
 - Worker counts tested: 1, 3, 5, 10, 20
 
 **Metrics Measured:**
+
 - Jobs processed per minute
 - Queue depth over time
 - Average job completion time
@@ -444,17 +478,18 @@ results/
 
 #### 1 Worker Configuration
 
-| Metric | Value |
-|--------|-------|
-| **Jobs Processed/Min** | 58 jobs/min |
-| **Queue Depth (Avg)** | 42 jobs |
-| **Queue Depth (Max)** | 126 jobs |
-| **Job Completion Time (P95)** | 45s |
-| **CPU Usage** | 85% |
-| **Memory Usage** | 165MB |
-| **Worker Utilization** | 97% |
+| Metric                        | Value       |
+| ----------------------------- | ----------- |
+| **Jobs Processed/Min**        | 58 jobs/min |
+| **Queue Depth (Avg)**         | 42 jobs     |
+| **Queue Depth (Max)**         | 126 jobs    |
+| **Job Completion Time (P95)** | 45s         |
+| **CPU Usage**                 | 85%         |
+| **Memory Usage**              | 165MB       |
+| **Worker Utilization**        | 97%         |
 
 **Analysis:**
+
 - ⚠️ Cannot keep up with 100 jobs/min submission rate
 - ⚠️ Queue backs up over time (42 → 126 jobs)
 - ⚠️ Completion time increases as queue grows
@@ -462,17 +497,18 @@ results/
 
 #### 3 Workers Configuration
 
-| Metric | Value |
-|--------|-------|
-| **Jobs Processed/Min** | 175 jobs/min |
-| **Queue Depth (Avg)** | 15 jobs |
-| **Queue Depth (Max)** | 45 jobs |
-| **Job Completion Time (P95)** | 8s |
-| **CPU Usage (Avg)** | 65% per worker |
-| **Memory Usage (Avg)** | 178MB per worker |
-| **Worker Utilization (Avg)** | 58% |
+| Metric                        | Value            |
+| ----------------------------- | ---------------- |
+| **Jobs Processed/Min**        | 175 jobs/min     |
+| **Queue Depth (Avg)**         | 15 jobs          |
+| **Queue Depth (Max)**         | 45 jobs          |
+| **Job Completion Time (P95)** | 8s               |
+| **CPU Usage (Avg)**           | 65% per worker   |
+| **Memory Usage (Avg)**        | 178MB per worker |
+| **Worker Utilization (Avg)**  | 58%              |
 
 **Analysis:**
+
 - ✅ Exceeds 100 jobs/min requirement (175 > 100)
 - ✅ Queue depth stable (15-45 jobs)
 - ✅ Completion time acceptable (<10s P95)
@@ -480,17 +516,18 @@ results/
 
 #### 5 Workers Configuration
 
-| Metric | Value |
-|--------|-------|
-| **Jobs Processed/Min** | 290 jobs/min |
-| **Queue Depth (Avg)** | 8 jobs |
-| **Queue Depth (Max)** | 22 jobs |
-| **Job Completion Time (P95)** | 4.5s |
-| **CPU Usage (Avg)** | 45% per worker |
-| **Memory Usage (Avg)** | 172MB per worker |
-| **Worker Utilization (Avg)** | 35% |
+| Metric                        | Value            |
+| ----------------------------- | ---------------- |
+| **Jobs Processed/Min**        | 290 jobs/min     |
+| **Queue Depth (Avg)**         | 8 jobs           |
+| **Queue Depth (Max)**         | 22 jobs          |
+| **Job Completion Time (P95)** | 4.5s             |
+| **CPU Usage (Avg)**           | 45% per worker   |
+| **Memory Usage (Avg)**        | 172MB per worker |
+| **Worker Utilization (Avg)**  | 35%              |
 
 **Analysis:**
+
 - ✅ Well above 100 jobs/min requirement (2.9x)
 - ✅ Queue depth very low (under-utilized)
 - ✅ Fast completion time
@@ -498,17 +535,18 @@ results/
 
 #### 10 Workers Configuration
 
-| Metric | Value |
-|--------|-------|
-| **Jobs Processed/Min** | 580 jobs/min |
-| **Queue Depth (Avg)** | 3 jobs |
-| **Queue Depth (Max)** | 12 jobs |
-| **Job Completion Time (P95)** | 2.8s |
-| **CPU Usage (Avg)** | 28% per worker |
-| **Memory Usage (Avg)** | 168MB per worker |
-| **Worker Utilization (Avg)** | 18% |
+| Metric                        | Value            |
+| ----------------------------- | ---------------- |
+| **Jobs Processed/Min**        | 580 jobs/min     |
+| **Queue Depth (Avg)**         | 3 jobs           |
+| **Queue Depth (Max)**         | 12 jobs          |
+| **Job Completion Time (P95)** | 2.8s             |
+| **CPU Usage (Avg)**           | 28% per worker   |
+| **Memory Usage (Avg)**        | 168MB per worker |
+| **Worker Utilization (Avg)**  | 18%              |
 
 **Analysis:**
+
 - ✅ Maximum throughput for this test (5.8x requirement)
 - ✅ Near-zero queue depth
 - ✅ Very fast completion
@@ -516,17 +554,18 @@ results/
 
 #### 20 Workers Configuration
 
-| Metric | Value |
-|--------|-------|
-| **Jobs Processed/Min** | 600 jobs/min |
-| **Queue Depth (Avg)** | 1 job |
-| **Queue Depth (Max)** | 5 jobs |
-| **Job Completion Time (P95)** | 2.5s |
-| **CPU Usage (Avg)** | 15% per worker |
-| **Memory Usage (Avg)** | 165MB per worker |
-| **Worker Utilization (Avg)** | 9% |
+| Metric                        | Value            |
+| ----------------------------- | ---------------- |
+| **Jobs Processed/Min**        | 600 jobs/min     |
+| **Queue Depth (Avg)**         | 1 job            |
+| **Queue Depth (Max)**         | 5 jobs           |
+| **Job Completion Time (P95)** | 2.5s             |
+| **CPU Usage (Avg)**           | 15% per worker   |
+| **Memory Usage (Avg)**        | 165MB per worker |
+| **Worker Utilization (Avg)**  | 9%               |
 
 **Analysis:**
+
 - ⚠️ Only 3.4% improvement over 10 workers (diminishing returns)
 - ⚠️ Extreme under-utilization (9%)
 - ⚠️ 2x resource usage for minimal benefit
@@ -537,27 +576,28 @@ results/
 #### Throughput vs Worker Count
 
 | Workers | Jobs/Min | Scaling Factor | Efficiency |
-|---------|----------|----------------|------------|
-| 1 | 58 | 1.0x | 100% |
-| 3 | 175 | 3.0x | 100% |
-| 5 | 290 | 5.0x | 100% |
-| 10 | 580 | 10.0x | 100% |
-| 20 | 600 | 10.3x | 52% |
+| ------- | -------- | -------------- | ---------- |
+| 1       | 58       | 1.0x           | 100%       |
+| 3       | 175      | 3.0x           | 100%       |
+| 5       | 290      | 5.0x           | 100%       |
+| 10      | 580      | 10.0x          | 100%       |
+| 20      | 600      | 10.3x          | 52%        |
 
 **Analysis:**
+
 - ✅ **Perfect linear scaling from 1-10 workers**
 - ❌ **Diminishing returns after 10 workers**
 - 📊 **Bottleneck shifts from workers to other components at 10+ workers**
 
 #### Cost-Benefit Analysis
 
-| Workers | Monthly Cost | Jobs/Day | Cost per 1M Jobs | Recommendation |
-|---------|--------------|----------|------------------|----------------|
-| 1 | $30 | 83,520 | $359 | ❌ Under-provisioned |
-| 3 | $90 | 252,000 | $357 | ✅ Good for light load |
-| 5 | $150 | 417,600 | $359 | ✅ Good for medium load |
-| 10 | $300 | 835,200 | $359 | ✅ **Optimal** |
-| 20 | $600 | 864,000 | $694 | ❌ Wasteful |
+| Workers | Monthly Cost | Jobs/Day | Cost per 1M Jobs | Recommendation          |
+| ------- | ------------ | -------- | ---------------- | ----------------------- |
+| 1       | $30          | 83,520   | $359             | ❌ Under-provisioned    |
+| 3       | $90          | 252,000  | $357             | ✅ Good for light load  |
+| 5       | $150         | 417,600  | $359             | ✅ Good for medium load |
+| 10      | $300         | 835,200  | $359             | ✅ **Optimal**          |
+| 20      | $600         | 864,000  | $694             | ❌ Wasteful             |
 
 **Recommendation:** **Use 10 workers for production** (optimal cost/performance)
 
@@ -566,14 +606,15 @@ results/
 #### Memory Usage Patterns
 
 | Workers | Total Memory | Per Worker | Overhead | Efficiency |
-|---------|--------------|------------|----------|------------|
-| 1 | 165MB | 165MB | 0MB | 100% |
-| 3 | 534MB | 178MB | 0MB | 100% |
-| 5 | 860MB | 172MB | 0MB | 100% |
-| 10 | 1,680MB | 168MB | 0MB | 100% |
-| 20 | 3,300MB | 165MB | 0MB | 100% |
+| ------- | ------------ | ---------- | -------- | ---------- |
+| 1       | 165MB        | 165MB      | 0MB      | 100%       |
+| 3       | 534MB        | 178MB      | 0MB      | 100%       |
+| 5       | 860MB        | 172MB      | 0MB      | 100%       |
+| 10      | 1,680MB      | 168MB      | 0MB      | 100%       |
+| 20      | 3,300MB      | 165MB      | 0MB      | 100%       |
 
 **Analysis:**
+
 - ✅ Memory per worker stable (~170MB)
 - ✅ No memory leaks observed
 - ✅ Linear memory growth (predictable)
@@ -581,14 +622,15 @@ results/
 #### CPU Usage Patterns
 
 | Workers | Total CPU | Per Worker | System Overhead | Efficiency |
-|---------|-----------|------------|-----------------|------------|
-| 1 | 85% | 85% | ~5% | 94% |
-| 3 | 195% | 65% | ~8% | 96% |
-| 5 | 225% | 45% | ~12% | 95% |
-| 10 | 280% | 28% | ~18% | 94% |
-| 20 | 300% | 15% | ~25% | 92% |
+| ------- | --------- | ---------- | --------------- | ---------- |
+| 1       | 85%       | 85%        | ~5%             | 94%        |
+| 3       | 195%      | 65%        | ~8%             | 96%        |
+| 5       | 225%      | 45%        | ~12%            | 95%        |
+| 10      | 280%      | 28%        | ~18%            | 94%        |
+| 20      | 300%      | 15%        | ~25%            | 92%        |
 
 **Analysis:**
+
 - ✅ CPU usage scales linearly up to 10 workers
 - ⚠️ System overhead increases with worker count
 - ⚠️ CPU efficiency drops after 10 workers (92% vs 96%)
@@ -602,6 +644,7 @@ results/
 #### PostgreSQL Performance
 
 **Configuration:**
+
 ```yaml
 postgres:
   cpus: 2.0
@@ -613,27 +656,28 @@ postgres:
 
 **Under Sustained Load (50 VUs):**
 
-| Metric | Value | Capacity | Utilization |
-|--------|-------|----------|-------------|
-| **CPU Usage** | 65% | 2 cores | 65% |
-| **Memory Usage** | 1.2GB | 2GB | 60% |
-| **Connections** | 85 | 200 | 42% |
-| **TPS (Transactions)** | 166 TPS | ~10K | 1.7% |
-| **INSERT Rate** | 83/sec | ~5K | 1.7% |
-| **UPDATE Rate** | 83/sec | ~5K | 1.7% |
-| **Disk I/O** | 15 MB/s | ~500 MB/s | 3% |
+| Metric                 | Value   | Capacity  | Utilization |
+| ---------------------- | ------- | --------- | ----------- |
+| **CPU Usage**          | 65%     | 2 cores   | 65%         |
+| **Memory Usage**       | 1.2GB   | 2GB       | 60%         |
+| **Connections**        | 85      | 200       | 42%         |
+| **TPS (Transactions)** | 166 TPS | ~10K      | 1.7%        |
+| **INSERT Rate**        | 83/sec  | ~5K       | 1.7%        |
+| **UPDATE Rate**        | 83/sec  | ~5K       | 1.7%        |
+| **Disk I/O**           | 15 MB/s | ~500 MB/s | 3%          |
 
 **Under Spike Load (100 VUs):**
 
-| Metric | Value | Capacity | Utilization |
-|--------|-------|----------|-------------|
-| **CPU Usage** | 88% | 2 cores | 88% |
-| **Memory Usage** | 1.6GB | 2GB | 80% |
-| **Connections** | 145 | 200 | 72% |
-| **TPS (Transactions)** | 340 TPS | ~10K | 3.4% |
-| **Disk I/O** | 45 MB/s | ~500 MB/s | 9% |
+| Metric                 | Value   | Capacity  | Utilization |
+| ---------------------- | ------- | --------- | ----------- |
+| **CPU Usage**          | 88%     | 2 cores   | 88%         |
+| **Memory Usage**       | 1.6GB   | 2GB       | 80%         |
+| **Connections**        | 145     | 200       | 72%         |
+| **TPS (Transactions)** | 340 TPS | ~10K      | 3.4%        |
+| **Disk I/O**           | 45 MB/s | ~500 MB/s | 9%          |
 
 **Analysis:**
+
 - ✅ Well within capacity for test loads
 - ✅ Headroom for 5-10x additional load
 - 📊 **Bottleneck will be TPS at ~10K jobs/min**
@@ -642,6 +686,7 @@ postgres:
 #### Redis Performance
 
 **Configuration:**
+
 ```yaml
 redis:
   cpus: 1.0
@@ -652,25 +697,26 @@ redis:
 
 **Under Sustained Load:**
 
-| Metric | Value | Capacity | Utilization |
-|--------|-------|----------|-------------|
-| **CPU Usage** | 35% | 1 core | 35% |
-| **Memory Usage** | 245MB | 900MB | 27% |
-| **Commands/Sec** | 250 ops/s | ~50K | 0.5% |
-| **Network In** | 2.5 MB/s | ~125 MB/s | 2% |
-| **Network Out** | 3.8 MB/s | ~125 MB/s | 3% |
-| **Stream Length (Avg)** | 150 msgs | 10M+ | <0.001% |
+| Metric                  | Value     | Capacity  | Utilization |
+| ----------------------- | --------- | --------- | ----------- |
+| **CPU Usage**           | 35%       | 1 core    | 35%         |
+| **Memory Usage**        | 245MB     | 900MB     | 27%         |
+| **Commands/Sec**        | 250 ops/s | ~50K      | 0.5%        |
+| **Network In**          | 2.5 MB/s  | ~125 MB/s | 2%          |
+| **Network Out**         | 3.8 MB/s  | ~125 MB/s | 3%          |
+| **Stream Length (Avg)** | 150 msgs  | 10M+      | <0.001%     |
 
 **Under Spike Load:**
 
-| Metric | Value | Capacity | Utilization |
-|--------|-------|----------|-------------|
-| **CPU Usage** | 68% | 1 core | 68% |
-| **Memory Usage** | 680MB | 900MB | 76% |
-| **Commands/Sec** | 850 ops/s | ~50K | 1.7% |
-| **Stream Length (Max)** | 1,850 msgs | 10M+ | <0.02% |
+| Metric                  | Value      | Capacity | Utilization |
+| ----------------------- | ---------- | -------- | ----------- |
+| **CPU Usage**           | 68%        | 1 core   | 68%         |
+| **Memory Usage**        | 680MB      | 900MB    | 76%         |
+| **Commands/Sec**        | 850 ops/s  | ~50K     | 1.7%        |
+| **Stream Length (Max)** | 1,850 msgs | 10M+     | <0.02%      |
 
 **Analysis:**
+
 - ✅ Excellent headroom (using <2% of capacity)
 - ✅ Single-threaded Redis CPU at 68% during spike (acceptable)
 - ✅ Memory usage safe (76% during peak)
@@ -679,6 +725,7 @@ redis:
 #### Kafka (Redpanda) Performance
 
 **Configuration:**
+
 ```yaml
 redpanda:
   cpus: 2.0
@@ -688,16 +735,17 @@ redpanda:
 
 **Under Sustained Load:**
 
-| Metric | Value | Capacity | Utilization |
-|--------|-------|----------|-------------|
-| **CPU Usage** | 22% | 2 cores | 22% |
-| **Memory Usage** | 485MB | 1536MB | 32% |
-| **Messages/Sec** | 83 msgs/s | ~100K | 0.08% |
-| **Bytes In** | 125 KB/s | ~100 MB/s | 0.12% |
-| **Bytes Out** | 140 KB/s | ~100 MB/s | 0.14% |
-| **Partition Count** | 3 | 1000+ | 0.3% |
+| Metric              | Value     | Capacity  | Utilization |
+| ------------------- | --------- | --------- | ----------- |
+| **CPU Usage**       | 22%       | 2 cores   | 22%         |
+| **Memory Usage**    | 485MB     | 1536MB    | 32%         |
+| **Messages/Sec**    | 83 msgs/s | ~100K     | 0.08%       |
+| **Bytes In**        | 125 KB/s  | ~100 MB/s | 0.12%       |
+| **Bytes Out**       | 140 KB/s  | ~100 MB/s | 0.14%       |
+| **Partition Count** | 3         | 1000+     | 0.3%        |
 
 **Analysis:**
+
 - ✅ Kafka severely under-utilized (good for reliability)
 - ✅ Can handle 1000x more event throughput
 - ✅ Event publishing not a bottleneck
@@ -705,6 +753,7 @@ redpanda:
 ### API Server Performance
 
 **Configuration (per replica):**
+
 ```yaml
 api:
   replicas: 2
@@ -714,15 +763,16 @@ api:
 
 **Under Sustained Load:**
 
-| Metric | Replica 1 | Replica 2 | Combined |
-|--------|-----------|-----------|----------|
-| **CPU Usage** | 42% | 38% | 40% avg |
-| **Memory (RSS)** | 185MB | 178MB | 182MB avg |
-| **Requests/Sec** | 45 req/s | 38 req/s | 83 req/s |
-| **Response Time (P95)** | 165ms | 185ms | 175ms |
-| **Active Connections** | 28 | 22 | 50 |
+| Metric                  | Replica 1 | Replica 2 | Combined  |
+| ----------------------- | --------- | --------- | --------- |
+| **CPU Usage**           | 42%       | 38%       | 40% avg   |
+| **Memory (RSS)**        | 185MB     | 178MB     | 182MB avg |
+| **Requests/Sec**        | 45 req/s  | 38 req/s  | 83 req/s  |
+| **Response Time (P95)** | 165ms     | 185ms     | 175ms     |
+| **Active Connections**  | 28        | 22        | 50        |
 
 **Analysis:**
+
 - ✅ Load balanced evenly across replicas
 - ✅ Memory usage stable (no leaks)
 - ✅ Can handle 3-5x more load per replica
@@ -730,6 +780,7 @@ api:
 ### Worker Performance
 
 **Configuration (per worker):**
+
 ```yaml
 worker:
   replicas: 3
@@ -740,16 +791,17 @@ worker:
 
 **Under Sustained Load (3 workers):**
 
-| Metric | Worker 1 | Worker 2 | Worker 3 | Average |
-|--------|----------|----------|----------|---------|
-| **CPU Usage** | 65% | 62% | 68% | 65% |
-| **Memory (RSS)** | 185MB | 178MB | 192MB | 185MB |
-| **Jobs Processing** | 8 | 7 | 9 | 8 |
-| **Jobs Processed** | 14,950 | 14,820 | 14,930 | 14,900 |
-| **Success Rate** | 99.8% | 99.7% | 99.8% | 99.8% |
-| **Avg Processing Time** | 1.18s | 1.22s | 1.19s | 1.20s |
+| Metric                  | Worker 1 | Worker 2 | Worker 3 | Average |
+| ----------------------- | -------- | -------- | -------- | ------- |
+| **CPU Usage**           | 65%      | 62%      | 68%      | 65%     |
+| **Memory (RSS)**        | 185MB    | 178MB    | 192MB    | 185MB   |
+| **Jobs Processing**     | 8        | 7        | 9        | 8       |
+| **Jobs Processed**      | 14,950   | 14,820   | 14,930   | 14,900  |
+| **Success Rate**        | 99.8%    | 99.7%    | 99.8%    | 99.8%   |
+| **Avg Processing Time** | 1.18s    | 1.22s    | 1.19s    | 1.20s   |
 
 **Analysis:**
+
 - ✅ Excellent load distribution (±2%)
 - ✅ Workers not CPU-bound (65% usage)
 - ✅ Memory usage healthy
@@ -766,15 +818,16 @@ Disconnect Redis mid-test (10 seconds)
 
 **Impact:**
 
-| Metric | Before | During Failure | After Recovery |
-|--------|--------|----------------|----------------|
-| **Job Submission** | 83 jobs/s | **0 jobs/s** | 85 jobs/s |
-| **API Error Rate** | 0% | **100%** | 0.2% |
-| **Worker Processing** | Active | **Continues** | Active |
-| **Jobs Lost** | 0 | **~830 submissions** | 0 |
-| **Recovery Time** | - | - | **<5 seconds** |
+| Metric                | Before    | During Failure       | After Recovery |
+| --------------------- | --------- | -------------------- | -------------- |
+| **Job Submission**    | 83 jobs/s | **0 jobs/s**         | 85 jobs/s      |
+| **API Error Rate**    | 0%        | **100%**             | 0.2%           |
+| **Worker Processing** | Active    | **Continues**        | Active         |
+| **Jobs Lost**         | 0         | **~830 submissions** | 0              |
+| **Recovery Time**     | -         | -                    | **<5 seconds** |
 
 **Analysis:**
+
 - ❌ All job submissions fail during Redis outage
 - ✅ Workers continue processing existing jobs (unaffected)
 - ✅ Fast recovery when Redis reconnects
@@ -789,15 +842,16 @@ Disconnect PostgreSQL mid-test (10 seconds)
 
 **Impact:**
 
-| Metric | Before | During Failure | After Recovery |
-|--------|--------|----------------|----------------|
-| **Job Submission** | 83 jobs/s | **0 jobs/s** | 80 jobs/s |
-| **Worker Processing** | Active | **0 jobs/s** | Active |
-| **API Error Rate** | 0% | **100%** | 0% |
-| **Redis Messages** | Consumed | **Not consumed** | Consumed |
-| **Recovery Time** | - | - | **<10 seconds** |
+| Metric                | Before    | During Failure   | After Recovery  |
+| --------------------- | --------- | ---------------- | --------------- |
+| **Job Submission**    | 83 jobs/s | **0 jobs/s**     | 80 jobs/s       |
+| **Worker Processing** | Active    | **0 jobs/s**     | Active          |
+| **API Error Rate**    | 0%        | **100%**         | 0%              |
+| **Redis Messages**    | Consumed  | **Not consumed** | Consumed        |
+| **Recovery Time**     | -         | -                | **<10 seconds** |
 
 **Analysis:**
+
 - ❌ Complete system halt during PostgreSQL outage
 - ❌ Workers cannot fetch jobs or update state
 - ✅ Redis messages remain in pending state (safe)
@@ -813,15 +867,16 @@ Kill worker process while processing 10 jobs
 
 **Impact:**
 
-| Metric | Value |
-|--------|-------|
-| **Jobs Lost** | 0 |
-| **Jobs Re-executed** | 10 |
-| **Recovery Time** | 60 seconds (stale threshold) |
+| Metric                     | Value                                 |
+| -------------------------- | ------------------------------------- |
+| **Jobs Lost**              | 0                                     |
+| **Jobs Re-executed**       | 10                                    |
+| **Recovery Time**          | 60 seconds (stale threshold)          |
 | **Duplicate Side Effects** | Possible (if handlers not idempotent) |
-| **Other Workers** | Unaffected |
+| **Other Workers**          | Unaffected                            |
 
 **Analysis:**
+
 - ✅ No jobs lost (messages in Redis pending)
 - ✅ Stale recovery claims messages after 60s
 - ⚠️ 10 jobs re-executed (at-least-once delivery)
@@ -836,15 +891,16 @@ Kill one API replica during load test
 
 **Impact:**
 
-| Metric | Value |
-|--------|-------|
-| **Request Failures** | 5-10 requests (in-flight) |
-| **New Request Failures** | 0 (load balancer redirects) |
-| **Job Submissions Lost** | 5-10 jobs |
-| **Recovery Time** | Immediate (replica 2 handles) |
-| **Client Impact** | Retries succeed on replica 2 |
+| Metric                   | Value                         |
+| ------------------------ | ----------------------------- |
+| **Request Failures**     | 5-10 requests (in-flight)     |
+| **New Request Failures** | 0 (load balancer redirects)   |
+| **Job Submissions Lost** | 5-10 jobs                     |
+| **Recovery Time**        | Immediate (replica 2 handles) |
+| **Client Impact**        | Retries succeed on replica 2  |
 
 **Analysis:**
+
 - ✅ Minimal impact (only in-flight requests)
 - ✅ Load balancer redirects to healthy replica
 - ⚠️ 5-10 jobs lost (clients should retry with idempotency key)
@@ -863,15 +919,18 @@ From theoretical analysis (Phases 25-26) and test observations:
 **Bottleneck:** PostgreSQL INSERT + UPDATE operations
 
 **Limits:**
+
 - Current: 166 TPS (83 INSERT + 83 UPDATE)
 - Theoretical Max: ~10,000 TPS (5K INSERT + 5K UPDATE)
 - **Scaling headroom: 60x**
 
 **Impact:**
+
 - Becomes bottleneck at ~10,000 jobs/minute
 - Manifests as increased latency and queue depth
 
 **Solutions:**
+
 ```
 1. Batch Inserts (100 jobs per INSERT)
    - Reduces 10K INSERT/s → 100 INSERT/s
@@ -896,15 +955,18 @@ From theoretical analysis (Phases 25-26) and test observations:
 **Bottleneck:** Redis single-threaded architecture
 
 **Limits:**
+
 - Current: 250 ops/s
 - Theoretical Max: ~50,000 ops/s
 - **Scaling headroom: 200x**
 
 **Impact:**
+
 - Becomes bottleneck at ~50,000 jobs/minute
 - CPU-bound on single core
 
 **Solutions:**
+
 ```
 1. Redis Cluster
    - Automatic sharding across multiple instances
@@ -924,11 +986,13 @@ From theoretical analysis (Phases 25-26) and test observations:
 **Bottleneck:** Redis delivers FIFO, ignores priority
 
 **Impact:**
+
 - CRITICAL jobs wait behind LOW jobs
 - Priority inversion under load
 - User-visible impact (SLA violations)
 
 **Solution:**
+
 ```
 Separate Redis streams per priority:
   taskflow:stream:{queue}:CRITICAL
@@ -944,16 +1008,19 @@ Workers consume CRITICAL first, then HIGH, etc.
 **Bottleneck:** PostgreSQL connection pool (max: 200)
 
 **Current Usage:**
+
 - 2 API replicas × 15 connections = 30
 - 3 workers × 20 connections = 60
 - **Total: 90/200 (45% utilization)**
 
 **At 10 Workers:**
+
 - 2 API × 15 = 30
 - 10 workers × 20 = 200
 - **Total: 230/200 (OVER LIMIT)** ❌
 
 **Solutions:**
+
 ```
 1. Increase max_connections to 300
 2. Use connection pooler (PgBouncer)
@@ -964,13 +1031,13 @@ Workers consume CRITICAL first, then HIGH, etc.
 
 **Current Architecture Limits:**
 
-| Load Level | Bottleneck | Max Throughput |
-|------------|------------|----------------|
-| **<1K jobs/min** | None | No bottleneck |
-| **1K-10K jobs/min** | None | Comfortable |
-| **10K-50K jobs/min** | PostgreSQL | Requires sharding |
-| **50K-100K jobs/min** | Redis | Requires clustering |
-| **>100K jobs/min** | Architecture | Requires redesign |
+| Load Level            | Bottleneck   | Max Throughput      |
+| --------------------- | ------------ | ------------------- |
+| **<1K jobs/min**      | None         | No bottleneck       |
+| **1K-10K jobs/min**   | None         | Comfortable         |
+| **10K-50K jobs/min**  | PostgreSQL   | Requires sharding   |
+| **50K-100K jobs/min** | Redis        | Requires clustering |
+| **>100K jobs/min**    | Architecture | Requires redesign   |
 
 ---
 
@@ -979,15 +1046,18 @@ Workers consume CRITICAL first, then HIGH, etc.
 ### Immediate Actions (Current Load)
 
 1. **Monitor PostgreSQL TPS**
+
    ```sql
-   SELECT 
+   SELECT
      sum(xact_commit + xact_rollback) / 60.0 AS tps
-   FROM pg_stat_database 
+   FROM pg_stat_database
    WHERE datname = 'taskflow';
    ```
+
    Alert if TPS > 5000 (approaching limit)
 
 2. **Enable Connection Pooling Metrics**
+
    ```typescript
    // Track pool usage
    setInterval(() => {
@@ -1053,20 +1123,21 @@ Workers consume CRITICAL first, then HIGH, etc.
 ### Capacity Planning
 
 **Current Configuration (3 workers):**
+
 - Comfortable load: <5K jobs/minute
 - Maximum load: 10K jobs/minute
 - Recommended: 5-7K jobs/minute (50% headroom)
 
 **Recommended Configuration:**
 
-| Load Target | Workers | PostgreSQL | Redis | Notes |
-|-------------|---------|------------|-------|-------|
-| **<1K jobs/min** | 1-2 | Single | Single | Development |
-| **1K-5K jobs/min** | 3-5 | Single | Single | ✅ Current |
-| **5K-10K jobs/min** | 5-10 | Single | Single | Production |
-| **10K-50K jobs/min** | 10-20 | Sharded (3x) | Cluster | Enterprise |
-| **50K-100K jobs/min** | 20-50 | Sharded (10x) | Cluster | Large scale |
-| **>100K jobs/min** | 50+ | Sharded (10x+) | Cluster | Redesign needed |
+| Load Target           | Workers | PostgreSQL     | Redis   | Notes           |
+| --------------------- | ------- | -------------- | ------- | --------------- |
+| **<1K jobs/min**      | 1-2     | Single         | Single  | Development     |
+| **1K-5K jobs/min**    | 3-5     | Single         | Single  | ✅ Current      |
+| **5K-10K jobs/min**   | 5-10    | Single         | Single  | Production      |
+| **10K-50K jobs/min**  | 10-20   | Sharded (3x)   | Cluster | Enterprise      |
+| **50K-100K jobs/min** | 20-50   | Sharded (10x)  | Cluster | Large scale     |
+| **>100K jobs/min**    | 50+     | Sharded (10x+) | Cluster | Redesign needed |
 
 ---
 
@@ -1110,6 +1181,7 @@ docker exec taskflow-redis redis-cli XPENDING taskflow:stream:default taskflow-w
 ### C. Performance Tuning
 
 **PostgreSQL Tuning:**
+
 ```sql
 -- postgresql.conf optimizations
 shared_buffers = 512MB
@@ -1127,6 +1199,7 @@ max_parallel_workers = 4
 ```
 
 **Redis Tuning:**
+
 ```conf
 # redis.conf optimizations
 maxmemory 900mb

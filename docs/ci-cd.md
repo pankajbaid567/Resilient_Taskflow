@@ -9,12 +9,14 @@ Resilient TaskFlow uses GitHub Actions for continuous integration, deployment, a
 **Trigger:** Push/PR to `main` or `develop` branches
 
 **Jobs:**
+
 - **Lint**: ESLint and Prettier formatting checks
 - **Type Check**: TypeScript compilation and type validation
 - **Test**: Unit and integration tests with PostgreSQL and Redis
 - **Build**: Build all applications (API, Worker, Dashboard)
 
 **Features:**
+
 - Parallel job execution for faster feedback
 - pnpm caching for dependency installation
 - Service containers for database/cache
@@ -25,17 +27,20 @@ Resilient TaskFlow uses GitHub Actions for continuous integration, deployment, a
 
 ### 2. Docker Workflow (`docker.yml`)
 
-**Trigger:** 
+**Trigger:**
+
 - Push to `main` branch
 - Version tags (`v*`)
 - Pull requests (build only)
 
 **Jobs:**
+
 - **Build and Push**: Multi-platform Docker images (amd64, arm64)
 - **Scan**: Trivy vulnerability scanning
 - **Docker Compose Test**: Integration testing
 
 **Features:**
+
 - GitHub Container Registry (ghcr.io) publishing
 - Multi-architecture support (amd64/arm64)
 - SBOM (Software Bill of Materials) generation
@@ -44,6 +49,7 @@ Resilient TaskFlow uses GitHub Actions for continuous integration, deployment, a
 - Image tagging: latest, semver, branch, SHA
 
 **Image Tags:**
+
 - `ghcr.io/YOUR_USERNAME/taskflow-api:latest`
 - `ghcr.io/YOUR_USERNAME/taskflow-worker:latest`
 - `ghcr.io/YOUR_USERNAME/taskflow-dashboard:latest`
@@ -53,11 +59,13 @@ Resilient TaskFlow uses GitHub Actions for continuous integration, deployment, a
 ### 3. Security Workflow (`security.yml`)
 
 **Trigger:**
+
 - Push/PR to `main` or `develop` branches
 - Weekly schedule (Mondays at 9:00 UTC)
 - Manual dispatch
 
 **Scans:**
+
 - **Dependency Review**: Checks for vulnerable dependencies in PRs
 - **NPM Audit**: Identifies npm package vulnerabilities
 - **CodeQL**: Static code analysis for security issues
@@ -67,6 +75,7 @@ Resilient TaskFlow uses GitHub Actions for continuous integration, deployment, a
 - **License Check**: Validates license compliance
 
 **Features:**
+
 - SARIF uploads to GitHub Security tab
 - Automated PR comments with scan results
 - Scheduled weekly scans
@@ -80,14 +89,17 @@ Resilient TaskFlow uses GitHub Actions for continuous integration, deployment, a
 **Trigger:** Manual workflow dispatch
 
 **Parameters:**
+
 - `environment`: staging or production
 - `version`: Docker tag to deploy (default: latest)
 
 **Jobs:**
+
 - **Deploy**: AWS ECS deployment with health checks
 - **Rollback**: Automatic rollback on failure
 
 **Deployment Steps:**
+
 1. Configure AWS credentials
 2. Update ECS task definitions
 3. Deploy API and Worker services
@@ -97,6 +109,7 @@ Resilient TaskFlow uses GitHub Actions for continuous integration, deployment, a
 7. Slack notifications
 
 **Features:**
+
 - Environment-specific deployments
 - Automated rollback on failure
 - Health check validation
@@ -107,10 +120,12 @@ Resilient TaskFlow uses GitHub Actions for continuous integration, deployment, a
 ### 5. Release Workflow (`release.yml`)
 
 **Trigger:**
+
 - Version tags (`v*`)
 - Manual workflow dispatch
 
 **Jobs:**
+
 - **Validate**: Version format validation
 - **Build**: Create release artifacts
 - **Docker**: Build and push versioned images
@@ -119,6 +134,7 @@ Resilient TaskFlow uses GitHub Actions for continuous integration, deployment, a
 - **Notify**: Slack notifications
 
 **Features:**
+
 - Semantic versioning support
 - Automated changelog from PR labels
 - Release artifacts with checksums
@@ -127,6 +143,7 @@ Resilient TaskFlow uses GitHub Actions for continuous integration, deployment, a
 - Deployment tracking issues
 
 **Release Artifacts:**
+
 - `taskflow-api-{version}.tar.gz`
 - `taskflow-worker-{version}.tar.gz`
 - `taskflow-dashboard-{version}.tar.gz`
@@ -139,6 +156,7 @@ Resilient TaskFlow uses GitHub Actions for continuous integration, deployment, a
 Configure these secrets in GitHub repository settings:
 
 ### AWS Deployment
+
 ```
 AWS_ROLE_ARN              # AWS IAM role for deployment
 AWS_REGION                # AWS region (e.g., us-east-1)
@@ -150,11 +168,13 @@ CLOUDFRONT_DISTRIBUTION_ID # CloudFront distribution for dashboard
 ```
 
 ### Notifications
+
 ```
 SLACK_WEBHOOK_URL         # Slack webhook for notifications
 ```
 
 ### Optional
+
 ```
 CODECOV_TOKEN             # Codecov upload token
 ```
@@ -162,6 +182,7 @@ CODECOV_TOKEN             # Codecov upload token
 ## Environment Variables
 
 ### Development
+
 ```bash
 NODE_ENV=development
 DATABASE_URL=postgresql://user:pass@localhost:5432/taskflow
@@ -170,6 +191,7 @@ KAFKA_BROKERS=localhost:19092
 ```
 
 ### Production
+
 ```bash
 NODE_ENV=production
 DATABASE_URL=postgresql://user:pass@prod-db:5432/taskflow
@@ -184,6 +206,7 @@ API_KEY=<secure-api-key>
 ### Running CI on Pull Requests
 
 CI runs automatically on all PRs. Ensure:
+
 - All tests pass
 - Linting passes
 - Type checking passes
@@ -192,6 +215,7 @@ CI runs automatically on all PRs. Ensure:
 ### Creating a Release
 
 1. **Tag the version:**
+
    ```bash
    git tag v1.0.0
    git push origin v1.0.0
@@ -240,7 +264,7 @@ CI runs automatically on all PRs. Ensure:
 
 ### Branch Strategy
 
-- `main`: Production-ready code, protected branch
+- `main`: reviewed core code; production readiness is not asserted
 - `develop`: Integration branch for features
 - Feature branches: `feature/description`
 - Bugfix branches: `fix/description`
@@ -258,6 +282,7 @@ Use conventional commits for automated changelog:
 ### Pull Request Labels
 
 Add labels for changelog categorization:
+
 - `feature`, `enhancement` → Features
 - `bug`, `fix` → Bug Fixes
 - `documentation`, `docs` → Documentation
@@ -277,6 +302,7 @@ pnpm build
 ### Docker Image Tags
 
 The workflow creates multiple tags:
+
 - `latest`: Latest build from main branch
 - `v1.0.0`: Semantic version tag
 - `v1.0`: Major.minor tag
@@ -289,6 +315,7 @@ The workflow creates multiple tags:
 ### GitHub Actions Dashboard
 
 View workflow runs at:
+
 ```
 https://github.com/YOUR_USERNAME/Resilient_TaskFlow/actions
 ```
@@ -306,6 +333,7 @@ Add to README.md:
 ### Slack Notifications
 
 Configure Slack webhook for:
+
 - Deployment success/failure
 - Release notifications
 - Security scan alerts
@@ -315,6 +343,7 @@ Configure Slack webhook for:
 ### CI Failures
 
 **Tests failing:**
+
 ```bash
 # Run tests locally with same environment
 docker-compose up -d postgres redis
@@ -322,6 +351,7 @@ pnpm test
 ```
 
 **Build failing:**
+
 ```bash
 # Clear cache and rebuild
 pnpm clean
@@ -330,6 +360,7 @@ pnpm build
 ```
 
 **Type errors:**
+
 ```bash
 pnpm typecheck
 ```
@@ -337,27 +368,32 @@ pnpm typecheck
 ### Docker Build Failures
 
 **Image too large:**
+
 - Review Dockerfile layers
 - Use `.dockerignore` effectively
 - Multi-stage builds already implemented
 
 **Platform issues:**
+
 - Check if building for correct platform
 - ARM64 builds may be slower
 
 ### Deployment Failures
 
 **Health check timeout:**
+
 - Check ECS task logs
 - Verify environment variables
 - Check database connectivity
 
 **Migration failures:**
+
 - Review migration logs
 - Check database permissions
 - Verify migration files
 
 **Rollback triggered:**
+
 - Check deployment logs
 - Review health check results
 - Manual verification may be needed
@@ -365,6 +401,7 @@ pnpm typecheck
 ### Security Scan Failures
 
 **High/Critical vulnerabilities:**
+
 ```bash
 # Run audit locally
 pnpm audit
@@ -372,6 +409,7 @@ pnpm audit fix
 ```
 
 **False positives:**
+
 - Review vulnerability details
 - Add exceptions if safe
 - Document reasoning
@@ -381,6 +419,7 @@ pnpm audit fix
 ### Workflow Runtime
 
 Current average runtimes:
+
 - CI: ~8-12 minutes
 - Docker: ~15-20 minutes
 - Security: ~10-15 minutes
@@ -390,6 +429,7 @@ Current average runtimes:
 ### Caching Strategy
 
 The workflows use:
+
 - pnpm store caching
 - Docker layer caching (GitHub Actions cache)
 - Build artifact caching
@@ -397,6 +437,7 @@ The workflows use:
 ### Parallel Execution
 
 Jobs run in parallel where possible:
+
 - CI: All jobs parallel except status
 - Security: All scans parallel
 - Docker: Matrix builds parallel
@@ -446,6 +487,7 @@ Jobs run in parallel where possible:
 ## Future Enhancements
 
 Potential improvements:
+
 - [ ] Add E2E tests with Playwright
 - [ ] Implement blue-green deployments
 - [ ] Add canary deployment strategy
@@ -466,6 +508,7 @@ Potential improvements:
 ## Support
 
 For CI/CD issues:
+
 1. Check workflow logs in GitHub Actions
 2. Review this documentation
 3. Check GitHub Discussions

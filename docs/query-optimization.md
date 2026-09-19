@@ -43,6 +43,7 @@ max_wal_size = 4GB
 ### Primary Indexes
 
 All tables have primary key indexes (UUID). These support:
+
 - Fast row lookups by ID
 - Foreign key constraints
 - Join operations
@@ -52,6 +53,7 @@ All tables have primary key indexes (UUID). These support:
 #### Jobs Table
 
 **1. Worker Polling (Most Critical)**
+
 ```sql
 CREATE INDEX idx_jobs_worker_polling
 ON jobs (queue_id, status, priority DESC, created_at ASC)
@@ -61,7 +63,8 @@ WHERE status = 'QUEUED';
 
 **Why**: This is the hottest query path. Workers constantly poll for jobs.
 
-**Query**: 
+**Query**:
+
 ```sql
 SELECT id, type, payload, max_attempts, timeout_ms, scheduled_at
 FROM jobs
@@ -73,8 +76,9 @@ LIMIT 10;
 **Optimization**: Covering index includes all columns needed, avoiding heap lookup.
 
 **2. Stale Lease Detection**
+
 ```sql
-CREATE INDEX idx_jobs_stale_leases 
+CREATE INDEX idx_jobs_stale_leases
 ON jobs (lease_expires_at, status)
 WHERE lease_expires_at IS NOT NULL AND status = 'PROCESSING';
 ```
@@ -82,6 +86,7 @@ WHERE lease_expires_at IS NOT NULL AND status = 'PROCESSING';
 **Why**: Worker recovery scans for expired leases every 30s.
 
 **Query**:
+
 ```sql
 SELECT id, worker_id, lease_id
 FROM jobs
@@ -91,6 +96,7 @@ WHERE lease_expires_at < NOW() AND status = 'PROCESSING';
 **Optimization**: Partial index only on processing jobs with leases.
 
 **3. Scheduled Job Pickup**
+
 ```sql
 CREATE INDEX idx_jobs_ready_to_schedule
 ON jobs (scheduled_at, status)
@@ -100,6 +106,7 @@ WHERE status = 'CREATED' AND scheduled_at IS NOT NULL;
 **Why**: Scheduler polls for jobs ready to execute.
 
 **Query**:
+
 ```sql
 SELECT id FROM jobs
 WHERE status = 'CREATED' AND scheduled_at <= NOW()
@@ -109,6 +116,7 @@ LIMIT 100;
 **Optimization**: Partial index only on scheduled jobs.
 
 **4. User Job Listing**
+
 ```sql
 CREATE INDEX idx_jobs_user_status_created
 ON jobs (user_id, status, created_at DESC);
@@ -117,6 +125,7 @@ ON jobs (user_id, status, created_at DESC);
 **Why**: Dashboard queries filter by user and status.
 
 **Query**:
+
 ```sql
 SELECT * FROM jobs
 WHERE user_id = $1 AND status = $2
@@ -125,6 +134,7 @@ LIMIT 20;
 ```
 
 **5. Failed Jobs (DLQ)**
+
 ```sql
 CREATE INDEX idx_jobs_failed_recent
 ON jobs (status, failed_at DESC)
@@ -136,6 +146,7 @@ WHERE status IN ('FAILED', 'DEAD_LETTERED');
 #### Workers Table
 
 **1. Stale Worker Detection**
+
 ```sql
 CREATE INDEX idx_workers_stale
 ON workers (last_heartbeat_at, status)
@@ -145,14 +156,16 @@ WHERE status = 'ACTIVE';
 **Why**: Health check service monitors worker heartbeats.
 
 **Query**:
+
 ```sql
 SELECT id, worker_name, last_heartbeat_at
 FROM workers
-WHERE last_heartbeat_at < NOW() - INTERVAL '1 minute' 
+WHERE last_heartbeat_at < NOW() - INTERVAL '1 minute'
   AND status = 'ACTIVE';
 ```
 
 **2. Active Workers by Queue**
+
 ```sql
 CREATE INDEX idx_workers_active_queues
 ON workers USING GIN (queues)
@@ -162,6 +175,7 @@ WHERE status = 'ACTIVE';
 **Why**: Queue stats need active worker count per queue.
 
 **Query**:
+
 ```sql
 SELECT COUNT(*) FROM workers
 WHERE status = 'ACTIVE' AND 'email' = ANY(queues);
@@ -172,6 +186,7 @@ WHERE status = 'ACTIVE' AND 'email' = ANY(queues);
 #### Job Attempts Table
 
 **1. Failed Attempts per Job**
+
 ```sql
 CREATE INDEX idx_job_attempts_job_failures
 ON job_attempts (job_id, status, attempt_number DESC)
@@ -181,6 +196,7 @@ WHERE status = 'FAILED';
 **Why**: Error analysis needs failed attempt history.
 
 **2. Slow Job Detection**
+
 ```sql
 CREATE INDEX idx_job_attempts_slow
 ON job_attempts (duration_ms DESC)
@@ -190,6 +206,7 @@ WHERE duration_ms > 5000;
 **Why**: Performance monitoring identifies slow jobs.
 
 **Query**:
+
 ```sql
 SELECT job_id, duration_ms, started_at
 FROM job_attempts
@@ -201,6 +218,7 @@ LIMIT 100;
 #### Idempotency Keys Table
 
 **1. Active Keys Lookup**
+
 ```sql
 CREATE INDEX idx_idempotency_keys_active
 ON idempotency_keys (user_id, idempotency_key)
@@ -210,6 +228,7 @@ WHERE expires_at > NOW();
 **Why**: Every job submission checks idempotency.
 
 **Query**:
+
 ```sql
 SELECT job_id FROM idempotency_keys
 WHERE user_id = $1 AND idempotency_key = $2 AND expires_at > NOW();
@@ -220,12 +239,14 @@ WHERE user_id = $1 AND idempotency_key = $2 AND expires_at > NOW();
 ### Index Maintenance
 
 **Automatic Vacuuming**:
+
 ```sql
 ALTER TABLE jobs SET (autovacuum_vacuum_scale_factor = 0.05);
 ALTER TABLE job_attempts SET (autovacuum_vacuum_scale_factor = 0.1);
 ```
 
 **Manual Vacuum** (after bulk operations):
+
 ```sql
 VACUUM ANALYZE jobs;
 VACUUM ANALYZE workers;
@@ -233,6 +254,7 @@ VACUUM ANALYZE job_attempts;
 ```
 
 **Reindex** (if indexes become bloated):
+
 ```sql
 REINDEX TABLE CONCURRENTLY jobs;
 ```
@@ -242,6 +264,7 @@ REINDEX TABLE CONCURRENTLY jobs;
 ### Efficient Patterns
 
 #### ✅ Use Prepared Statements
+
 ```typescript
 // Good: Prepared statement with parameters
 const result = await db
@@ -255,6 +278,7 @@ const result = await db
 **Why**: Prepared statements are cached and prevent SQL injection.
 
 #### ✅ Use Covering Indexes
+
 ```typescript
 // Good: Only select columns in covering index
 const result = await db
@@ -270,18 +294,22 @@ const result = await db
 **Why**: Avoids heap lookup if all columns are in index.
 
 #### ✅ Use Batch Operations
+
 ```typescript
 // Good: Single query for multiple rows
-await db.insert(jobAttempts).values([
-  { jobId: 'job1', /* ... */ },
-  { jobId: 'job2', /* ... */ },
-  { jobId: 'job3', /* ... */ },
-]);
+await db
+  .insert(jobAttempts)
+  .values([
+    { jobId: 'job1' /* ... */ },
+    { jobId: 'job2' /* ... */ },
+    { jobId: 'job3' /* ... */ },
+  ]);
 ```
 
 **Why**: Reduces round-trip time (RTT).
 
 #### ✅ Use EXISTS for Existence Checks
+
 ```typescript
 // Good: Use EXISTS
 const exists = await db
@@ -296,19 +324,19 @@ const exists = await db
 ### Inefficient Patterns
 
 #### ❌ Avoid SELECT *
+
 ```typescript
 // Bad: Fetches all columns
 const result = await db.select().from(jobs);
 
 // Good: Select only needed columns
-const result = await db
-  .select({ id: jobs.id, status: jobs.status })
-  .from(jobs);
+const result = await db.select({ id: jobs.id, status: jobs.status }).from(jobs);
 ```
 
 **Why**: Fetching unused columns wastes memory and I/O.
 
 #### ❌ Avoid N+1 Queries
+
 ```typescript
 // Bad: N+1 queries
 for (const job of jobs) {
@@ -328,6 +356,7 @@ const result = await db
 **Why**: N+1 creates network overhead (N RTTs).
 
 #### ❌ Avoid OR in WHERE
+
 ```typescript
 // Bad: OR prevents index usage
 const result = await db
@@ -345,23 +374,19 @@ const result = await db
 **Why**: IN can use index, OR often can't.
 
 #### ❌ Avoid LIKE with Leading Wildcard
+
 ```typescript
 // Bad: Leading wildcard prevents index usage
-const result = await db
-  .select()
-  .from(jobs)
-  .where(like(jobs.type, '%email%'));
+const result = await db.select().from(jobs).where(like(jobs.type, '%email%'));
 
 // Good: Use full-text search or exact match
-const result = await db
-  .select()
-  .from(jobs)
-  .where(eq(jobs.type, 'email-send'));
+const result = await db.select().from(jobs).where(eq(jobs.type, 'email-send'));
 ```
 
 **Why**: Leading wildcard requires full table scan.
 
 #### ❌ Avoid Function Calls on Indexed Columns
+
 ```typescript
 // Bad: Function prevents index usage
 const result = await db
@@ -370,10 +395,7 @@ const result = await db
   .where(sql`LOWER(${jobs.type}) = 'email'`);
 
 // Good: Store normalized values
-const result = await db
-  .select()
-  .from(jobs)
-  .where(eq(jobs.type, 'email'));
+const result = await db.select().from(jobs).where(eq(jobs.type, 'email'));
 ```
 
 **Why**: Index can't be used on function result.
@@ -392,13 +414,13 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  
+
   // Connection pool settings
   max: 20, // Maximum connections
-  min: 5,  // Minimum connections (keep-alive)
+  min: 5, // Minimum connections (keep-alive)
   idleTimeoutMillis: 30000, // Close idle connections after 30s
   connectionTimeoutMillis: 2000, // Wait max 2s for connection
-  
+
   // Statement timeout
   statement_timeout: 10000, // Kill queries after 10s
 });
@@ -413,10 +435,10 @@ const db = drizzle(pool);
 await db.transaction(async (tx) => {
   // Create job
   const job = await tx.insert(jobs).values(/* ... */).returning();
-  
+
   // Record idempotency key
   await tx.insert(idempotencyKeys).values(/* ... */);
-  
+
   // Create initial attempt
   await tx.insert(jobAttempts).values(/* ... */);
 });
@@ -434,10 +456,12 @@ const result = await db
     status: 'PROCESSING',
     version: sql`${jobs.version} + 1`,
   })
-  .where(and(
-    eq(jobs.id, jobId),
-    eq(jobs.version, currentVersion) // Version check
-  ))
+  .where(
+    and(
+      eq(jobs.id, jobId),
+      eq(jobs.version, currentVersion) // Version check
+    )
+  )
   .returning();
 
 if (result.length === 0) {
@@ -453,7 +477,7 @@ if (result.length === 0) {
 // Good: Use limit and offset for pagination
 async function listJobs(page: number = 1, pageSize: number = 20) {
   const offset = (page - 1) * pageSize;
-  
+
   return await db
     .select()
     .from(jobs)
@@ -501,19 +525,17 @@ const cache = new LRUCache<string, any>({
 
 async function getQueueStats(queueId: string) {
   const cacheKey = `queue_stats:${queueId}`;
-  
+
   // Check cache
   const cached = cache.get(cacheKey);
   if (cached) return cached;
-  
+
   // Query database
-  const stats = await db
-    .select()
-    .from(/* ... */);
-  
+  const stats = await db.select().from(/* ... */);
+
   // Store in cache
   cache.set(cacheKey, stats);
-  
+
   return stats;
 }
 ```
@@ -637,11 +659,13 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 **Symptom**: PostgreSQL process consuming high CPU
 
 **Possible Causes**:
+
 1. Missing indexes (full table scans)
 2. Complex queries
 3. Too many connections
 
 **Investigation**:
+
 ```sql
 -- Find running queries
 SELECT pid, query, state, query_start, now() - query_start AS duration
@@ -658,6 +682,7 @@ SELECT pg_terminate_backend(pid);
 **Symptom**: Queries taking > 100ms
 
 **Investigation**:
+
 ```sql
 -- Explain query plan
 EXPLAIN ANALYZE
@@ -668,11 +693,13 @@ LIMIT 10;
 ```
 
 **Look for**:
+
 - Seq Scan (should be Index Scan)
 - High execution time
 - Many rows processed
 
 **Fix**:
+
 - Add index
 - Rewrite query
 - Update statistics: `ANALYZE jobs;`
@@ -682,6 +709,7 @@ LIMIT 10;
 **Symptom**: Queries waiting for locks
 
 **Investigation**:
+
 ```sql
 -- Find blocking queries
 SELECT
@@ -691,7 +719,7 @@ SELECT
   blocking_activity.query AS blocking_query
 FROM pg_catalog.pg_locks blocked_locks
 JOIN pg_catalog.pg_stat_activity blocked_activity ON blocked_activity.pid = blocked_locks.pid
-JOIN pg_catalog.pg_locks blocking_locks 
+JOIN pg_catalog.pg_locks blocking_locks
   ON blocking_locks.locktype = blocked_locks.locktype
   AND blocking_locks.database IS NOT DISTINCT FROM blocked_locks.database
   AND blocking_locks.relation IS NOT DISTINCT FROM blocked_locks.relation
@@ -708,6 +736,7 @@ WHERE NOT blocked_locks.granted;
 ```
 
 **Fix**:
+
 - Keep transactions short
 - Use optimistic locking instead of row locks
 - Consider SKIP LOCKED for job polling
@@ -717,6 +746,7 @@ WHERE NOT blocked_locks.granted;
 **Symptom**: "Too many connections" errors
 
 **Investigation**:
+
 ```sql
 -- Check connection count
 SELECT count(*) FROM pg_stat_activity;
@@ -726,6 +756,7 @@ SHOW max_connections;
 ```
 
 **Fix**:
+
 - Increase max_connections
 - Fix connection leaks in application
 - Use connection pooling (PgBouncer)
@@ -743,6 +774,6 @@ SHOW max_connections;
 ✅ **Keep transactions short** to avoid lock contention  
 ✅ **Use connection pooling** to manage resources  
 ✅ **Cache frequently accessed data** to reduce DB load  
-✅ **Profile before optimizing** to find real bottlenecks  
+✅ **Profile before optimizing** to find real bottlenecks
 
 **Remember**: Premature optimization is the root of all evil. Profile first, then optimize!

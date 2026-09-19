@@ -256,7 +256,7 @@ export class Profiler {
    * Log the report
    */
   logReport(): void {
-    console.log(this.generateReport());
+    logger.info(this.generateReport());
   }
 
   /**

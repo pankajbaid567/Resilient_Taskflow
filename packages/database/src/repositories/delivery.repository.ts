@@ -437,6 +437,15 @@ export async function acquireJobForDelivery(
       return { kind: 'NOT_READY', job };
     }
 
+    const [queue] = await tx
+      .select({ isActive: queues.isActive })
+      .from(queues)
+      .where(eq(queues.id, job.queueId))
+      .limit(1);
+    if (!queue?.isActive) {
+      return { kind: 'NOT_READY', job };
+    }
+
     if (job.attempts >= job.maxAttempts) {
       return { kind: 'NOT_READY', job };
     }

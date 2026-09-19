@@ -151,6 +151,36 @@ export async function updateWorkerStatus(
   return worker || null;
 }
 
+/** Durably request cooperative shutdown of a live worker. */
+export async function requestWorkerStop(
+  workerId: string
+): Promise<Worker | undefined> {
+  return db.transaction(async (tx) => {
+    const [worker] = await tx
+      .select()
+      .from(workers)
+      .where(eq(workers.id, workerId))
+      .limit(1)
+      .for('update');
+
+    if (!worker) return undefined;
+    if (worker.status === WorkerStatus.STOPPING) return worker;
+    if (
+      worker.status !== WorkerStatus.ACTIVE &&
+      worker.status !== WorkerStatus.STARTING
+    ) {
+      return worker;
+    }
+
+    const [stopping] = await tx
+      .update(workers)
+      .set({ status: WorkerStatus.STOPPING })
+      .where(eq(workers.id, workerId))
+      .returning();
+    return stopping;
+  });
+}
+
 /**
  * Get stale workers (heartbeat older than threshold)
  */

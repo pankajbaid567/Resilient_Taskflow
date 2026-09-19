@@ -1,10 +1,14 @@
+> Historical planning input only. It is not current implementation status or acceptance evidence.
+
 Below is the **`prompts.md`** I would use with Claude Opus / another coding agent. It is deliberately phased: the agent should **not try to build the entire distributed system in one shot**, because the difficult parts are correctness, failure semantics, concurrency, idempotency, recovery, and benchmarking.
 
 ```md
 # PROMPTS.md
 
 # RESILIENT TASKFLOW
+
 ## Production-Grade Distributed Task Queue
+
 ### TypeScript + Fastify + Redis Streams + PostgreSQL + Kafka/Redpanda
 
 ---
@@ -181,50 +185,50 @@ If Turborepo adds unnecessary complexity, use pnpm workspaces, but preserve clea
 The intended architecture is:
 
 Client
-    |
-    v
+|
+v
 Load Balancer
-    |
-    v
+|
+v
 Fastify API
-    |
-    +--------------------+
-    |                    |
-    v                    v
-PostgreSQL             Redis
-    |                    |
-    |                    v
-    |              Redis Streams
-    |                    |
-    |             +------+------+------+
-    |             |      |      |      |
-    |             v      v      v      v
-    |            W1     W2     W3     WN
-    |             |      |      |      |
-    +-------------+------+------+
-                  |
-                  v
-              Job State
+|
++--------------------+
+| |
+v v
+PostgreSQL Redis
+| |
+| v
+| Redis Streams
+| |
+| +------+------+------+
+| | | | |
+| v v v v
+| W1 W2 W3 WN
+| | | | |
++-------------+------+------+
+|
+v
+Job State
 
 Job lifecycle events
-        |
-        v
-      Kafka
-        |
-        +--> analytics consumer
-        +--> audit consumer
-        +--> notification consumer
-        +--> metrics consumer
+|
+v
+Kafka
+|
++--> analytics consumer
++--> audit consumer
++--> notification consumer
++--> metrics consumer
 
 Observability:
 
 API / Workers
-     |
-     +--> Pino
-     +--> Prometheus
-     +--> OpenTelemetry
-     |
-     +--> Grafana
+|
++--> Pino
++--> Prometheus
++--> OpenTelemetry
+|
++--> Grafana
 ```
 
 ---
@@ -286,27 +290,27 @@ Document every valid and invalid transition.
 
 Every job should support:
 
-* id
-* queue
-* type
-* payload
-* priority
-* status
-* attempts
-* maxAttempts
-* timeout
-* idempotencyKey
-* scheduledAt
-* createdAt
-* startedAt
-* completedAt
-* failedAt
-* workerId
-* leaseId
-* leaseExpiresAt
-* result
-* error
-* metadata
+- id
+- queue
+- type
+- payload
+- priority
+- status
+- attempts
+- maxAttempts
+- timeout
+- idempotencyKey
+- scheduledAt
+- createdAt
+- startedAt
+- completedAt
+- failedAt
+- workerId
+- leaseId
+- leaseExpiresAt
+- result
+- error
+- metadata
 
 Never store sensitive payloads unnecessarily in logs.
 
@@ -356,22 +360,22 @@ Workers must stop accepting new work and finish/release active work safely.
 
 Explicitly design for:
 
-* API crash
-* worker crash
-* worker network partition
-* Redis restart
-* PostgreSQL restart
-* Kafka restart
-* duplicate delivery
-* delayed delivery
-* message acknowledgement failure
-* job timeout
-* job handler failure
-* malformed payload
-* poison job
-* retry storm
-* database transaction failure
-* partial system failure
+- API crash
+- worker crash
+- worker network partition
+- Redis restart
+- PostgreSQL restart
+- Kafka restart
+- duplicate delivery
+- delayed delivery
+- message acknowledgement failure
+- job timeout
+- job handler failure
+- malformed payload
+- poison job
+- retry storm
+- database transaction failure
+- partial system failure
 
 Every failure scenario must have:
 
@@ -387,27 +391,27 @@ Every failure scenario must have:
 
 Implement:
 
-* API authentication
-* API keys
-* role-based authorization
-* request validation
-* payload size limits
-* rate limiting
-* secure headers
-* CORS
-* secrets through environment variables
-* no secrets committed to Git
-* SQL injection prevention
-* audit logging
-* safe error responses
+- API authentication
+- API keys
+- role-based authorization
+- request validation
+- payload size limits
+- rate limiting
+- secure headers
+- CORS
+- secrets through environment variables
+- no secrets committed to Git
+- SQL injection prevention
+- audit logging
+- safe error responses
 
 Never expose:
 
-* database credentials
-* Redis credentials
-* Kafka credentials
-* API keys
-* internal stack traces in production
+- database credentials
+- Redis credentials
+- Kafka credentials
+- API keys
+- internal stack traces in production
 
 ---
 
@@ -415,33 +419,33 @@ Never expose:
 
 ## DO
 
-* write tests before/alongside complex behavior
-* use strict TypeScript
-* use explicit types
-* use dependency injection where useful
-* use structured logging
-* use transactions for state transitions
-* document distributed-system assumptions
-* measure performance
-* test failures
-* keep services independently testable
-* keep commits focused
-* maintain a clean README
+- write tests before/alongside complex behavior
+- use strict TypeScript
+- use explicit types
+- use dependency injection where useful
+- use structured logging
+- use transactions for state transitions
+- document distributed-system assumptions
+- measure performance
+- test failures
+- keep services independently testable
+- keep commits focused
+- maintain a clean README
 
 ## DO NOT
 
-* use `any` unless absolutely justified
-* use global mutable state
-* silently swallow errors
-* use arbitrary `setTimeout` hacks for reliability
-* claim exactly-once processing
-* hide queue semantics behind BullMQ
-* add microservices without justification
-* introduce Kubernetes early
-* optimize before measuring
-* fabricate benchmark numbers
-* over-engineer authentication
-* create 20 services just to appear distributed
+- use `any` unless absolutely justified
+- use global mutable state
+- silently swallow errors
+- use arbitrary `setTimeout` hacks for reliability
+- claim exactly-once processing
+- hide queue semantics behind BullMQ
+- add microservices without justification
+- introduce Kubernetes early
+- optimize before measuring
+- fabricate benchmark numbers
+- over-engineer authentication
+- create 20 services just to appear distributed
 
 ---
 
@@ -541,10 +545,10 @@ Pay special attention to race conditions.
 
 For every critical operation explain:
 
-* what can happen concurrently
-* what can fail
-* what transaction boundary exists
-* what guarantees are provided
+- what can happen concurrently
+- what can fail
+- what transaction boundary exists
+- what guarantees are provided
 
 Do not implement until the architecture is internally consistent.
 
@@ -558,22 +562,22 @@ Implement the repository foundation.
 
 Requirements:
 
-* pnpm
-* TypeScript strict mode
-* Turborepo/workspaces
-* Fastify
-* PostgreSQL
-* Drizzle
-* Redis client
-* Redpanda/Kafka client
-* Zod
-* Pino
-* Vitest
-* Docker
-* environment configuration
-* linting
-* formatting
-* Git hooks if useful
+- pnpm
+- TypeScript strict mode
+- Turborepo/workspaces
+- Fastify
+- PostgreSQL
+- Drizzle
+- Redis client
+- Redpanda/Kafka client
+- Zod
+- Pino
+- Vitest
+- Docker
+- environment configuration
+- linting
+- formatting
+- Git hooks if useful
 
 Create:
 
@@ -591,12 +595,12 @@ observability
 
 Requirements:
 
-* clean dependency boundaries
-* no circular dependencies
-* no business logic inside route files
-* environment validation at startup
-* graceful shutdown skeleton
-* health endpoints
+- clean dependency boundaries
+- no circular dependencies
+- no business logic inside route files
+- environment validation at startup
+- graceful shutdown skeleton
+- health endpoints
 
 Implement:
 
@@ -643,16 +647,16 @@ Implement the job state machine.
 
 Requirements:
 
-* explicit valid transitions
-* invalid transitions rejected
-* transactional state changes
-* optimistic/concurrency-safe updates where required
-* timestamps
-* UUID/ULID identifiers
-* appropriate JSONB usage
-* constraints
-* foreign keys
-* indexes
+- explicit valid transitions
+- invalid transitions rejected
+- transactional state changes
+- optimistic/concurrency-safe updates where required
+- timestamps
+- UUID/ULID identifiers
+- appropriate JSONB usage
+- constraints
+- foreign keys
+- indexes
 
 Create domain services rather than placing logic in routes.
 
@@ -660,11 +664,11 @@ Implement repository tests.
 
 Add tests for:
 
-* valid transitions
-* invalid transitions
-* concurrent state changes
-* transaction rollback
-* idempotency uniqueness
+- valid transitions
+- invalid transitions
+- concurrent state changes
+- transaction rollback
+- idempotency uniqueness
 
 Document the state machine.
 
@@ -680,15 +684,15 @@ Do NOT use BullMQ.
 
 Implement:
 
-* stream creation
-* consumer groups
-* producers
-* consumers
-* acknowledgement
-* pending-entry inspection
-* stale-message recovery
-* consumer identification
-* graceful consumer shutdown
+- stream creation
+- consumer groups
+- producers
+- consumers
+- acknowledgement
+- pending-entry inspection
+- stale-message recovery
+- consumer identification
+- graceful consumer shutdown
 
 Define:
 
@@ -717,13 +721,13 @@ Add integration tests using a real Redis container.
 
 Test:
 
-* enqueue
-* consume
-* acknowledge
-* duplicate delivery
-* pending messages
-* consumer restart
-* stale consumer recovery
+- enqueue
+- consume
+- acknowledge
+- duplicate delivery
+- pending messages
+- consumer restart
+- stale consumer recovery
 
 ---
 
@@ -747,14 +751,14 @@ GET /api/v1/queues/:queue/stats
 
 Implement:
 
-* Zod validation
-* authentication
-* authorization
-* idempotency
-* rate limiting
-* pagination
-* consistent error responses
-* OpenAPI documentation
+- Zod validation
+- authentication
+- authorization
+- idempotency
+- rate limiting
+- pagination
+- consistent error responses
+- OpenAPI documentation
 
 Critical requirement:
 
@@ -831,14 +835,14 @@ Implement production-grade retry behavior.
 
 Requirements:
 
-* configurable max attempts
-* exponential backoff
-* jitter
-* retryable vs non-retryable errors
-* retry scheduling
-* retry metadata
-* attempt records
-* DLQ transition
+- configurable max attempts
+- exponential backoff
+- jitter
+- retryable vs non-retryable errors
+- retry scheduling
+- retry metadata
+- attempt records
+- DLQ transition
 
 Example:
 
@@ -853,13 +857,13 @@ Implement retry storm protection.
 
 Tests must cover:
 
-* retryable errors
-* permanent errors
-* maximum attempts
-* backoff correctness
-* jitter range
-* DLQ transition
-* duplicate delivery during retry
+- retryable errors
+- permanent errors
+- maximum attempts
+- backoff correctness
+- jitter range
+- DLQ transition
+- duplicate delivery during retry
 
 Do not rely solely on application timers for durable scheduling.
 
@@ -877,11 +881,11 @@ Idempotency-Key HTTP header.
 
 Requirements:
 
-* same key + same request -> same job
-* same key + different request -> conflict
-* concurrent identical requests -> one job
-* database uniqueness enforcement
-* safe retry after API crash
+- same key + same request -> same job
+- same key + different request -> conflict
+- concurrent identical requests -> one job
+- database uniqueness enforcement
+- safe retry after API crash
 
 Also design handler-level idempotency.
 
@@ -901,11 +905,11 @@ A worker must obtain a lease before processing.
 
 Lease includes:
 
-* leaseId
-* workerId
-* jobId
-* acquiredAt
-* expiresAt
+- leaseId
+- workerId
+- jobId
+- acquiredAt
+- expiresAt
 
 Workers must periodically renew the lease.
 
@@ -930,11 +934,11 @@ If a worker dies:
 
 Test:
 
-* worker crash
-* lease expiry
-* worker pause
-* delayed heartbeat
-* duplicate worker recovery
+- worker crash
+- lease expiry
+- worker pause
+- delayed heartbeat
+- duplicate worker recovery
 
 ---
 
@@ -959,9 +963,9 @@ scheduledAt
 
 Support:
 
-* immediate jobs
-* delayed jobs
-* retry-delayed jobs
+- immediate jobs
+- delayed jobs
+- retry-delayed jobs
 
 Do not build a naive polling loop that constantly queries PostgreSQL.
 
@@ -971,11 +975,11 @@ Document the trade-offs.
 
 Test:
 
-* priority ordering
-* starvation prevention
-* delayed execution
-* scheduler restart
-* duplicate scheduling
+- priority ordering
+- starvation prevention
+- delayed execution
+- scheduler restart
+- duplicate scheduling
 
 ---
 
@@ -993,11 +997,11 @@ PROCESSING -> CANCEL_REQUESTED -> CANCELLED
 
 Requirements:
 
-* queued jobs should be cancellable
-* running jobs should support cooperative cancellation
-* cancellation must be race-safe
-* completed jobs cannot be cancelled
-* cancellation should be idempotent
+- queued jobs should be cancellable
+- running jobs should support cooperative cancellation
+- cancellation must be race-safe
+- completed jobs cannot be cancelled
+- cancellation should be idempotent
 
 Implement AbortController or equivalent cancellation propagation for handlers.
 
@@ -1034,12 +1038,12 @@ Implement at least two consumers:
 
 Requirements:
 
-* idempotent consumers
-* consumer groups
-* offsets
-* retries
-* dead-letter handling for events
-* schema versioning
+- idempotent consumers
+- consumer groups
+- offsets
+- retries
+- dead-letter handling for events
+- schema versioning
 
 Document:
 
@@ -1055,9 +1059,9 @@ Implement distributed API rate limiting using Redis.
 
 Use a well-defined algorithm:
 
-* token bucket
+- token bucket
   OR
-* sliding window
+- sliding window
 
 Support per-user and/or per-API-key limits.
 
@@ -1067,12 +1071,12 @@ Example:
 
 Requirements:
 
-* distributed-safe
-* race-safe
-* HTTP 429
-* Retry-After
-* configurable limits
-* tests under concurrency
+- distributed-safe
+- race-safe
+- HTTP 429
+- Retry-After
+- configurable limits
+- tests under concurrency
 
 Benchmark the rate limiter.
 
@@ -1179,23 +1183,23 @@ Create:
 
 ## Unit tests
 
-* state machine
-* retry logic
-* backoff
-* idempotency
-* priority
-* scheduling
-* cancellation
-* rate limiting
-* lease logic
+- state machine
+- retry logic
+- backoff
+- idempotency
+- priority
+- scheduling
+- cancellation
+- rate limiting
+- lease logic
 
 ## Integration tests
 
-* API + PostgreSQL
-* API + Redis
-* worker + Redis
-* worker + PostgreSQL
-* Kafka events
+- API + PostgreSQL
+- API + Redis
+- worker + Redis
+- worker + PostgreSQL
+- Kafka events
 
 ## End-to-end tests
 
@@ -1208,14 +1212,14 @@ Submit job
 
 ## Failure tests
 
-* API crash
-* worker crash
-* Redis restart
-* PostgreSQL restart
-* Kafka restart
-* duplicate message
-* stale lease
-* poison job
+- API crash
+- worker crash
+- Redis restart
+- PostgreSQL restart
+- Kafka restart
+- duplicate message
+- stale lease
+- poison job
 
 No major functionality should remain untested.
 
@@ -1229,23 +1233,23 @@ Build a controlled chaos testing suite.
 
 Simulate:
 
-* worker process termination
-* Redis restart
-* Kafka restart
-* random job failures
-* delayed jobs
-* network failures where practical
-* worker pauses
-* database transient errors
+- worker process termination
+- Redis restart
+- Kafka restart
+- random job failures
+- delayed jobs
+- network failures where practical
+- worker pauses
+- database transient errors
 
 Measure whether:
 
-* jobs are lost
-* jobs become stuck
-* duplicates occur
-* recovery works
-* DLQ works
-* metrics accurately represent the incident
+- jobs are lost
+- jobs become stuck
+- duplicates occur
+- recovery works
+- DLQ works
+- metrics accurately represent the incident
 
 Do NOT claim zero data loss unless the tests actually prove the specific guarantee.
 
@@ -1272,16 +1276,16 @@ Scenarios:
 
 Measure:
 
-* requests/sec
-* jobs/sec
-* P50
-* P95
-* P99
-* error rate
-* queue depth
-* worker utilization
-* memory
-* CPU
+- requests/sec
+- jobs/sec
+- P50
+- P95
+- P99
+- error rate
+- queue depth
+- worker utilization
+- memory
+- CPU
 
 Benchmark:
 
@@ -1306,14 +1310,14 @@ Analyze the complete system for bottlenecks.
 
 Investigate:
 
-* PostgreSQL query performance
-* Redis throughput
-* worker concurrency
-* serialization
-* API overhead
-* Kafka publishing
-* logging overhead
-* tracing overhead
+- PostgreSQL query performance
+- Redis throughput
+- worker concurrency
+- serialization
+- API overhead
+- Kafka publishing
+- logging overhead
+- tracing overhead
 
 Use profiling where appropriate.
 
@@ -1338,22 +1342,22 @@ Perform a security review.
 
 Check:
 
-* authentication
-* authorization
-* API keys
-* rate limiting
-* input validation
-* payload limits
-* SQL injection
-* Redis injection risks
-* Kafka credentials
-* secrets
-* CORS
-* headers
-* error leakage
-* logging of sensitive information
-* dependency vulnerabilities
-* Docker security
+- authentication
+- authorization
+- API keys
+- rate limiting
+- input validation
+- payload limits
+- SQL injection
+- Redis injection risks
+- Kafka credentials
+- secrets
+- CORS
+- headers
+- error leakage
+- logging of sensitive information
+- dependency vulnerabilities
+- Docker security
 
 Run dependency auditing.
 
@@ -1379,26 +1383,26 @@ Create complete OpenAPI documentation.
 
 Document:
 
-* authentication
-* job creation
-* job retrieval
-* cancellation
-* retries
-* queues
-* queue statistics
-* workers
-* DLQ
-* health
-* metrics
+- authentication
+- job creation
+- job retrieval
+- cancellation
+- retries
+- queues
+- queue statistics
+- workers
+- DLQ
+- health
+- metrics
 
 Every endpoint must specify:
 
-* request schema
-* response schema
-* error schema
-* authentication
-* status codes
-* examples
+- request schema
+- response schema
+- error schema
+- authentication
+- status codes
+- examples
 
 Ensure generated OpenAPI matches implementation.
 
@@ -1422,13 +1426,13 @@ Pages:
 
 Show:
 
-* queue depth
-* jobs
-* worker status
-* failures
-* retries
-* DLQ
-* latency
+- queue depth
+- jobs
+- worker status
+- failures
+- retries
+- DLQ
+- latency
 
 Use polling or SSE/WebSocket where appropriate.
 
@@ -1446,20 +1450,20 @@ Create GitHub Actions pipelines.
 
 On pull request:
 
-* install dependencies
-* lint
-* typecheck
-* unit tests
-* integration tests
-* build
+- install dependencies
+- lint
+- typecheck
+- unit tests
+- integration tests
+- build
 
 On main:
 
-* build Docker images
-* run tests
-* security checks
-* publish images if configured
-* deploy if configured
+- build Docker images
+- run tests
+- security checks
+- publish images if configured
+- deploy if configured
 
 Use caching carefully.
 
@@ -1475,14 +1479,14 @@ Review all Dockerfiles.
 
 Requirements:
 
-* multi-stage builds
-* minimal runtime image
-* non-root user
-* deterministic installs
-* health checks
-* proper signal handling
-* graceful shutdown
-* no secrets inside image
+- multi-stage builds
+- minimal runtime image
+- non-root user
+- deterministic installs
+- health checks
+- proper signal handling
+- graceful shutdown
+- no secrets inside image
 
 Optimize image sizes only after measuring.
 
@@ -1512,15 +1516,15 @@ Prefer managed services where appropriate.
 
 Document:
 
-* networking
-* security groups
-* secrets
-* environment configuration
-* autoscaling
-* health checks
-* logging
-* metrics
-* rollback
+- networking
+- security groups
+- secrets
+- environment configuration
+- autoscaling
+- health checks
+- logging
+- metrics
+- rollback
 
 Keep initial infrastructure cost low.
 
@@ -1577,24 +1581,24 @@ Try to break the architecture.
 
 Ask:
 
-* What happens if Redis goes down after DB insertion?
-* What happens if Redis accepts the job but API crashes before responding?
-* What happens if a worker dies after completing a job but before ACK?
-* What happens if ACK succeeds but DB update fails?
-* What happens if two workers process the same job?
-* What happens if a worker heartbeat is delayed?
-* What happens if PostgreSQL is unavailable?
-* What happens if Kafka is unavailable?
-* What happens during retry storms?
-* How does priority avoid starvation?
-* How does cancellation race with completion?
-* How does idempotency work under concurrent requests?
-* Why is this at-least-once rather than exactly-once?
-* How does horizontal scaling work?
-* What is the bottleneck?
-* How would you scale from 1K to 100K jobs/sec?
-* What would you change at 1M jobs/day?
-* What happens during a regional outage?
+- What happens if Redis goes down after DB insertion?
+- What happens if Redis accepts the job but API crashes before responding?
+- What happens if a worker dies after completing a job but before ACK?
+- What happens if ACK succeeds but DB update fails?
+- What happens if two workers process the same job?
+- What happens if a worker heartbeat is delayed?
+- What happens if PostgreSQL is unavailable?
+- What happens if Kafka is unavailable?
+- What happens during retry storms?
+- How does priority avoid starvation?
+- How does cancellation race with completion?
+- How does idempotency work under concurrent requests?
+- Why is this at-least-once rather than exactly-once?
+- How does horizontal scaling work?
+- What is the bottleneck?
+- How would you scale from 1K to 100K jobs/sec?
+- What would you change at 1M jobs/day?
+- What happens during a regional outage?
 
 For every question:
 
@@ -1615,17 +1619,17 @@ Run real tests.
 
 Measure:
 
-* API throughput
-* job throughput
-* P50
-* P95
-* P99
-* worker scaling
-* CPU
-* memory
-* queue backlog
-* recovery time
-* retry overhead
+- API throughput
+- job throughput
+- P50
+- P95
+- P99
+- worker scaling
+- CPU
+- memory
+- queue backlog
+- recovery time
+- retry overhead
 
 Compare:
 
@@ -1672,12 +1676,12 @@ Architecture diagram.
 
 Clearly state:
 
-* at-least-once delivery
-* idempotency
-* durable state
-* worker recovery
-* retries
-* DLQ
+- at-least-once delivery
+- idempotency
+- durable state
+- worker recovery
+- retries
+- DLQ
 
 ## Features
 
@@ -1729,24 +1733,24 @@ Inspect every source file.
 
 Look for:
 
-* duplicated logic
-* poor naming
-* excessive abstraction
-* unnecessary abstraction
-* any
-* unsafe casts
-* race conditions
-* swallowed errors
-* missing error handling
-* bad async patterns
-* resource leaks
-* connection leaks
-* missing timeouts
-* missing graceful shutdown
-* incorrect transactions
-* unbounded memory
-* logging problems
-* security issues
+- duplicated logic
+- poor naming
+- excessive abstraction
+- unnecessary abstraction
+- any
+- unsafe casts
+- race conditions
+- swallowed errors
+- missing error handling
+- bad async patterns
+- resource leaks
+- connection leaks
+- missing timeouts
+- missing graceful shutdown
+- incorrect transactions
+- unbounded memory
+- logging problems
+- security issues
 
 Fix everything reasonable.
 
@@ -1769,17 +1773,17 @@ Evaluate this project as if you were:
 
 Score:
 
-* engineering depth /10
-* backend depth /10
-* distributed systems /10
-* scalability /10
-* reliability /10
-* testing /10
-* observability /10
-* DevOps /10
-* code quality /10
-* resume value /10
-* interview value /10
+- engineering depth /10
+- backend depth /10
+- distributed systems /10
+- scalability /10
+- reliability /10
+- testing /10
+- observability /10
+- DevOps /10
+- code quality /10
+- resume value /10
+- interview value /10
 
 Identify the 5 highest-impact remaining improvements.
 
@@ -1856,12 +1860,12 @@ At every phase:
 
 Never fabricate:
 
-* benchmark results
-* test results
-* deployment status
-* coverage
-* scalability
-* reliability guarantees
+- benchmark results
+- test results
+- deployment status
+- coverage
+- scalability
+- reliability guarantees
 
 When uncertain, investigate the repository and documentation first.
 
@@ -1883,8 +1887,8 @@ The goal is to build the **most technically defensible distributed task-processi
 
 The particularly important architectural distinction is:
 
-> **PostgreSQL = durable truth**  
-> **Redis Streams = task delivery**  
+> **PostgreSQL = durable truth**
+> **Redis Streams = task delivery**
 > **Kafka = event propagation**
 
 That separation is what I would defend in an interview. It also prevents the project from becoming a superficial "Redis queue + Node.js" demo.
