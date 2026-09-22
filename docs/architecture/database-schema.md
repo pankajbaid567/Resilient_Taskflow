@@ -644,6 +644,14 @@ LEFT JOIN jobs j ON j.queue_id = q.id
 GROUP BY q.id, q.name;
 ```
 
+### Operational audit logs
+
+Migration `0008_operational_audit_logs.sql` adds application append-only operational-control evidence. Records contain actor UUID and role snapshots, request ID, action, target type/ID, outcome, HTTP status, bounded metadata, and database time. They intentionally have no foreign key to `users`, so account cleanup cannot erase or block audit history. Credentials and job payloads are excluded.
+
+Indexes support actor, action, target, and reverse-time queries. Existing-resource control decisions insert the audit row in the same transaction as the associated mutation or rejection.
+
+The table is a control-decision audit trail, not a complete security log. Requests rejected during authentication or authorization never reach the control transaction and are represented only by structured API security logs.
+
 ## Performance Considerations
 
 ### Index Strategy
@@ -663,27 +671,9 @@ GROUP BY q.id, q.name;
 4. **Prepared Statements**: Reduce parsing overhead
 5. **Read Replicas**: Separate read and write workloads
 
-### Maintenance
+### Retention status
 
-```sql
--- Vacuum dead rows periodically
-VACUUM ANALYZE jobs;
-
--- Reindex for performance
-REINDEX TABLE jobs;
-
--- Clean up old job_events
-DELETE FROM job_events WHERE created_at < NOW() - INTERVAL '90 days';
-
--- Clean up expired idempotency keys
-DELETE FROM idempotency_keys WHERE expires_at < NOW();
-
--- Clean up old job_attempts
-DELETE FROM job_attempts
-WHERE job_id IN (
-  SELECT id FROM jobs WHERE completed_at < NOW() - INTERVAL '30 days'
-);
-```
+Automated retention is not implemented yet. Do not run ad hoc deletes against jobs, attempts, events, deliveries, or dead letters: pending Redis entries, retry wake-ups, leases, and redispatch evidence must be protected together. P2 requires a bounded, resumable cleanup transaction and process tests before documenting deletion commands.
 
 ## Migration Strategy
 

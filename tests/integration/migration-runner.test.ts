@@ -365,6 +365,43 @@ describe.sequential('authoritative migration runner', () => {
       )
     ).rejects.toMatchObject({ constraint: 'workers_concurrency_positive' });
 
+    await pool.query(
+      `INSERT INTO operational_audit_logs (
+         actor_user_id, actor_role, action, target_type, target_id,
+         request_id, outcome, status_code, metadata
+       ) VALUES (
+         $1, 'admin', 'queue.pause', 'queue', 'p1-constraints',
+         'migration-proof', 'SUCCEEDED', 200, '{"isActive":false}'
+       )`,
+      [user.id]
+    );
+    const audit = await pool.query<{
+      action: string;
+      outcome: string;
+      metadata: { isActive: boolean };
+    }>(
+      `SELECT action, outcome, metadata
+         FROM operational_audit_logs
+        WHERE request_id = 'migration-proof'`
+    );
+    expect(audit.rows[0]).toEqual({
+      action: 'queue.pause',
+      outcome: 'SUCCEEDED',
+      metadata: { isActive: false },
+    });
+    await expect(
+      pool.query(
+        `INSERT INTO operational_audit_logs (
+           actor_user_id, actor_role, action, target_type, target_id,
+           request_id, outcome, status_code
+         ) VALUES (
+           $1, 'admin', 'queue.delete', 'queue', 'p1-constraints',
+           'invalid-action-proof', 'SUCCEEDED', 200
+         )`,
+        [user.id]
+      )
+    ).rejects.toMatchObject({ constraint: 'operational_audit_action_valid' });
+
     const pollingIndex = await pool.query<{ definition: string }>(
       `SELECT pg_get_indexdef(indexrelid) AS definition
          FROM pg_index

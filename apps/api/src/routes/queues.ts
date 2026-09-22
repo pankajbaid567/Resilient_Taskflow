@@ -3,6 +3,7 @@ import {
   getQueueByName,
   getQueueStats,
   listQueues,
+  recordOperationalAudit,
   setQueueActive,
   type Queue,
 } from '@taskflow/database';
@@ -127,8 +128,24 @@ export function queueRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAdmin },
     async (request, reply) => {
       const { name } = queueNameParamsSchema.parse(request.params);
-      const queue = await setQueueActive(name, false);
-      if (!queue) return sendMissingQueue(reply, name);
+      const audit = {
+        actorUserId: request.user!.id,
+        actorRole: request.user!.role,
+        requestId: request.id,
+      };
+      const queue = await setQueueActive(name, false, audit);
+      if (!queue) {
+        await recordOperationalAudit({
+          ...audit,
+          action: 'queue.pause',
+          targetType: 'queue',
+          targetId: name,
+          outcome: 'REJECTED',
+          statusCode: 404,
+          metadata: { reason: 'not_found' },
+        });
+        return sendMissingQueue(reply, name);
+      }
 
       logger.info('Queue paused', { queue: name });
       return reply.send(serializeQueue(queue));
@@ -140,8 +157,24 @@ export function queueRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAdmin },
     async (request, reply) => {
       const { name } = queueNameParamsSchema.parse(request.params);
-      const queue = await setQueueActive(name, true);
-      if (!queue) return sendMissingQueue(reply, name);
+      const audit = {
+        actorUserId: request.user!.id,
+        actorRole: request.user!.role,
+        requestId: request.id,
+      };
+      const queue = await setQueueActive(name, true, audit);
+      if (!queue) {
+        await recordOperationalAudit({
+          ...audit,
+          action: 'queue.resume',
+          targetType: 'queue',
+          targetId: name,
+          outcome: 'REJECTED',
+          statusCode: 404,
+          metadata: { reason: 'not_found' },
+        });
+        return sendMissingQueue(reply, name);
+      }
 
       logger.info('Queue resumed', { queue: name });
       return reply.send(serializeQueue(queue));

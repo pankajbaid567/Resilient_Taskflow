@@ -4,6 +4,11 @@ import { and, asc, desc, eq, lt, sql } from 'drizzle-orm';
 import { db } from '../client';
 import { NewWorker, Worker, workers } from '../schema';
 
+import {
+  insertOperationalAudit,
+  type OperationAuditContext,
+} from './audit.repository';
+
 export interface ListWorkersOptions {
   status?: WorkerStatus;
   limit: number;
@@ -153,7 +158,8 @@ export async function updateWorkerStatus(
 
 /** Durably request cooperative shutdown of a live worker. */
 export async function requestWorkerStop(
-  workerId: string
+  workerId: string,
+  audit: OperationAuditContext
 ): Promise<Worker | undefined> {
   return db.transaction(async (tx) => {
     const [worker] = await tx
@@ -164,11 +170,31 @@ export async function requestWorkerStop(
       .for('update');
 
     if (!worker) return undefined;
-    if (worker.status === WorkerStatus.STOPPING) return worker;
+    if (worker.status === WorkerStatus.STOPPING) {
+      await insertOperationalAudit(tx, {
+        ...audit,
+        action: 'worker.stop',
+        targetType: 'worker',
+        targetId: workerId,
+        outcome: 'NOOP',
+        statusCode: 202,
+        metadata: { status: worker.status },
+      });
+      return worker;
+    }
     if (
       worker.status !== WorkerStatus.ACTIVE &&
       worker.status !== WorkerStatus.STARTING
     ) {
+      await insertOperationalAudit(tx, {
+        ...audit,
+        action: 'worker.stop',
+        targetType: 'worker',
+        targetId: workerId,
+        outcome: 'REJECTED',
+        statusCode: 409,
+        metadata: { status: worker.status },
+      });
       return worker;
     }
 
@@ -177,6 +203,16 @@ export async function requestWorkerStop(
       .set({ status: WorkerStatus.STOPPING })
       .where(eq(workers.id, workerId))
       .returning();
+    if (!stopping) throw new Error(`Failed to request stop for ${workerId}`);
+    await insertOperationalAudit(tx, {
+      ...audit,
+      action: 'worker.stop',
+      targetType: 'worker',
+      targetId: workerId,
+      outcome: 'SUCCEEDED',
+      statusCode: 202,
+      metadata: { previousStatus: worker.status, status: stopping.status },
+    });
     return stopping;
   });
 }

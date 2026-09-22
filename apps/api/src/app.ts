@@ -15,6 +15,7 @@ import { extractIdempotencyKey } from './middleware/idempotency';
 import { rateLimiters } from './middleware/rate-limiter';
 import { requestLogger } from './middleware/request-logger';
 import { registerSwagger } from './openapi';
+import { auditRoutes } from './routes/audit';
 import { healthRoutes } from './routes/health';
 import { jobRoutes } from './routes/jobs';
 import { metricsRoutes } from './routes/metrics';
@@ -233,6 +234,15 @@ export async function createApp(
           await workerInstance.register(workerRoutes);
         },
         { prefix: '/workers' }
+      );
+
+      // Audit reads are tenant scoped; admins may query across actors.
+      await instance.register(
+        async (auditInstance) => {
+          auditInstance.addHook('onRequest', applyNonJobRateLimit);
+          await auditInstance.register(auditRoutes);
+        },
+        { prefix: '/audit' }
       );
     },
     { prefix: '/api/v1' }

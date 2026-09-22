@@ -1,6 +1,12 @@
 # P2 Scope: Operable Lifecycle Management
 
-P2 is defined here; it is not implemented by this document.
+P2 is incremental. The audit-log slice is implemented; retention, extended
+control semantics, and deployable configuration remain open.
+
+## Current progress
+
+- Implemented: application append-only operational audit schema, transactional control audit writes, payload-free metadata policy, tenant/admin audit reads, pagination, and process tests.
+- Not implemented: retention cleanup, bounded control waits/status APIs, stale-worker policy extensions, and deployable production configuration.
 
 ## Objective
 

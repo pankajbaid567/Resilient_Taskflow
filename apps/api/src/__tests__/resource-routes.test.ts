@@ -9,6 +9,7 @@ const database = vi.hoisted(() => ({
   getWorkerById: vi.fn(),
   listQueues: vi.fn(),
   listWorkers: vi.fn(),
+  recordOperationalAudit: vi.fn(),
   requestWorkerStop: vi.fn(),
   setQueueActive: vi.fn(),
 }));
@@ -87,6 +88,7 @@ beforeEach(() => {
   database.listWorkers.mockResolvedValue({ workers: [], total: 0 });
   database.getQueueStats.mockResolvedValue(undefined);
   database.countActiveWorkersForQueue.mockResolvedValue(0);
+  database.recordOperationalAudit.mockResolvedValue({});
   database.requestWorkerStop.mockResolvedValue({
     ...workerRecord,
     status: WorkerStatus.STOPPING,

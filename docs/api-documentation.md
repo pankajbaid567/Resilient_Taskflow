@@ -22,6 +22,14 @@ The shared response uses the real queue name and canonical uppercase states: `CR
 
 - `GET /workers`, `GET /workers/:id`, and `GET /workers/:id/stats` read PostgreSQL worker records.
 - `POST /workers/:id/stop` requires admin authorization. It persists `STOPPING` and returns `202`; the live worker observes the request on heartbeat, drains, closes worker-owned infrastructure, and persists `STOPPED`. An already terminal worker returns `409`.
+- Operational audit rows cover authenticated requests that reach an authorized control handler. Authentication and authorization failures remain in structured security logs and do not create durable operational-audit rows.
+
+## Operational audit
+
+- `GET /audit` returns operational control records with validated `action`, `outcome`, `actorUserId`, `limit`, and `offset` filters.
+- Ordinary users are always scoped to their own actor ID. Administrators may query all actors or select one actor.
+- Queue pause/resume, worker stop, and manual retry record actor ID/role, request ID, target, outcome, status code, timestamp, and bounded metadata. Credentials and job payloads are not stored.
+- Decisions for existing resources commit their audit record in the same PostgreSQL transaction as the mutation or rejection. A hidden/missing-resource `404` is recorded in a separate transaction because there is no target mutation.
 
 ## Probes and metrics
 

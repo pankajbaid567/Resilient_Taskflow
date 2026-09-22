@@ -14,3 +14,4 @@ export * from './job-events';
 export * from './idempotency-keys';
 export * from './dead-letter-jobs';
 export * from './job-deliveries';
+export * from './operational-audit-logs';

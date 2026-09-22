@@ -6,6 +6,10 @@ import * as schema from '../schema';
 import { Job, jobs, NewJob } from '../schema';
 import { InvalidStateTransitionError } from '../state-machine';
 
+import {
+  insertOperationalAudit,
+  type OperationAuditContext,
+} from './audit.repository';
 import { insertPendingDelivery } from './dispatch.repository';
 
 /**
@@ -36,15 +40,6 @@ export class IdempotencyConflictError extends Error {
   constructor() {
     super('Idempotency key was already used for a different request');
     this.name = 'IdempotencyConflictError';
-  }
-}
-
-export class ManualRetryConflictError extends Error {
-  readonly statusCode = 409;
-
-  constructor(message: string) {
-    super(message);
-    this.name = 'ManualRetryConflictError';
   }
 }
 
@@ -170,8 +165,13 @@ export async function getJobForUser(
  */
 export async function retryDeadLetteredJobForUser(
   jobId: string,
-  userId: string
-): Promise<JobWithQueue | undefined> {
+  userId: string,
+  audit: OperationAuditContext
+): Promise<
+  | { kind: 'CREATED'; replacement: JobWithQueue }
+  | { kind: 'CONFLICT'; message: string }
+  | undefined
+> {
   return db.transaction(async (tx) => {
     const [record] = await tx
       .select({
@@ -191,19 +191,43 @@ export async function retryDeadLetteredJobForUser(
 
     if (!record) return undefined;
     if (record.original.status !== JobStatus.DEAD_LETTERED) {
-      throw new ManualRetryConflictError(
-        `Job ${jobId} is not in DEAD_LETTERED state`
-      );
+      const message = `Job ${jobId} is not in DEAD_LETTERED state`;
+      await insertOperationalAudit(tx, {
+        ...audit,
+        action: 'job.manual_retry',
+        targetType: 'job',
+        targetId: jobId,
+        outcome: 'REJECTED',
+        statusCode: 409,
+        metadata: { status: record.original.status, reason: 'invalid_state' },
+      });
+      return { kind: 'CONFLICT', message };
     }
     if (record.deadLetter.requeued) {
-      throw new ManualRetryConflictError(
-        `Job ${jobId} has already been manually retried`
-      );
+      const message = `Job ${jobId} has already been manually retried`;
+      await insertOperationalAudit(tx, {
+        ...audit,
+        action: 'job.manual_retry',
+        targetType: 'job',
+        targetId: jobId,
+        outcome: 'REJECTED',
+        statusCode: 409,
+        metadata: { reason: 'already_retried' },
+      });
+      return { kind: 'CONFLICT', message };
     }
     if (!record.queue.isActive) {
-      throw new ManualRetryConflictError(
-        `Queue ${record.queue.name} is paused`
-      );
+      const message = `Queue ${record.queue.name} is paused`;
+      await insertOperationalAudit(tx, {
+        ...audit,
+        action: 'job.manual_retry',
+        targetType: 'job',
+        targetId: jobId,
+        outcome: 'REJECTED',
+        statusCode: 409,
+        metadata: { reason: 'queue_paused', queue: record.queue.name },
+      });
+      return { kind: 'CONFLICT', message };
     }
 
     const originalMetadata =
@@ -243,16 +267,23 @@ export async function retryDeadLetteredJobForUser(
       )
       .returning({ id: schema.deadLetterJobs.id });
     if (updated.length !== 1) {
-      throw new ManualRetryConflictError(
-        `Job ${jobId} was retried concurrently`
-      );
+      throw new Error(`Job ${jobId} retry marker update was lost`);
     }
 
-    return replacement;
+    await insertOperationalAudit(tx, {
+      ...audit,
+      action: 'job.manual_retry',
+      targetType: 'job',
+      targetId: jobId,
+      outcome: 'SUCCEEDED',
+      statusCode: 201,
+      metadata: { replacementJobId: replacement.job.id },
+    });
+    return { kind: 'CREATED', replacement };
   });
 }
 
-/** Tenant-scoped listing and count from one database snapshot. */
+/** Tenant-scoped listing and count in one transaction. */
 export async function getJobsForUser(
   userId: string,
   options: {

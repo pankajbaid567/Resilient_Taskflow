@@ -1,6 +1,7 @@
 import {
   getWorkerById,
   listWorkers,
+  recordOperationalAudit,
   requestWorkerStop,
   type Worker,
 } from '@taskflow/database';
@@ -122,8 +123,24 @@ export function workerRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAdmin },
     async (request, reply) => {
       const { id } = workerIdParamsSchema.parse(request.params);
-      const worker = await requestWorkerStop(id);
-      if (!worker) return sendMissingWorker(reply, id);
+      const audit = {
+        actorUserId: request.user!.id,
+        actorRole: request.user!.role,
+        requestId: request.id,
+      };
+      const worker = await requestWorkerStop(id, audit);
+      if (!worker) {
+        await recordOperationalAudit({
+          ...audit,
+          action: 'worker.stop',
+          targetType: 'worker',
+          targetId: id,
+          outcome: 'REJECTED',
+          statusCode: 404,
+          metadata: { reason: 'not_found' },
+        });
+        return sendMissingWorker(reply, id);
+      }
       if (
         worker.status !== WorkerStatus.STOPPING &&
         worker.status !== WorkerStatus.ACTIVE &&

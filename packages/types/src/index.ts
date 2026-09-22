@@ -46,6 +46,18 @@ export enum WorkerStatus {
   FAILED = 'FAILED',
 }
 
+/** Audited operator and tenant mutations. */
+export const AUDIT_ACTION_VALUES = [
+  'queue.pause',
+  'queue.resume',
+  'worker.stop',
+  'job.manual_retry',
+] as const;
+export type AuditAction = (typeof AUDIT_ACTION_VALUES)[number];
+
+export const AUDIT_OUTCOME_VALUES = ['SUCCEEDED', 'NOOP', 'REJECTED'] as const;
+export type AuditOutcome = (typeof AUDIT_OUTCOME_VALUES)[number];
+
 /**
  * Job Event Type
  */

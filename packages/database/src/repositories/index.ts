@@ -10,3 +10,4 @@ export * from './worker.repository';
 export * from './delivery.repository';
 export * from './dispatch.repository';
 export * from './auth.repository';
+export * from './audit.repository';

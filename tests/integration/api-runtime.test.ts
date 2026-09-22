@@ -120,6 +120,7 @@ async function resetAndSeed(): Promise<void> {
 
   await pool.query(`
     TRUNCATE TABLE
+      operational_audit_logs,
       api_keys,
       idempotency_keys,
       job_deliveries,
@@ -728,10 +729,60 @@ describe.sequential('API runtime against PostgreSQL and Redis', () => {
     );
     expect(statusCounts).toEqual({ 200: 50, 429: 10 });
 
+    const auditOutcomes = await pool!.query<{
+      outcome: string;
+      count: string;
+    }>(
+      `SELECT outcome, count(*)::text AS count
+         FROM operational_audit_logs
+        WHERE action = 'queue.pause'
+        GROUP BY outcome
+        ORDER BY outcome`
+    );
+    expect(auditOutcomes.rows).toEqual([
+      { outcome: 'NOOP', count: '49' },
+      { outcome: 'SUCCEEDED', count: '1' },
+    ]);
+
     if (!redis) throw new Error('Redis client not initialized');
     expect(await redis.zcard(`taskflow:rate-limit:mutation:${adminId}`)).toBe(
       50
     );
+
+    const userCannotReadAdminAudit = await inject({
+      method: 'GET',
+      url: `/api/v1/audit?actorUserId=${adminId}&limit=1`,
+      headers: authHeaders(),
+    });
+    expect(userCannotReadAdminAudit.statusCode).toBe(403);
+
+    const adminAudit = await inject({
+      method: 'GET',
+      url: '/api/v1/audit?action=queue.pause&limit=1&offset=1',
+      headers: authHeaders(adminApiKey),
+    });
+    expect(adminAudit.statusCode, adminAudit.body).toBe(200);
+    expect(
+      adminAudit.json<{
+        data: Array<{
+          actorUserId: string;
+          action: string;
+          targetId: string;
+          metadata: Record<string, unknown>;
+        }>;
+        pagination: { limit: number; offset: number; total: number };
+      }>()
+    ).toMatchObject({
+      data: [
+        {
+          actorUserId: adminId,
+          action: 'queue.pause',
+          targetId: 'default',
+          metadata: { isActive: false },
+        },
+      ],
+      pagination: { limit: 1, offset: 1, total: 50 },
+    });
 
     const independentRead = await inject({
       method: 'GET',
@@ -739,7 +790,7 @@ describe.sequential('API runtime against PostgreSQL and Redis', () => {
       headers: authHeaders(adminApiKey),
     });
     expect(independentRead.statusCode, independentRead.body).toBe(200);
-    expect(await redis.zcard(`taskflow:rate-limit:read:${adminId}`)).toBe(1);
+    expect(await redis.zcard(`taskflow:rate-limit:read:${adminId}`)).toBe(2);
   });
 
   it('starts as a real process and drains HTTP, Redis and PostgreSQL on SIGTERM', async () => {

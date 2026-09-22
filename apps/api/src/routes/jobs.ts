@@ -5,6 +5,7 @@ import {
   getJobForUser,
   getJobsForUser,
   getQueueByName,
+  recordOperationalAudit,
   retryDeadLetteredJobForUser,
   type JobWithQueue,
 } from '@taskflow/database';
@@ -157,8 +158,38 @@ export function jobRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Params: { id: string } }>('/:id/retry', async (request, reply) => {
     const { id } = jobIdParamsSchema.parse(request.params);
-    const replacement = await retryDeadLetteredJobForUser(id, request.user!.id);
-    if (!replacement) return sendMissingJob(reply, id);
+    const audit = {
+      actorUserId: request.user!.id,
+      actorRole: request.user!.role,
+      requestId: request.id,
+    };
+    const result = await retryDeadLetteredJobForUser(
+      id,
+      request.user!.id,
+      audit
+    );
+    if (!result) {
+      await recordOperationalAudit({
+        ...audit,
+        action: 'job.manual_retry',
+        targetType: 'job',
+        targetId: id,
+        outcome: 'REJECTED',
+        statusCode: 404,
+        metadata: { reason: 'not_found_or_not_owned' },
+      });
+      return sendMissingJob(reply, id);
+    }
+    if (result.kind === 'CONFLICT') {
+      return reply.status(409).send({
+        error: 'Conflict',
+        message: result.message,
+        statusCode: 409,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const { replacement } = result;
 
     logger.info(
       { originalJobId: id, replacementJobId: replacement.job.id },

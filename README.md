@@ -55,7 +55,8 @@ See [`docs/testing.md`](docs/testing.md), [`docs/api-documentation.md`](docs/api
 ## Current limitations
 
 - No exactly-once guarantee for arbitrary external effects.
-- Kafka, load testing, dashboard enhancement, retention automation, audit-log APIs, and production deployment configuration are outside the completed milestone.
+- Kafka, load testing, dashboard enhancement, retention automation, and production deployment configuration remain unimplemented.
+- Operational audit records cover queue pause/resume, worker stop, and manual retry; they are not a general-purpose compliance log.
 - Public readiness performs dependency checks, but deliberately hides dependency details.
 - Admin-only Prometheus scraping requires a provisioned database-backed admin API key or JWT.
 - The Docker suites prove the documented local failure scenarios; they do not establish throughput, multi-region behavior, availability targets, or production readiness.

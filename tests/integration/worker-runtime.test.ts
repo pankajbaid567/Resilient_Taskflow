@@ -489,6 +489,7 @@ beforeEach(async () => {
   await redis.flushall();
   await pool.query(
     `TRUNCATE TABLE
+       operational_audit_logs,
        job_deliveries,
        idempotency_keys,
        dead_letter_jobs,
@@ -553,6 +554,32 @@ describe.sequential('authoritative worker delivery', () => {
       expect(resumed.json<{ isActive: boolean }>().isActive).toBe(true);
       await waitForJobStatus(jobId, JobStatus.SUCCEEDED);
       await waitForPendingCount(0);
+
+      const audit = await pool.query<{
+        action: string;
+        outcome: string;
+        status_code: number;
+        metadata: Record<string, unknown>;
+      }>(
+        `SELECT action, outcome, status_code, metadata
+           FROM operational_audit_logs
+          WHERE target_type = 'queue' AND target_id = 'default'
+          ORDER BY created_at`
+      );
+      expect(audit.rows).toEqual([
+        {
+          action: 'queue.pause',
+          outcome: 'SUCCEEDED',
+          status_code: 200,
+          metadata: { isActive: false },
+        },
+        {
+          action: 'queue.resume',
+          outcome: 'SUCCEEDED',
+          status_code: 200,
+          metadata: { isActive: true },
+        },
+      ]);
     }, 20_000);
 
     it('turns an API stop request into a clean worker-process shutdown', async () => {
@@ -580,6 +607,25 @@ describe.sequential('authoritative worker delivery', () => {
         [workerId]
       );
       expect(stopped.rows[0]?.status).toBe('STOPPED');
+      const audit = await pool.query<{
+        actor_user_id: string;
+        action: string;
+        outcome: string;
+        status_code: number;
+      }>(
+        `SELECT actor_user_id, action, outcome, status_code
+           FROM operational_audit_logs
+          WHERE target_type = 'worker' AND target_id = $1`,
+        [workerId]
+      );
+      expect(audit.rows).toEqual([
+        {
+          actor_user_id: userId,
+          action: 'worker.stop',
+          outcome: 'SUCCEEDED',
+          status_code: 202,
+        },
+      ]);
     }, 20_000);
 
     it('creates one owned replacement for a dead-lettered job and executes it', async () => {
@@ -627,6 +673,32 @@ describe.sequential('authoritative worker delivery', () => {
         requeued: true,
         requeued_job_id: replacementId,
       });
+      const audit = await pool.query<{
+        action: string;
+        outcome: string;
+        status_code: number;
+        metadata: Record<string, unknown>;
+      }>(
+        `SELECT action, outcome, status_code, metadata
+           FROM operational_audit_logs
+          WHERE target_type = 'job' AND target_id = $1
+          ORDER BY created_at`,
+        [originalJobId]
+      );
+      expect(audit.rows).toEqual([
+        {
+          action: 'job.manual_retry',
+          outcome: 'SUCCEEDED',
+          status_code: 201,
+          metadata: { replacementJobId: replacementId },
+        },
+        {
+          action: 'job.manual_retry',
+          outcome: 'REJECTED',
+          status_code: 409,
+          metadata: { reason: 'already_retried' },
+        },
+      ]);
     }, 25_000);
   });
 

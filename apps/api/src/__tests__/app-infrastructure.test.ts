@@ -26,6 +26,8 @@ vi.mock('@taskflow/database', () => ({
   getWorkerById: vi.fn(),
   listQueues: vi.fn(),
   listWorkers: vi.fn(),
+  listOperationalAudit: vi.fn().mockResolvedValue({ records: [], total: 0 }),
+  recordOperationalAudit: vi.fn(),
   requestWorkerStop: vi.fn(),
   setQueueActive: vi.fn(),
   testConnection: vi.fn(),
