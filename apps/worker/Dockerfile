@@ -1,81 +1,40 @@
-# syntax=docker/dockerfile:1.4
+# syntax=docker/dockerfile:1.7
+# Build context: repository root.  docker build -f apps/worker/Dockerfile .
 
-# Build stage
 FROM node:20-alpine AS builder
-
-# Install build dependencies
-RUN apk add --no-cache python3 make g++
-
+RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 WORKDIR /app
 
-# Copy package files for dependency installation
-COPY package.json pnpm-lock.yaml* ./
-COPY apps/worker/package.json ./apps/worker/
-COPY packages/*/package.json ./packages/*/
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps ./apps
+COPY packages ./packages
+COPY tests/package.json ./tests/package.json
+RUN pnpm install --frozen-lockfile --filter "@taskflow/worker-app..."
 
-# Install pnpm
-RUN npm install -g pnpm@8.15.0
+COPY tsconfig.json turbo.json ./
+RUN pnpm --filter @taskflow/worker-app... build
 
-# Install dependencies
-RUN pnpm install --frozen-lockfile --prefer-offline
+RUN pnpm --filter @taskflow/worker-app deploy --prod /out
 
-# Copy source code
-COPY . .
-
-# Build the application
-WORKDIR /app/apps/worker
-RUN pnpm build
-
-# Remove dev dependencies
-WORKDIR /app
-RUN pnpm prune --prod
-
-# Production stage
 FROM node:20-alpine AS production
-
-# Install dumb-init for proper signal handling
 RUN apk add --no-cache dumb-init
-
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
-# Set working directory
 WORKDIR /app
+COPY --from=builder --chown=node:node /out ./
 
-# Copy package files
-COPY --from=builder --chown=nodejs:nodejs /app/package.json ./
-COPY --from=builder --chown=nodejs:nodejs /app/pnpm-lock.yaml* ./
-COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
-
-# Copy built application
-COPY --from=builder --chown=nodejs:nodejs /app/apps/worker/dist ./apps/worker/dist
-COPY --from=builder --chown=nodejs:nodejs /app/apps/worker/package.json ./apps/worker/
-
-# Copy shared packages
-COPY --from=builder --chown=nodejs:nodejs /app/packages ./packages
-
-# Set environment variables
+# The worker image also carries @taskflow/database (dist + SQL migrations), so
+# the one-shot `migrate` service reuses it:
+#   node node_modules/@taskflow/database/dist/migrate.js
 ENV NODE_ENV=production \
-    # Worker concurrency (jobs processed in parallel per worker)
     WORKER_CONCURRENCY=10 \
-    # Graceful shutdown timeout (allow current jobs to finish)
-    SHUTDOWN_TIMEOUT=60000 \
-    # Queues to process (comma-separated)
-    WORKER_QUEUES=default,high-priority,low-priority
+    WORKER_QUEUES=default,email,critical,low \
+    WORKER_METRICS_PORT=9464
 
-# Switch to non-root user
-USER nodejs
+USER node
 
-# No exposed ports (worker doesn't serve HTTP)
+# The worker serves no application traffic. Liveness: the metrics endpoint
+# (WORKER_METRICS_PORT, 0 disables it and so the check) answers.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
+  CMD node -e "const p=process.env.WORKER_METRICS_PORT||9464;if(p==='0')process.exit(0);fetch('http://127.0.0.1:'+p+'/metrics').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-# Health check - check if worker process is running
-# In production, use external health monitoring
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD pgrep -f "node.*worker" > /dev/null || exit 1
-
-# Use dumb-init to handle signals properly (SIGTERM for graceful shutdown)
 ENTRYPOINT ["dumb-init", "--"]
-
-# Start the worker
-CMD ["node", "apps/worker/dist/index.js"]
+CMD ["node", "dist/index.js"]

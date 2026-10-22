@@ -20,6 +20,9 @@ export { HandlerRegistry, createHandlerRegistry } from './handler-registry';
 export { getDefaultWorkerConfig, createWorkerConfig } from './worker-config';
 export type { TerminalPersistedEvent, WorkerConfig } from './worker-config';
 
+// Handlers throw this to dead-letter immediately instead of burning retries.
+export { PermanentJobError } from '@taskflow/retry';
+
 // Worker
 export { Worker, createWorker } from './worker';
 export type { WorkerState, WorkerStats } from './worker';
@@ -42,6 +45,25 @@ export {
   CancellationError,
   createCancellationToken,
   checkCancellation,
-  createTimeoutCancellationToken,
-  combineCancellationTokens,
 } from './cancellation-token';
+
+// Lifecycle Retention
+export {
+  executeFullRetention,
+  type RetentionServiceOptions,
+} from './retention-service';
+export {
+  RetentionScheduler,
+  createRetentionScheduler,
+  RETENTION_LOCK_KEY,
+  type RetentionSchedulerConfig,
+  type RetentionSchedulerStats,
+  type RetentionRunOutcome,
+} from './retention-scheduler';
+
+// Prometheus endpoint for the worker process
+export {
+  startMetricsServer,
+  type MetricsServer,
+  type MetricsServerOptions,
+} from './metrics-server';

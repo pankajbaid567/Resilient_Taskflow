@@ -9,7 +9,6 @@
     "distributed-systems",
     "redis-streams",
     "postgres",
-    "kafka",
     "worker-pool"
   ],
   "author": "Pankaj Baid",
@@ -44,7 +43,6 @@
     "load:scaling": "k6 run tests/load/worker-scaling.test.js",
     "load:mixed": "k6 run tests/load/mixed-workload.test.js",
     "load:all": "pnpm load:sustained && pnpm load:spike && pnpm load:scaling && pnpm load:mixed",
-    "perf:report": "ts-node scripts/performance-report.ts",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix",
@@ -56,6 +54,7 @@
     "docker:logs": "docker compose logs -f",
     "db:migrate": "pnpm --filter @taskflow/database db:migrate",
     "db:seed": "pnpm --filter @taskflow/database db:seed",
+    "db:create-api-key": "pnpm --silent --filter @taskflow/database exec tsx src/create-api-key.ts",
     "prepare": "husky install"
   },
   "devDependencies": {

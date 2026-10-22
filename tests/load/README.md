@@ -1,15 +1,35 @@
-# Load Testing with k6
+# Load testing
+
+## Measured benchmarks (use these)
+
+`bench.js`, `bench.sh`, `bench-drain.sh`, `bench-scaling.sh`, `bench-crash.sh` and `bench-term.sh` produce the numbers in [`docs/benchmarking/RESULTS.md`](../../docs/benchmarking/RESULTS.md), which also lists the exact commands. They run the built API and workers against a separate `taskflow_bench` database and never touch the development database.
+
+```bash
+tests/load/bench.sh setup && tests/load/bench.sh api
+K6_API_KEY=$(cat /tmp/tf-bench/api-key) MODE=admission RATE=250 DURATION=60s k6 run tests/load/bench.js
+tests/load/bench-drain.sh 2 20000 noop
+```
+
+## Legacy scripts (unverified)
+
+`sustained-load`, `spike-load`, `worker-scaling`, `mixed-workload`, `scale-workers.js` and `utils.js` below predate the benchmarks above. They have not been run against the current system, their thresholds are guesses and not results, and they are excluded from Vitest. Do not quote anything from them.
+
+---
+
+## Legacy: k6 scripts
 
 This directory contains k6 load tests for Resilient TaskFlow.
 
 ## Installation
 
 ### macOS
+
 ```bash
 brew install k6
 ```
 
 ### Linux
+
 ```bash
 # Debian/Ubuntu
 sudo gpg -k
@@ -24,11 +44,13 @@ sudo dnf install k6
 ```
 
 ### Windows
+
 ```bash
 choco install k6
 ```
 
 ### Docker
+
 ```bash
 docker pull grafana/k6:latest
 ```
@@ -61,24 +83,28 @@ pnpm load:all
 ## Test Scenarios
 
 ### 1. Sustained Load (`sustained-load.test.js`)
+
 - **Duration**: 5 minutes
 - **VUs**: 10 → 50 → 10 (ramp up, sustain, ramp down)
 - **Purpose**: Measure steady-state performance
 - **Metrics**: Throughput, latency, success rate
 
 ### 2. Spike Load (`spike-load.test.js`)
+
 - **Duration**: 3 minutes
 - **VUs**: 10 → 100 (sudden spike) → 10
 - **Purpose**: Test recovery from traffic spikes
 - **Metrics**: Error rate during spike, recovery time
 
 ### 3. Worker Scaling (`worker-scaling.test.js`)
+
 - **Duration**: 10 minutes
 - **Workers**: 1 → 5 → 10 → 5 → 1 (dynamic scaling)
 - **Purpose**: Validate system scales with worker count
 - **Metrics**: Jobs/sec vs worker count, queue depth
 
 ### 4. Mixed Workload (`mixed-workload.test.js`)
+
 - **Duration**: 5 minutes
 - **Mix**: Different priorities, job types, durations
 - **Purpose**: Simulate realistic production traffic
@@ -87,12 +113,14 @@ pnpm load:all
 ## Metrics
 
 k6 tracks these metrics automatically:
+
 - **http_req_duration**: HTTP request latency (P95, P99)
 - **http_req_failed**: Failed request rate
 - **http_reqs**: Total requests per second
 - **vus**: Virtual users (concurrent connections)
 
 Custom metrics:
+
 - **job_submission_duration**: Time to submit job
 - **job_completion_duration**: End-to-end job duration
 - **queue_depth**: Current queue backlog
@@ -101,6 +129,7 @@ Custom metrics:
 ## Thresholds
 
 Tests fail if:
+
 - P95 latency > 500ms
 - P99 latency > 1000ms
 - Error rate > 1%
@@ -109,6 +138,7 @@ Tests fail if:
 ## Interpreting Results
 
 ### Good Performance
+
 ```
 http_req_duration..........: avg=120ms  p95=250ms  p99=400ms
 http_req_failed............: 0.05% ✓
@@ -116,6 +146,7 @@ http_reqs..................: 500/s
 ```
 
 ### Degraded Performance
+
 ```
 http_req_duration..........: avg=450ms  p95=800ms  p99=1200ms  ✗
 http_req_failed............: 2.5% ✗
@@ -134,16 +165,19 @@ http_reqs..................: 150/s
 ## Troubleshooting
 
 ### High Error Rate
+
 - Check API logs: `docker-compose logs api`
 - Check database connections
 - Verify rate limits not exceeded
 
 ### High Latency
+
 - Check queue depth (backlog?)
 - Check worker count (under-provisioned?)
 - Check database slow queries
 
 ### Connection Errors
+
 - Ensure services running: `docker-compose ps`
 - Check API health: `curl http://localhost:3000/health`
 - Verify network connectivity
@@ -151,6 +185,7 @@ http_reqs..................: 150/s
 ## Advanced Usage
 
 ### Custom Scenario
+
 ```javascript
 export const options = {
   scenarios: {
@@ -168,6 +203,7 @@ export const options = {
 ```
 
 ### Environment Variables
+
 ```bash
 # Custom API URL
 K6_API_URL=http://production.example.com:3000 k6 run sustained-load.test.js
@@ -180,6 +216,7 @@ K6_VUS=100 k6 run sustained-load.test.js
 ```
 
 ### Docker Usage
+
 ```bash
 docker run --rm -i \
   --network host \
@@ -195,7 +232,7 @@ docker run --rm -i \
 name: Load Tests
 on:
   schedule:
-    - cron: '0 2 * * *'  # Daily at 2 AM
+    - cron: '0 2 * * *' # Daily at 2 AM
 
 jobs:
   load-test:

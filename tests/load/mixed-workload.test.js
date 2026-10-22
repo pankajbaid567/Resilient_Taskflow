@@ -1,10 +1,10 @@
 /**
  * Mixed Workload Test
- * 
+ *
  * Purpose: Simulate realistic production traffic patterns
  * Duration: 5 minutes
  * Pattern: Multiple concurrent scenarios with different behaviors
- * 
+ *
  * This test validates:
  * - System handles mixed priorities correctly (CRITICAL > HIGH > NORMAL > LOW)
  * - Different job types and sizes are processed efficiently
@@ -49,7 +49,7 @@ export const options = {
       ],
       exec: 'normalUserFlow',
     },
-    
+
     // Scenario 2: High-priority urgent jobs (15% of load)
     urgent_jobs: {
       executor: 'constant-arrival-rate',
@@ -60,7 +60,7 @@ export const options = {
       maxVUs: 15,
       exec: 'urgentJobFlow',
     },
-    
+
     // Scenario 3: Batch processing (10% of load)
     batch_processing: {
       executor: 'ramping-vus',
@@ -72,7 +72,7 @@ export const options = {
       ],
       exec: 'batchProcessingFlow',
     },
-    
+
     // Scenario 4: Scheduled jobs (5% of load)
     scheduled_jobs: {
       executor: 'constant-arrival-rate',
@@ -83,7 +83,7 @@ export const options = {
       maxVUs: 5,
       exec: 'scheduledJobFlow',
     },
-    
+
     // Scenario 5: Job monitoring (read-heavy)
     monitoring: {
       executor: 'constant-vus',
@@ -95,11 +95,11 @@ export const options = {
   thresholds: {
     ...commonThresholds,
     // Mixed workload specific thresholds
-    'http_req_duration': ['p(95)<600', 'p(99)<1200'],
-    'http_req_failed': ['rate<0.01'],
-    'job_submission_duration': ['p(95)<250', 'p(99)<500'],
-    'queue_depth': ['value<800'],
-    
+    http_req_duration: ['p(95)<600', 'p(99)<1200'],
+    http_req_failed: ['rate<0.01'],
+    job_submission_duration: ['p(95)<250', 'p(99)<500'],
+    queue_depth: ['value<800'],
+
     // Per-scenario thresholds
     'http_req_duration{scenario:normal_users}': ['p(95)<500'],
     'http_req_duration{scenario:urgent_jobs}': ['p(95)<300'], // Urgent should be faster
@@ -114,40 +114,50 @@ export const options = {
 
 export function setup() {
   const client = new TaskFlowClient();
-  
+
   console.log('='.repeat(80));
   console.log('MIXED WORKLOAD TEST - SETUP');
   console.log('='.repeat(80));
-  
+
   // Health check
   console.log('Performing health check...');
   const health = client.healthCheck();
   console.log(`Health status: ${JSON.stringify(health)}`);
-  
+
   if (!health || health.status !== 'healthy') {
     throw new Error('System is not healthy. Aborting test.');
   }
-  
+
   // Get initial system state
   console.log('Collecting initial system state...');
   const queueStats = client.getQueueStats();
   const workerStats = client.getWorkerStats();
-  
+
   console.log(`Initial queue depth: ${queueStats?.total || 0}`);
-  console.log(`Active workers: ${workerStats?.workers?.filter(w => w.status === 'ACTIVE').length || 0}`);
-  
+  console.log(
+    `Active workers: ${workerStats?.workers?.filter((w) => w.status === 'ACTIVE').length || 0}`
+  );
+
   console.log('');
   console.log('Mixed Workload Scenarios:');
-  console.log('  1. Normal Users (70%): Submit jobs, check status, cancel occasionally');
-  console.log('  2. Urgent Jobs (15%): High-priority jobs with immediate execution');
-  console.log('  3. Batch Processing (10%): Large payloads, low priority, bulk operations');
+  console.log(
+    '  1. Normal Users (70%): Submit jobs, check status, cancel occasionally'
+  );
+  console.log(
+    '  2. Urgent Jobs (15%): High-priority jobs with immediate execution'
+  );
+  console.log(
+    '  3. Batch Processing (10%): Large payloads, low priority, bulk operations'
+  );
   console.log('  4. Scheduled Jobs (5%): Jobs scheduled for future execution');
-  console.log('  5. Monitoring (constant): Read-heavy queries, dashboards, metrics');
+  console.log(
+    '  5. Monitoring (constant): Read-heavy queries, dashboards, metrics'
+  );
   console.log('');
-  
+
   console.log('Setup complete. Starting mixed workload...');
   console.log('='.repeat(80));
-  
+
   return {
     startTime: Date.now(),
     initialQueueDepth: queueStats?.total || 0,
@@ -161,7 +171,7 @@ export function setup() {
 
 export function normalUserFlow(data) {
   const client = new TaskFlowClient();
-  
+
   try {
     // Submit a job with normal behavior
     const job = client.submitJob({
@@ -171,33 +181,32 @@ export function normalUserFlow(data) {
       maxRetries: 3,
       idempotencyKey: `normal-${generateUUID()}`,
     });
-    
+
     if (!job) return;
-    
+
     // Realistic think time
     thinkTime(1, 3);
-    
+
     // Check job status (50% chance)
     if (Math.random() < 0.5) {
       client.getJob(job.id);
       thinkTime(0.5, 1);
     }
-    
+
     // List jobs (20% chance)
     if (Math.random() < 0.2) {
       client.listJobs({ limit: 20, status: 'QUEUED' });
     }
-    
+
     // Cancel job (5% chance)
     if (Math.random() < 0.05) {
       client.cancelJob(job.id);
     }
-    
+
     // Collect metrics periodically
     if (__ITER % 10 === 0) {
       collectSystemMetrics(client);
     }
-    
   } catch (error) {
     handleError(error, 'normal user flow');
   }
@@ -209,11 +218,11 @@ export function normalUserFlow(data) {
 
 export function urgentJobFlow(data) {
   const client = new TaskFlowClient();
-  
+
   try {
     // Submit high-priority urgent job
     const priority = Math.random() < 0.7 ? 'HIGH' : 'CRITICAL';
-    
+
     const job = client.submitJob({
       type: 'urgent-' + randomJobType(),
       priority: priority,
@@ -221,17 +230,16 @@ export function urgentJobFlow(data) {
       maxRetries: 5, // More retries for important jobs
       idempotencyKey: `urgent-${generateUUID()}`,
     });
-    
+
     if (!job) return;
-    
+
     // Minimal think time for urgent requests
     thinkTime(0.1, 0.5);
-    
+
     // Check status immediately (80% chance)
     if (Math.random() < 0.8) {
       client.getJob(job.id);
     }
-    
   } catch (error) {
     handleError(error, 'urgent job flow');
   }
@@ -243,12 +251,12 @@ export function urgentJobFlow(data) {
 
 export function batchProcessingFlow(data) {
   const client = new TaskFlowClient();
-  
+
   try {
     // Submit batch of low-priority jobs with larger payloads
     const batchSize = Math.floor(Math.random() * 5) + 3; // 3-7 jobs per batch
     const batchId = generateUUID();
-    
+
     for (let i = 0; i < batchSize; i++) {
       client.submitJob({
         type: 'batch-' + randomJobType(),
@@ -262,17 +270,16 @@ export function batchProcessingFlow(data) {
         maxRetries: 3,
         idempotencyKey: `batch-${batchId}-${i}`,
       });
-      
+
       // Small delay between batch submissions
       sleep(0.1);
     }
-    
+
     // Longer think time between batches
     thinkTime(3, 5);
-    
+
     // Check batch status
     client.listJobs({ limit: batchSize });
-    
   } catch (error) {
     handleError(error, 'batch processing flow');
   }
@@ -284,11 +291,11 @@ export function batchProcessingFlow(data) {
 
 export function scheduledJobFlow(data) {
   const client = new TaskFlowClient();
-  
+
   try {
     // Schedule job for future execution
     const delaySeconds = Math.floor(Math.random() * 300) + 60; // 60-360 seconds in future
-    
+
     const job = client.submitJob({
       type: 'scheduled-' + randomJobType(),
       priority: randomPriority(),
@@ -297,17 +304,16 @@ export function scheduledJobFlow(data) {
       maxRetries: 3,
       idempotencyKey: `scheduled-${generateUUID()}`,
     });
-    
+
     if (!job) return;
-    
+
     // Think time
     thinkTime(1, 2);
-    
+
     // Occasionally cancel scheduled jobs (10% chance)
     if (Math.random() < 0.1) {
       client.cancelJob(job.id);
     }
-    
   } catch (error) {
     handleError(error, 'scheduled job flow');
   }
@@ -319,34 +325,33 @@ export function scheduledJobFlow(data) {
 
 export function monitoringFlow(data) {
   const client = new TaskFlowClient();
-  
+
   try {
     // Simulate dashboard queries - read-heavy workload
-    
+
     // Get queue stats
     client.getQueueStats();
     sleep(0.5);
-    
+
     // Get worker stats
     client.getWorkerStats();
     sleep(0.5);
-    
+
     // List recent jobs
     client.listJobs({ limit: 50, status: 'QUEUED' });
     sleep(0.5);
-    
+
     client.listJobs({ limit: 50, status: 'RUNNING' });
     sleep(0.5);
-    
+
     client.listJobs({ limit: 50, status: 'COMPLETED' });
     sleep(0.5);
-    
+
     // Collect system metrics
     collectSystemMetrics(client);
-    
+
     // Dashboard refresh interval
     sleep(5);
-    
   } catch (error) {
     handleError(error, 'monitoring flow');
   }
@@ -358,27 +363,29 @@ export function monitoringFlow(data) {
 
 export function teardown(data) {
   const client = new TaskFlowClient();
-  
+
   console.log('='.repeat(80));
   console.log('MIXED WORKLOAD TEST - TEARDOWN');
   console.log('='.repeat(80));
-  
+
   // Collect final system state
   console.log('Collecting final system state...');
   const queueStats = client.getQueueStats();
   const workerStats = client.getWorkerStats();
-  
+
   console.log(`Final queue depth: ${queueStats?.total || 0}`);
   console.log(`  CRITICAL: ${queueStats?.byPriority?.CRITICAL || 0}`);
   console.log(`  HIGH: ${queueStats?.byPriority?.HIGH || 0}`);
   console.log(`  NORMAL: ${queueStats?.byPriority?.NORMAL || 0}`);
   console.log(`  LOW: ${queueStats?.byPriority?.LOW || 0}`);
-  
-  console.log(`Active workers: ${workerStats?.workers?.filter(w => w.status === 'ACTIVE').length || 0}`);
-  
+
+  console.log(
+    `Active workers: ${workerStats?.workers?.filter((w) => w.status === 'ACTIVE').length || 0}`
+  );
+
   const testDuration = (Date.now() - data.startTime) / 1000;
   console.log(`Test duration: ${testDuration.toFixed(2)}s`);
-  
+
   console.log('Teardown complete.');
   console.log('='.repeat(80));
 }
@@ -389,15 +396,24 @@ export function teardown(data) {
 
 export function handleSummary(data) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  
+
   // Calculate overall metrics
-  const successRate = ((1 - (data.metrics.http_req_failed?.values?.rate || 0)) * 100).toFixed(2);
-  const avgLatency = (data.metrics.http_req_duration?.values?.avg || 0).toFixed(2);
-  const p95Latency = (data.metrics.http_req_duration?.values['p(95)'] || 0).toFixed(2);
-  const p99Latency = (data.metrics.http_req_duration?.values['p(99)'] || 0).toFixed(2);
+  const successRate = (
+    (1 - (data.metrics.http_req_failed?.values?.rate || 0)) *
+    100
+  ).toFixed(2);
+  const avgLatency = (data.metrics.http_req_duration?.values?.avg || 0).toFixed(
+    2
+  );
+  const p95Latency = (
+    data.metrics.http_req_duration?.values['p(95)'] || 0
+  ).toFixed(2);
+  const p99Latency = (
+    data.metrics.http_req_duration?.values['p(99)'] || 0
+  ).toFixed(2);
   const requestRate = (data.metrics.http_reqs?.values?.rate || 0).toFixed(2);
   const totalRequests = data.metrics.http_reqs?.values?.count || 0;
-  
+
   const customSummary = `
 ${'='.repeat(80)}
 MIXED WORKLOAD TEST RESULTS
@@ -421,11 +437,13 @@ Overall Performance:
   ✓ P99 Latency:         ${p99Latency}ms
 
 Thresholds:
-  ${data.metrics.http_req_duration?.thresholds ? 
-    Object.entries(data.metrics.http_req_duration.thresholds)
-      .map(([key, val]) => `  ${val.ok ? '✓' : '✗'} ${key}`)
-      .join('\n') 
-    : 'No thresholds defined'}
+  ${
+    data.metrics.http_req_duration?.thresholds
+      ? Object.entries(data.metrics.http_req_duration.thresholds)
+          .map(([key, val]) => `  ${val.ok ? '✓' : '✗'} ${key}`)
+          .join('\n')
+      : 'No thresholds defined'
+  }
 
 Job Metrics:
   Successful Submissions: ${data.metrics.job_submission_success?.values?.count || 0}
@@ -477,7 +495,8 @@ ${'='.repeat(80)}
 `;
 
   return {
-    'stdout': textSummary(data, { indent: ' ', enableColors: true }) + customSummary,
+    stdout:
+      textSummary(data, { indent: ' ', enableColors: true }) + customSummary,
     [`results/mixed-workload-${timestamp}.html`]: htmlReport(data),
     [`results/mixed-workload-${timestamp}.json`]: JSON.stringify(data, null, 2),
   };

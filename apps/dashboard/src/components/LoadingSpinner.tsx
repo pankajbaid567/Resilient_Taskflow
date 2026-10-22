@@ -10,9 +10,9 @@ export default function LoadingSpinner({
   text,
 }: LoadingSpinnerProps) {
   return (
-    <div className={styles.container}>
-      <div className={`${styles.spinner} ${styles[size]}`}></div>
-      {text && <p className={styles.text}>{text}</p>}
+    <div className={styles.container} role="status" aria-live="polite">
+      <div className={`${styles.spinner} ${styles[size]}`} aria-hidden="true" />
+      <p className={styles.text}>{text ?? 'Loading…'}</p>
     </div>
   );
 }

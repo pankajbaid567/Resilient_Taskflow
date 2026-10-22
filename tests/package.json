@@ -22,7 +22,6 @@
   "dependencies": {
     "@taskflow/config": "workspace:*",
     "@taskflow/database": "workspace:*",
-    "@taskflow/events": "workspace:*",
     "@taskflow/logger": "workspace:*",
     "@taskflow/observability": "workspace:*",
     "@taskflow/queue": "workspace:*",
@@ -35,7 +34,6 @@
     "@vitest/ui": "^1.2.0",
     "drizzle-orm": "^0.29.3",
     "ioredis": "^5.3.2",
-    "kafkajs": "^2.2.4",
     "pg": "^8.11.3",
     "typescript": "^5.3.3",
     "vitest": "^1.2.0"

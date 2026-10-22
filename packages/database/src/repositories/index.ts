@@ -11,3 +11,5 @@ export * from './delivery.repository';
 export * from './dispatch.repository';
 export * from './auth.repository';
 export * from './audit.repository';
+export * from './retention.repository';
+export * from './metrics.repository';

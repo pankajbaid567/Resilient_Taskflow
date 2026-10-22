@@ -1,10 +1,13 @@
 import { JobStatus } from '@taskflow/types';
-import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 
 import { db } from '../client';
 import * as schema from '../schema';
 import { Job, jobs, NewJob } from '../schema';
-import { InvalidStateTransitionError } from '../state-machine';
+import {
+  InvalidStateTransitionError,
+  validateTransition,
+} from '../state-machine';
 
 import {
   insertOperationalAudit,
@@ -92,6 +95,7 @@ async function createJobInTransaction(
     return { job, queueName };
   }
 
+  validateTransition(job.status, JobStatus.QUEUED);
   const [queuedJob] = await tx
     .update(jobs)
     .set({
@@ -344,25 +348,57 @@ export async function getJobsByUserId(
   return query;
 }
 
-/**
- * Get jobs ready to be queued (status = CREATED, scheduledAt <= now)
- */
-export async function getJobsReadyToQueue(limit: number = 100): Promise<Job[]> {
-  return db
-    .select()
-    .from(jobs)
+/** Transition an already-locked, due CREATED row to QUEUED with its outbox row. */
+async function promoteLockedJob(
+  tx: DatabaseTransaction,
+  lockedJob: Job
+): Promise<Job> {
+  const queueName = await resolveQueueName(tx, lockedJob.queueId);
+
+  validateTransition(lockedJob.status, JobStatus.QUEUED);
+
+  const [promoted] = await tx
+    .update(jobs)
+    .set({
+      status: JobStatus.QUEUED,
+      version: sql`${jobs.version} + 1`,
+      eventSequence: sql`${jobs.eventSequence} + 1`,
+    })
     .where(
-      and(eq(jobs.status, JobStatus.CREATED), lt(jobs.scheduledAt, new Date()))
+      and(
+        eq(jobs.id, lockedJob.id),
+        eq(jobs.status, JobStatus.CREATED),
+        eq(jobs.version, lockedJob.version)
+      )
     )
-    .limit(limit);
+    .returning();
+
+  if (!promoted) {
+    throw new Error(
+      `Concurrent modification prevented promotion of job ${lockedJob.id}`
+    );
+  }
+
+  await tx.insert(schema.jobEvents).values({
+    jobId: lockedJob.id,
+    eventType: 'queued',
+    sequence: promoted.eventSequence,
+    fromStatus: JobStatus.CREATED,
+    toStatus: JobStatus.QUEUED,
+    userId: promoted.userId,
+    createdAt: sql`clock_timestamp()`,
+    metadata: { version: promoted.version, source: 'scheduler' },
+  });
+
+  // Create delivery row in the same transaction so QUEUED ↔ PENDING are atomic
+  await insertPendingDelivery(tx, lockedJob.id, queueName, 1);
+
+  return promoted;
 }
 
 /**
  * Atomically promote a CREATED job to QUEUED and insert a PENDING delivery
  * row so the Dispatcher will publish it to Redis.
- *
- * This is the only delayed-job promotion mutation. The scheduler calls it
- * when a job's scheduledAt becomes due.
  */
 export async function promoteJobToQueued(jobId: string): Promise<Job> {
   return db.transaction(async (tx) => {
@@ -385,111 +421,61 @@ export async function promoteJobToQueued(jobId: string): Promise<Job> {
       );
     }
 
-    const queueName = await resolveQueueName(tx, lockedJob.queueId);
-
-    const [promoted] = await tx
-      .update(jobs)
-      .set({
-        status: JobStatus.QUEUED,
-        version: sql`${jobs.version} + 1`,
-        eventSequence: sql`${jobs.eventSequence} + 1`,
-      })
-      .where(
-        and(
-          eq(jobs.id, jobId),
-          eq(jobs.status, lockedJob.status),
-          eq(jobs.version, lockedJob.version)
-        )
-      )
-      .returning();
-
-    if (!promoted) {
-      throw new Error(
-        `Concurrent modification prevented promotion of job ${jobId}`
-      );
-    }
-
-    await tx.insert(schema.jobEvents).values({
-      jobId,
-      eventType: 'queued',
-      sequence: promoted.eventSequence,
-      fromStatus: JobStatus.CREATED,
-      toStatus: JobStatus.QUEUED,
-      userId: promoted.userId,
-      createdAt: sql`clock_timestamp()`,
-      metadata: { version: promoted.version, source: 'scheduler' },
-    });
-
-    // Create delivery row in the same transaction so QUEUED ↔ PENDING are atomic
-    await insertPendingDelivery(tx, jobId, queueName, 1);
-
-    return promoted;
+    return promoteLockedJob(tx, lockedJob);
   });
 }
 
-/**
- * Get jobs ready to process (status = QUEUED, scheduledAt <= now)
- */
-export async function getJobsReadyToProcess(
-  queueId: string,
-  limit: number = 100
-): Promise<Job[]> {
-  return db
-    .select()
-    .from(jobs)
-    .where(
-      and(
-        eq(jobs.queueId, queueId),
-        eq(jobs.status, JobStatus.QUEUED),
-        lt(jobs.scheduledAt, new Date())
-      )
-    )
-    .orderBy(
-      sql`CASE ${jobs.priority}
-        WHEN 'CRITICAL' THEN 4
-        WHEN 'HIGH' THEN 3
-        WHEN 'NORMAL' THEN 2
-        WHEN 'LOW' THEN 1
-      END DESC`,
-      asc(jobs.createdAt)
-    )
-    .limit(limit);
+export interface ScheduledPromotionResult {
+  promoted: Array<Pick<Job, 'id' | 'priority'>>;
+  failed: Array<{ jobId: string; error: string }>;
 }
 
 /**
- * Get jobs ready for retry (status = RETRY_SCHEDULED, scheduledAt <= now)
+ * Promote a batch of due delayed jobs in one transaction.
+ *
+ * Rows are claimed oldest-due first with FOR UPDATE SKIP LOCKED, so any
+ * number of concurrent schedulers take disjoint rows instead of serializing on
+ * the same locks. Due-ness uses the database clock, never the caller's.
+ * Each promotion runs in its own savepoint: one bad row is reported and
+ * skipped without aborting the rest of the batch.
  */
-export async function getJobsReadyForRetry(
+export async function promoteDueScheduledJobs(
   limit: number = 100
-): Promise<Job[]> {
-  return db
-    .select()
-    .from(jobs)
-    .where(
-      and(
-        eq(jobs.status, JobStatus.RETRY_SCHEDULED),
-        lt(jobs.scheduledAt, new Date())
-      )
-    )
-    .limit(limit);
-}
+): Promise<ScheduledPromotionResult> {
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new RangeError('Promotion batch limit must be a positive integer');
+  }
 
-/**
- * Get jobs with expired leases (status = PROCESSING, leaseExpiresAt < now)
- */
-export async function getJobsWithExpiredLeases(
-  limit: number = 100
-): Promise<Job[]> {
-  return db
-    .select()
-    .from(jobs)
-    .where(
-      and(
-        eq(jobs.status, JobStatus.PROCESSING),
-        lt(jobs.leaseExpiresAt, new Date())
+  return db.transaction(async (tx) => {
+    const due = await tx
+      .select()
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.status, JobStatus.CREATED),
+          sql`${jobs.scheduledAt} <= clock_timestamp()`
+        )
       )
-    )
-    .limit(limit);
+      .orderBy(asc(jobs.scheduledAt), asc(jobs.id))
+      .limit(limit)
+      .for('update', { skipLocked: true });
+
+    const result: ScheduledPromotionResult = { promoted: [], failed: [] };
+    for (const lockedJob of due) {
+      try {
+        const promoted = await tx.transaction((savepoint) =>
+          promoteLockedJob(savepoint, lockedJob)
+        );
+        result.promoted.push({ id: promoted.id, priority: promoted.priority });
+      } catch (error) {
+        result.failed.push({
+          jobId: lockedJob.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return result;
+  });
 }
 
 /**
@@ -534,6 +520,8 @@ export async function cancelJobForUser(
         : JobStatus.CANCELLED;
 
     const isTerminal = nextStatus === JobStatus.CANCELLED;
+
+    validateTransition(lockedJob.status, nextStatus);
 
     const [job] = await tx
       .update(jobs)
@@ -634,26 +622,6 @@ export async function countJobsByStatus(
   });
 
   return counts as Record<JobStatus, number>;
-}
-
-/**
- * Delete old completed jobs (cleanup)
- */
-export async function deleteOldCompletedJobs(
-  olderThanDays: number = 30
-): Promise<number> {
-  const cutoffDate = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
-
-  const result = await db
-    .delete(jobs)
-    .where(
-      and(
-        inArray(jobs.status, ['SUCCEEDED', 'CANCELLED']),
-        lt(jobs.completedAt, cutoffDate)
-      )
-    );
-
-  return result.length;
 }
 
 /** Count all jobs by the shared, canonical database state names. */
@@ -757,9 +725,12 @@ export async function createJobWithIdempotency(
  * Clean up expired idempotency keys
  */
 export async function cleanupExpiredIdempotencyKeys(): Promise<number> {
-  const result = await db
+  // RETURNING is required: postgres.js reports no row count for a bare DELETE,
+  // so without it this function always reported 0.
+  const deleted = await db
     .delete(schema.idempotencyKeys)
-    .where(sql`${schema.idempotencyKeys.expiresAt} <= clock_timestamp()`);
+    .where(sql`${schema.idempotencyKeys.expiresAt} <= clock_timestamp()`)
+    .returning({ id: schema.idempotencyKeys.id });
 
-  return result.length;
+  return deleted.length;
 }

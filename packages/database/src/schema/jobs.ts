@@ -79,7 +79,9 @@ export const jobs = pgTable(
     failedAt: timestamp('failed_at', { withTimezone: true }),
 
     // Worker Lease
-    workerId: uuid('worker_id').references(() => workers.id),
+    workerId: uuid('worker_id').references(() => workers.id, {
+      onDelete: 'set null',
+    }),
     leaseId: uuid('lease_id'),
     leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
 

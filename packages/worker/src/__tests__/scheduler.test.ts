@@ -2,11 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Scheduler, SchedulerConfig } from '../scheduler';
 
-// Mock dependencies — scheduler now calls promoteJobToQueued atomically
-// instead of enqueueJob + updateJobStatus separately.
+// The scheduler delegates claiming + promotion to one SKIP LOCKED batch
+// transaction in the database layer; these tests cover orchestration only.
 vi.mock('@taskflow/database', () => ({
-  getJobsReadyToQueue: vi.fn(),
-  promoteJobToQueued: vi.fn(),
+  promoteDueScheduledJobs: vi.fn(),
 }));
 
 vi.mock('@taskflow/logger', () => ({
@@ -18,7 +17,19 @@ vi.mock('@taskflow/logger', () => ({
   }),
 }));
 
-import { getJobsReadyToQueue, promoteJobToQueued } from '@taskflow/database';
+import { promoteDueScheduledJobs } from '@taskflow/database';
+
+const promote = vi.mocked(promoteDueScheduledJobs);
+
+function batch(
+  promotedIds: string[],
+  failed: Array<{ jobId: string; error: string }> = []
+) {
+  return {
+    promoted: promotedIds.map((id) => ({ id, priority: 'NORMAL' as const })),
+    failed,
+  };
+}
 
 describe('Scheduler', () => {
   beforeEach(() => {
@@ -32,8 +43,7 @@ describe('Scheduler', () => {
 
   describe('constructor', () => {
     it('should initialize with default config', () => {
-      const scheduler = new Scheduler();
-      const stats = scheduler.getStats();
+      const stats = new Scheduler().getStats();
 
       expect(stats.totalRuns).toBe(0);
       expect(stats.totalJobsScheduled).toBe(0);
@@ -47,78 +57,59 @@ describe('Scheduler', () => {
         enabled: false,
       };
 
-      const scheduler = new Scheduler(config);
-      expect(scheduler).toBeDefined();
+      expect(new Scheduler(config)).toBeDefined();
     });
   });
 
   describe('start', () => {
     it('should not start if disabled', () => {
-      const scheduler = new Scheduler({ enabled: false });
-      scheduler.start();
+      new Scheduler({ enabled: false }).start();
 
-      expect(getJobsReadyToQueue).not.toHaveBeenCalled();
+      expect(promote).not.toHaveBeenCalled();
     });
 
     it('should warn if already started', () => {
       vi.useFakeTimers();
+      promote.mockResolvedValue(batch([]));
       const scheduler = new Scheduler({ intervalMs: 1000 });
 
       scheduler.start();
-      scheduler.start(); // Second start
+      scheduler.start();
 
-      // Should only set up one interval
       expect(vi.getTimerCount()).toBe(1);
-
-      scheduler.stop();
-      vi.useRealTimers();
+      void scheduler.stop();
     });
   });
 
   describe('stop', () => {
     it('should clear interval timer', () => {
       vi.useFakeTimers();
+      promote.mockResolvedValue(batch([]));
       const scheduler = new Scheduler({ intervalMs: 1000 });
 
       scheduler.start();
       expect(vi.getTimerCount()).toBe(1);
 
-      scheduler.stop();
+      void scheduler.stop();
       expect(vi.getTimerCount()).toBe(0);
-
-      vi.useRealTimers();
     });
 
-    it('should warn if not running', () => {
-      const scheduler = new Scheduler();
-      scheduler.stop(); // Stop without start
-
-      // Should not throw
-      expect(scheduler).toBeDefined();
+    it('should not throw if not running', async () => {
+      await expect(new Scheduler().stop()).resolves.toBeUndefined();
     });
 
-    it('waits for the active database promotion before resolving', async () => {
-      let resolvePromotion!: (value: unknown) => void;
-      vi.mocked(getJobsReadyToQueue).mockResolvedValue([
-        {
-          id: 'job-1',
-          type: 'test',
-          priority: 'NORMAL',
-          scheduledAt: new Date(),
-        },
-      ] as any);
-      vi.mocked(promoteJobToQueued).mockImplementation(
+    it('waits for the active promotion transaction before resolving', async () => {
+      let resolveBatch!: (value: ReturnType<typeof batch>) => void;
+      promote.mockImplementation(
         () =>
           new Promise((resolve) => {
-            resolvePromotion = resolve;
-          }) as any
+            resolveBatch = resolve;
+          })
       );
 
       const scheduler = new Scheduler({ intervalMs: 5000 });
       scheduler.start();
-      await vi.waitFor(() => {
-        expect(promoteJobToQueued).toHaveBeenCalledWith('job-1');
-      });
+      await vi.waitFor(() => expect(promote).toHaveBeenCalledTimes(1));
 
       let stopped = false;
       const stopping = scheduler.stop().then(() => {
@@ -127,226 +118,104 @@ describe('Scheduler', () => {
       await Promise.resolve();
       expect(stopped).toBe(false);
 
-      resolvePromotion({ id: 'job-1' });
+      resolveBatch(batch(['job-1']));
       await stopping;
       expect(stopped).toBe(true);
     });
   });
 
   describe('runSchedulingCycle', () => {
-    it('should process jobs ready to queue via promoteJobToQueued', async () => {
-      const jobs = [
-        {
-          id: 'job-1',
-          type: 'test',
-          priority: 'HIGH',
-          scheduledAt: new Date(),
-          metadata: { queue: 'default' },
-        },
-        {
-          id: 'job-2',
-          type: 'test',
-          priority: 'NORMAL',
-          scheduledAt: new Date(),
-          metadata: { queue: 'email' },
-        },
-      ];
+    it('passes the configured batch size and counts promoted jobs', async () => {
+      promote.mockResolvedValue(batch(['job-1', 'job-2']));
 
-      vi.mocked(getJobsReadyToQueue).mockResolvedValue(jobs as any);
-      vi.mocked(promoteJobToQueued).mockResolvedValue({ id: 'job-1' } as any);
-
-      const scheduler = new Scheduler({
-        intervalMs: 5000,
-        batchSize: 100,
-      });
-
+      const scheduler = new Scheduler({ intervalMs: 5000, batchSize: 100 });
       scheduler.start();
+      await vi.waitFor(() =>
+        expect(scheduler.getStats().totalJobsScheduled).toBe(2)
+      );
 
-      // Wait for first cycle
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      expect(getJobsReadyToQueue).toHaveBeenCalledWith(100);
-      // promoteJobToQueued called once per job, with correct queue names
-      expect(promoteJobToQueued).toHaveBeenCalledTimes(2);
-      expect(promoteJobToQueued).toHaveBeenCalledWith('job-1');
-      expect(promoteJobToQueued).toHaveBeenCalledWith('job-2');
-
-      const stats = scheduler.getStats();
-      expect(stats.totalRuns).toBeGreaterThan(0);
-      expect(stats.totalJobsScheduled).toBe(2);
-
-      scheduler.stop();
+      expect(promote).toHaveBeenCalledWith(100);
+      expect(scheduler.getStats().totalRuns).toBe(1);
+      await scheduler.stop();
     });
 
-    it('should use default queue if not in metadata', async () => {
-      const jobs = [
-        {
-          id: 'job-1',
-          type: 'test',
-          priority: 'NORMAL',
-          scheduledAt: new Date(),
-          metadata: null, // No queue specified
-        },
-      ];
-
-      vi.mocked(getJobsReadyToQueue).mockResolvedValue(jobs as any);
-      vi.mocked(promoteJobToQueued).mockResolvedValue({ id: 'job-1' } as any);
+    it('handles an empty batch without updating run counters', async () => {
+      promote.mockResolvedValue(batch([]));
 
       const scheduler = new Scheduler({ intervalMs: 5000 });
       scheduler.start();
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      expect(promoteJobToQueued).toHaveBeenCalledWith('job-1');
-
-      scheduler.stop();
-    });
-
-    it('should handle no jobs gracefully', async () => {
-      vi.mocked(getJobsReadyToQueue).mockResolvedValue([]);
-
-      const scheduler = new Scheduler({ intervalMs: 5000 });
-      scheduler.start();
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      expect(getJobsReadyToQueue).toHaveBeenCalled();
-      expect(promoteJobToQueued).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(promote).toHaveBeenCalled());
+      await scheduler.stop();
 
       const stats = scheduler.getStats();
       expect(stats.totalJobsScheduled).toBe(0);
-
-      scheduler.stop();
+      expect(stats.lastRunJobCount).toBeUndefined();
     });
 
-    it('should handle promote errors, continue with remaining jobs', async () => {
-      const jobs = [
-        {
-          id: 'job-1',
-          type: 'test',
-          priority: 'HIGH',
-          scheduledAt: new Date(),
-          metadata: { queue: 'default' },
-        },
-        {
-          id: 'job-2',
-          type: 'test',
-          priority: 'NORMAL',
-          scheduledAt: new Date(),
-          metadata: { queue: 'email' },
-        },
-      ];
-
-      vi.mocked(getJobsReadyToQueue).mockResolvedValue(jobs as any);
-      vi.mocked(promoteJobToQueued)
-        .mockRejectedValueOnce(new Error('DB error'))
-        .mockResolvedValueOnce({ id: 'job-2' } as any);
-
-      const scheduler = new Scheduler({ intervalMs: 5000 });
-      scheduler.start();
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      const stats = scheduler.getStats();
-      expect(stats.totalJobsScheduled).toBe(1); // Only job-2 succeeded
-      expect(stats.totalErrors).toBeGreaterThan(0);
-
-      scheduler.stop();
-    });
-
-    it('should handle database errors', async () => {
-      vi.mocked(getJobsReadyToQueue).mockRejectedValue(
-        new Error('Database error')
+    it('records per-row failures while counting successful promotions', async () => {
+      promote.mockResolvedValue(
+        batch(['job-2'], [{ jobId: 'job-1', error: 'DB error' }])
       );
 
       const scheduler = new Scheduler({ intervalMs: 5000 });
       scheduler.start();
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await vi.waitFor(() =>
+        expect(scheduler.getStats().lastRunJobCount).toBe(2)
+      );
+      await scheduler.stop();
 
       const stats = scheduler.getStats();
-      expect(stats.totalErrors).toBeGreaterThan(0);
+      expect(stats.totalJobsScheduled).toBe(1);
+      expect(stats.totalErrors).toBe(1);
+    });
 
-      scheduler.stop();
+    it('counts a failed batch transaction as an error', async () => {
+      promote.mockRejectedValue(new Error('Database error'));
+
+      const scheduler = new Scheduler({ intervalMs: 5000 });
+      scheduler.start();
+      await vi.waitFor(() =>
+        expect(scheduler.getStats().totalErrors).toBeGreaterThan(0)
+      );
+      await scheduler.stop();
     });
 
     it('should prevent concurrent runs', async () => {
-      const jobs = [
-        {
-          id: 'job-1',
-          type: 'test',
-          priority: 'NORMAL',
-          scheduledAt: new Date(),
-          metadata: { queue: 'default' },
-        },
-      ];
-
-      // Make getJobsReadyToQueue slow
-      vi.mocked(getJobsReadyToQueue).mockImplementation(
+      vi.useFakeTimers();
+      promote.mockImplementation(
         () =>
           new Promise((resolve) => {
-            setTimeout(() => resolve(jobs as any), 1000);
+            setTimeout(() => resolve(batch(['job-1'])), 1000);
           })
       );
 
-      vi.mocked(promoteJobToQueued).mockResolvedValue({ id: 'job-1' } as any);
-
-      vi.useFakeTimers();
-
-      const scheduler = new Scheduler({ intervalMs: 500 }); // Fast interval
+      const scheduler = new Scheduler({ intervalMs: 500 });
       scheduler.start();
 
-      // Trigger an interval while the initial slow cycle is still running.
+      // An interval fires while the initial slow cycle is still running.
       await vi.advanceTimersByTimeAsync(750);
+      expect(promote).toHaveBeenCalledTimes(1);
 
-      // Should only call once due to concurrent run prevention
-      expect(getJobsReadyToQueue).toHaveBeenCalledTimes(1);
-
-      scheduler.stop();
+      const stopping = scheduler.stop();
       await vi.advanceTimersByTimeAsync(250);
+      await stopping;
     });
 
     it('should update stats correctly', async () => {
-      const jobs = [
-        {
-          id: 'job-1',
-          type: 'test',
-          priority: 'CRITICAL',
-          scheduledAt: new Date(),
-          metadata: { queue: 'default' },
-        },
-        {
-          id: 'job-2',
-          type: 'test',
-          priority: 'HIGH',
-          scheduledAt: new Date(),
-          metadata: { queue: 'default' },
-        },
-        {
-          id: 'job-3',
-          type: 'test',
-          priority: 'NORMAL',
-          scheduledAt: new Date(),
-          metadata: { queue: 'default' },
-        },
-      ];
-
-      vi.mocked(getJobsReadyToQueue).mockResolvedValue(jobs as any);
-      vi.mocked(promoteJobToQueued).mockResolvedValue({ id: 'job-1' } as any);
+      promote.mockResolvedValue(batch(['job-1', 'job-2', 'job-3']));
 
       const scheduler = new Scheduler({ intervalMs: 5000 });
       scheduler.start();
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await vi.waitFor(() =>
+        expect(scheduler.getStats().lastRunJobCount).toBe(3)
+      );
+      await scheduler.stop();
 
       const stats = scheduler.getStats();
-      expect(stats.totalRuns).toBeGreaterThan(0);
+      expect(stats.totalRuns).toBe(1);
       expect(stats.totalJobsScheduled).toBe(3);
       expect(stats.lastRunAt).toBeDefined();
       expect(stats.lastRunDurationMs).toBeGreaterThanOrEqual(0);
-      expect(stats.lastRunJobCount).toBe(3);
-
-      scheduler.stop();
     });
   });
 
@@ -356,8 +225,8 @@ describe('Scheduler', () => {
       const stats1 = scheduler.getStats();
       const stats2 = scheduler.getStats();
 
-      expect(stats1).not.toBe(stats2); // Different objects
-      expect(stats1).toEqual(stats2); // Same values
+      expect(stats1).not.toBe(stats2);
+      expect(stats1).toEqual(stats2);
     });
   });
 });

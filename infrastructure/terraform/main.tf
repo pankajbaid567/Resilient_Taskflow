@@ -108,23 +108,6 @@ module "elasticache" {
   tags = local.common_tags
 }
 
-# MSK (Kafka) Module
-module "msk" {
-  source = "./modules/msk"
-  
-  name_prefix              = local.name_prefix
-  vpc_id                   = module.vpc.vpc_id
-  subnet_ids               = module.vpc.private_subnet_ids
-  allowed_security_groups  = [module.ecs.api_security_group_id, module.ecs.worker_security_group_id]
-  
-  kafka_version            = var.kafka_version
-  number_of_broker_nodes   = var.kafka_broker_nodes
-  broker_instance_type     = var.kafka_instance_type
-  ebs_volume_size          = var.kafka_ebs_volume_size
-  
-  tags = local.common_tags
-}
-
 # Secrets Manager
 module "secrets" {
   source = "./modules/secrets"
@@ -132,7 +115,6 @@ module "secrets" {
   name_prefix    = local.name_prefix
   database_url   = module.rds.connection_string
   redis_url      = module.elasticache.primary_endpoint_address
-  kafka_brokers  = module.msk.bootstrap_brokers
   jwt_secret     = var.jwt_secret
   api_key        = var.api_key
   
@@ -184,7 +166,6 @@ module "ecs" {
   # Database and cache
   database_security_group_id = module.rds.security_group_id
   redis_security_group_id    = module.elasticache.security_group_id
-  kafka_security_group_id    = module.msk.security_group_id
   
   tags = local.common_tags
 }
@@ -231,12 +212,6 @@ output "rds_endpoint" {
 output "redis_endpoint" {
   description = "Redis endpoint"
   value       = module.elasticache.primary_endpoint_address
-  sensitive   = true
-}
-
-output "kafka_brokers" {
-  description = "Kafka bootstrap brokers"
-  value       = module.msk.bootstrap_brokers
   sensitive   = true
 }
 

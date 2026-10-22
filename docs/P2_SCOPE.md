@@ -6,7 +6,9 @@ control semantics, and deployable configuration remain open.
 ## Current progress
 
 - Implemented: application append-only operational audit schema, transactional control audit writes, payload-free metadata policy, tenant/admin audit reads, pagination, and process tests.
-- Not implemented: retention cleanup, bounded control waits/status APIs, stale-worker policy extensions, and deployable production configuration.
+- Implemented: bounded, resumable lifecycle retention across PostgreSQL tables (jobs, events, attempts, dead letters, deliveries, workers, idempotency keys, audit logs) and Redis stream trimming with PEL preservation and referential integrity protection.
+- Implemented: a production-style local Docker stack (`docker-compose.prod.yml`) with required-secret validation, migrations as a one-shot job, health probes and authenticated metrics scraping. It has not been deployed anywhere.
+- Not implemented: bounded control waits/status APIs, stale-worker policy extensions (a crashed worker stays `ACTIVE` in the database), TLS, and a real deployment.
 
 ## Objective
 
@@ -34,8 +36,7 @@ Make the verified TaskFlow core easier to operate without changing its PostgreSQ
 ## Explicitly out of scope
 
 - Kafka integration
-- load testing or benchmark publication
-- dashboard enhancements
+- sustained or multi-machine load testing (single-machine benchmarks exist in `docs/benchmarking/RESULTS.md`)
 - deployment, publishing, paid infrastructure, credential rotation, or external-account changes
 - exactly-once claims for arbitrary external effects
 

@@ -1,7 +1,16 @@
 apiVersion: 1
 
+# An earlier version of this file let Grafana generate the datasource uid.
+# Grafana will not change the uid of an existing provisioned datasource in
+# place, so remove the old one first; it is recreated below with a fixed uid
+# that the dashboards reference. Safe on a fresh install (nothing to delete).
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+
 datasources:
   - name: Prometheus
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090

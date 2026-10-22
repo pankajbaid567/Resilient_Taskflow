@@ -13,12 +13,11 @@
 
 // Redis Client
 export {
+  getBlockingRedisClient,
   getRedisClient,
   createRedisClient,
   testRedisConnection,
   closeRedisConnection,
-  createPipeline,
-  createTransaction,
   initRedis,
 } from './redis-client';
 
@@ -37,8 +36,8 @@ export {
 // Producer
 export {
   enqueueJob,
-  enqueueJobBatch,
   getQueueDepth,
+  getStreamInFlight,
   trimStream,
 } from './producer';
 
@@ -56,7 +55,6 @@ export {
 export {
   consumeJobs,
   acknowledgeMessage,
-  acknowledgeMessageBatch,
   getPendingMessages,
   claimStaleMessages,
   claimStaleMessagesWithReport,

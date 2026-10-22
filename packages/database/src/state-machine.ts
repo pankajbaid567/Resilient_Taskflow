@@ -10,7 +10,25 @@ import { JobStatus } from '@taskflow/types';
 type ValidTransitions = Record<JobStatus, JobStatus[]>;
 
 /**
+ * A job status as either the enum member or its string value. Database rows
+ * expose the string-literal form, so both are accepted without casts.
+ */
+export type JobStatusValue = `${JobStatus}`;
+
+/**
  * Valid State Transitions
+ *
+ * This table is enforced: every repository function that changes `jobs.status`
+ * calls {@link validateTransition} immediately before its UPDATE. It lists
+ * exactly the transitions the runtime performs, and no others:
+ *
+ * - PROCESSING -> QUEUED covers both lease-expiry recovery and the shutdown
+ *   release (`releaseJobDelivery`), which hands the job back to the queue.
+ * - CANCEL_REQUESTED -> SUCCEEDED is a result that commits before the owner
+ *   observed the cancel request (the first durable observation wins).
+ * - FAILED is a legacy state. The runtime never writes it: a failed attempt
+ *   goes straight to RETRY_SCHEDULED or DEAD_LETTERED. Rows that still hold it
+ *   keep their outgoing transitions so they can be resolved.
  */
 export const VALID_TRANSITIONS: ValidTransitions = {
   [JobStatus.CREATED]: [JobStatus.QUEUED, JobStatus.CANCELLED],
@@ -19,9 +37,9 @@ export const VALID_TRANSITIONS: ValidTransitions = {
 
   [JobStatus.PROCESSING]: [
     JobStatus.SUCCEEDED,
-    JobStatus.FAILED,
     JobStatus.RETRY_SCHEDULED,
     JobStatus.DEAD_LETTERED,
+    JobStatus.QUEUED,
     JobStatus.CANCEL_REQUESTED,
   ],
 
@@ -29,11 +47,7 @@ export const VALID_TRANSITIONS: ValidTransitions = {
 
   [JobStatus.RETRY_SCHEDULED]: [JobStatus.QUEUED, JobStatus.CANCELLED],
 
-  [JobStatus.CANCEL_REQUESTED]: [
-    JobStatus.CANCELLED,
-    JobStatus.SUCCEEDED,
-    JobStatus.FAILED,
-  ],
+  [JobStatus.CANCEL_REQUESTED]: [JobStatus.CANCELLED, JobStatus.SUCCEEDED],
 
   [JobStatus.SUCCEEDED]: [],
 
@@ -54,28 +68,34 @@ export const TERMINAL_STATES: JobStatus[] = [
 /**
  * Check if a state transition is valid
  */
-export function isValidTransition(from: JobStatus, to: JobStatus): boolean {
-  return VALID_TRANSITIONS[from].includes(to);
+export function isValidTransition(
+  from: JobStatusValue,
+  to: JobStatusValue
+): boolean {
+  return (VALID_TRANSITIONS[from] as readonly JobStatusValue[]).includes(to);
 }
 
 /**
  * Check if a state is terminal
  */
-export function isTerminalState(status: JobStatus): boolean {
-  return TERMINAL_STATES.includes(status);
+export function isTerminalState(status: JobStatusValue): boolean {
+  return (TERMINAL_STATES as readonly JobStatusValue[]).includes(status);
 }
 
 /**
  * Get valid transitions for a given state
  */
-export function getValidTransitions(status: JobStatus): JobStatus[] {
+export function getValidTransitions(status: JobStatusValue): JobStatus[] {
   return VALID_TRANSITIONS[status];
 }
 
 /**
  * Validate state transition and throw error if invalid
  */
-export function validateTransition(from: JobStatus, to: JobStatus): void {
+export function validateTransition(
+  from: JobStatusValue,
+  to: JobStatusValue
+): void {
   if (!isValidTransition(from, to)) {
     throw new InvalidStateTransitionError(
       `Invalid state transition from ${from} to ${to}. ` +
@@ -103,22 +123,18 @@ Job State Machine:
 
 CREATED
   ├─→ QUEUED
-  └─→ CANCELLED
+  └─→ CANCELLED (terminal)
 
 QUEUED
   ├─→ PROCESSING
-  └─→ CANCELLED
+  └─→ CANCELLED (terminal)
 
 PROCESSING
   ├─→ SUCCEEDED (terminal)
-  ├─→ FAILED
   ├─→ RETRY_SCHEDULED
   ├─→ DEAD_LETTERED (terminal)
+  ├─→ QUEUED            (lease expired, or released on worker shutdown)
   └─→ CANCEL_REQUESTED
-
-FAILED
-  ├─→ RETRY_SCHEDULED
-  └─→ DEAD_LETTERED (terminal)
 
 RETRY_SCHEDULED
   ├─→ QUEUED
@@ -126,8 +142,11 @@ RETRY_SCHEDULED
 
 CANCEL_REQUESTED
   ├─→ CANCELLED (terminal)
-  ├─→ SUCCEEDED (terminal)
-  └─→ FAILED
+  └─→ SUCCEEDED (terminal; result committed before the request was observed)
+
+FAILED (legacy; never written by the runtime)
+  ├─→ RETRY_SCHEDULED
+  └─→ DEAD_LETTERED (terminal)
 
 TERMINAL STATES:
   • SUCCEEDED

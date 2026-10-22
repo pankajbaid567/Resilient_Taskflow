@@ -15,7 +15,8 @@
 .modal {
   background: white;
   border-radius: 12px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1),
+  box-shadow:
+    0 20px 25px -5px rgba(0, 0, 0, 0.1),
     0 10px 10px -5px rgba(0, 0, 0, 0.04);
   max-height: 90vh;
   display: flex;
@@ -85,4 +86,13 @@
   padding: 24px;
   overflow-y: auto;
   flex: 1;
+}
+
+.modal:focus {
+  outline: none;
+}
+
+.closeButton:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }

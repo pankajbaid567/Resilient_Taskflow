@@ -8,6 +8,7 @@ import {
   isValidTransition,
   TERMINAL_STATES,
   validateTransition,
+  VALID_TRANSITIONS,
 } from '../state-machine';
 
 describe('Job State Machine', () => {
@@ -34,10 +35,16 @@ describe('Job State Machine', () => {
       );
     });
 
-    it('should allow PROCESSING -> FAILED', () => {
-      expect(isValidTransition(JobStatus.PROCESSING, JobStatus.FAILED)).toBe(
+    it('should allow PROCESSING -> QUEUED (lease recovery and shutdown release)', () => {
+      expect(isValidTransition(JobStatus.PROCESSING, JobStatus.QUEUED)).toBe(
         true
       );
+    });
+
+    it('should allow CANCEL_REQUESTED -> SUCCEEDED (result committed before the request was observed)', () => {
+      expect(
+        isValidTransition(JobStatus.CANCEL_REQUESTED, JobStatus.SUCCEEDED)
+      ).toBe(true);
     });
 
     it('should allow PROCESSING -> RETRY_SCHEDULED', () => {
@@ -94,6 +101,24 @@ describe('Job State Machine', () => {
       expect(isValidTransition(JobStatus.CREATED, JobStatus.PROCESSING)).toBe(
         false
       );
+    });
+
+    it('should reject PROCESSING -> FAILED (the runtime never writes FAILED)', () => {
+      expect(isValidTransition(JobStatus.PROCESSING, JobStatus.FAILED)).toBe(
+        false
+      );
+    });
+
+    it('should reject CANCEL_REQUESTED -> RETRY_SCHEDULED (a cancelled job is never retried)', () => {
+      expect(
+        isValidTransition(JobStatus.CANCEL_REQUESTED, JobStatus.RETRY_SCHEDULED)
+      ).toBe(false);
+    });
+
+    it('should reject CANCEL_REQUESTED -> QUEUED (a release must not undo a cancel request)', () => {
+      expect(
+        isValidTransition(JobStatus.CANCEL_REQUESTED, JobStatus.QUEUED)
+      ).toBe(false);
     });
 
     it('should reject QUEUED -> SUCCEEDED (skip PROCESSING)', () => {
@@ -166,7 +191,8 @@ describe('Job State Machine', () => {
     it('should return all possible transitions for PROCESSING', () => {
       const transitions = getValidTransitions(JobStatus.PROCESSING);
       expect(transitions).toContain(JobStatus.SUCCEEDED);
-      expect(transitions).toContain(JobStatus.FAILED);
+      expect(transitions).not.toContain(JobStatus.FAILED);
+      expect(transitions).toContain(JobStatus.QUEUED);
       expect(transitions).toContain(JobStatus.RETRY_SCHEDULED);
       expect(transitions).toContain(JobStatus.DEAD_LETTERED);
       expect(transitions).toContain(JobStatus.CANCEL_REQUESTED);
@@ -195,6 +221,60 @@ describe('Job State Machine', () => {
         const transitions = getValidTransitions(terminalState);
         expect(transitions).toEqual([]);
       });
+    });
+  });
+
+  describe('enforcement contract', () => {
+    /**
+     * Every status change the repositories perform, with where it happens.
+     * Each of these calls validateTransition() immediately before its UPDATE.
+     * Adding a transition to the runtime means adding it here AND to
+     * VALID_TRANSITIONS, which is the point of this test.
+     */
+    const REPOSITORY_TRANSITIONS: Array<[JobStatus, JobStatus]> = [
+      // createJob / promoteDueScheduledJobs / promoteJobToQueued
+      [JobStatus.CREATED, JobStatus.QUEUED],
+      // cancelJobForUser
+      [JobStatus.CREATED, JobStatus.CANCELLED],
+      [JobStatus.QUEUED, JobStatus.CANCELLED],
+      [JobStatus.RETRY_SCHEDULED, JobStatus.CANCELLED],
+      [JobStatus.PROCESSING, JobStatus.CANCEL_REQUESTED],
+      // acquireJobForDelivery
+      [JobStatus.QUEUED, JobStatus.PROCESSING],
+      [JobStatus.RETRY_SCHEDULED, JobStatus.QUEUED],
+      [JobStatus.PROCESSING, JobStatus.QUEUED],
+      [JobStatus.PROCESSING, JobStatus.DEAD_LETTERED],
+      [JobStatus.CANCEL_REQUESTED, JobStatus.CANCELLED],
+      // completeJobDelivery
+      [JobStatus.PROCESSING, JobStatus.SUCCEEDED],
+      [JobStatus.CANCEL_REQUESTED, JobStatus.SUCCEEDED],
+      // failJobDelivery
+      [JobStatus.PROCESSING, JobStatus.RETRY_SCHEDULED],
+      // releaseJobDelivery: PROCESSING -> QUEUED (listed above)
+    ];
+
+    const key = ([from, to]: [string, string]): string => `${from}->${to}`;
+
+    it('permits every transition the repositories perform', () => {
+      for (const [from, to] of REPOSITORY_TRANSITIONS) {
+        expect(isValidTransition(from, to), key([from, to])).toBe(true);
+      }
+    });
+
+    it('permits nothing the repositories never perform, except legacy FAILED exits', () => {
+      const table = Object.entries(VALID_TRANSITIONS)
+        .filter(([from]) => from !== String(JobStatus.FAILED))
+        .flatMap(([from, targets]) => targets.map((to) => key([from, to])))
+        .sort();
+
+      expect(table).toEqual(REPOSITORY_TRANSITIONS.map(key).sort());
+    });
+
+    it('has no way into the legacy FAILED state', () => {
+      const entering = Object.entries(VALID_TRANSITIONS).filter(([, targets]) =>
+        targets.includes(JobStatus.FAILED)
+      );
+      expect(entering).toEqual([]);
     });
   });
 });

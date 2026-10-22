@@ -15,6 +15,7 @@
     "@taskflow/config": "workspace:*",
     "@taskflow/database": "workspace:*",
     "@taskflow/logger": "workspace:*",
+    "@taskflow/observability": "workspace:*",
     "@taskflow/queue": "workspace:*",
     "@taskflow/retry": "workspace:*",
     "@taskflow/types": "workspace:*"

@@ -2,7 +2,9 @@ import { JobStatus } from '@taskflow/types';
 import {
   and,
   asc,
+  desc,
   eq,
+  exists,
   gt,
   inArray,
   isNull,
@@ -64,6 +66,10 @@ export async function insertPendingDelivery(
       attempt,
       availableAt,
       status: DELIVERY_STATUSES.PENDING,
+      // One definition of priority order: the job_priority_rank() database
+      // function, read from the job row in the same transaction. Callers never
+      // pass a rank, so a delivery can not disagree with its job.
+      priorityRank: sql`(SELECT job_priority_rank(${jobs.priority}) FROM ${jobs} WHERE ${jobs.id} = ${jobId})`,
     })
     .onConflictDoNothing({
       target: [jobDeliveries.jobId, jobDeliveries.attempt],
@@ -96,12 +102,15 @@ export async function insertPendingDelivery(
  * Uses FOR UPDATE SKIP LOCKED and a persisted claim lease so multiple live
  * Dispatcher instances do not process the same row simultaneously. Claims
  * abandoned by a crashed dispatcher become eligible after `claimTimeoutMs`.
- * Returns due rows ordered by durable availability, then creation time.
+ * Returns due rows highest priority first, then by durable availability, then
+ * creation time. With `queueName`, only that queue's rows are considered, so a
+ * dispatcher can budget each queue independently.
  */
 export async function claimPendingDeliveries(
   dispatcherId: string,
   limit: number = 50,
-  claimTimeoutMs: number = 30_000
+  claimTimeoutMs: number = 30_000,
+  queueName?: string
 ): Promise<JobDelivery[]> {
   if (!Number.isInteger(limit) || limit < 1) {
     throw new Error('Delivery claim limit must be a positive integer');
@@ -126,10 +135,17 @@ export async function claimPendingDeliveries(
           eq(jobDeliveries.status, DELIVERY_STATUSES.PENDING),
           eq(queues.isActive, true),
           lte(jobDeliveries.availableAt, sql`clock_timestamp()`),
-          claimable
+          claimable,
+          queueName === undefined
+            ? undefined
+            : eq(jobDeliveries.queueName, queueName)
         )
       )
-      .orderBy(jobDeliveries.availableAt, jobDeliveries.createdAt)
+      .orderBy(
+        desc(jobDeliveries.priorityRank),
+        jobDeliveries.availableAt,
+        jobDeliveries.createdAt
+      )
       .limit(limit)
       .for('update', { skipLocked: true });
 
@@ -153,14 +169,59 @@ export async function claimPendingDeliveries(
       )
       .returning();
 
-    // UPDATE ... RETURNING has no ordering guarantee. Preserve the oldest-first
-    // order selected under FOR UPDATE so dispatcher behavior is deterministic.
+    // UPDATE ... RETURNING has no ordering guarantee. Preserve the
+    // highest-priority-first, then oldest-first, order selected under FOR UPDATE
+    // so dispatcher behavior is deterministic.
     const claimedById = new Map(claimed.map((row) => [row.id, row]));
     return deliveryRows.flatMap((row) => {
       const updated = claimedById.get(row.id);
       return updated ? [updated] : [];
     });
   });
+}
+
+/**
+ * Names of active queues that currently have a due, claimable PENDING
+ * delivery. The dispatcher budgets each of these independently.
+ */
+export async function getQueuesWithClaimableDeliveries(
+  claimTimeoutMs: number = 30_000
+): Promise<string[]> {
+  if (!Number.isFinite(claimTimeoutMs) || claimTimeoutMs < 1) {
+    throw new Error('Delivery claim timeout must be positive');
+  }
+
+  // One EXISTS probe per active queue. The earlier SELECT DISTINCT over
+  // job_deliveries read every PENDING row on each dispatch cycle, so its cost
+  // grew with the backlog and with the number of dispatchers; this is bounded
+  // by the number of queues.
+  const rows = await db
+    .select({ queueName: queues.name })
+    .from(queues)
+    .where(
+      and(
+        eq(queues.isActive, true),
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(jobDeliveries)
+            .where(
+              and(
+                eq(jobDeliveries.queueName, queues.name),
+                eq(jobDeliveries.status, DELIVERY_STATUSES.PENDING),
+                lte(jobDeliveries.availableAt, sql`clock_timestamp()`),
+                or(
+                  isNull(jobDeliveries.claimedBy),
+                  isNull(jobDeliveries.claimedAt),
+                  sql`${jobDeliveries.claimedAt} < clock_timestamp() - (${claimTimeoutMs} * interval '1 millisecond')`
+                )
+              )
+            )
+        )
+      )
+    )
+    .orderBy(queues.name);
+  return rows.map((row) => row.queueName);
 }
 
 /**
@@ -206,38 +267,6 @@ export async function renewDeliveryClaim(
   const updated = await db
     .update(jobDeliveries)
     .set({ claimedAt: sql`clock_timestamp()` })
-    .where(
-      and(
-        eq(jobDeliveries.id, deliveryId),
-        eq(jobDeliveries.status, DELIVERY_STATUSES.PENDING),
-        eq(jobDeliveries.claimedBy, dispatcherId)
-      )
-    )
-    .returning({ id: jobDeliveries.id });
-
-  return updated.length === 1;
-}
-
-/**
- * Administrative escape hatch for a non-retryable delivery failure. Ordinary
- * Redis exhaustion must use releaseDeliveryForRetry so a QUEUED job cannot be
- * stranded by a transient infrastructure outage.
- */
-export async function markDeliveryFailed(
-  deliveryId: string,
-  dispatcherId: string,
-  error: string,
-  retryCount: number
-): Promise<boolean> {
-  const updated = await db
-    .update(jobDeliveries)
-    .set({
-      status: DELIVERY_STATUSES.FAILED,
-      error,
-      retryCount,
-      claimedBy: null,
-      claimedAt: null,
-    })
     .where(
       and(
         eq(jobDeliveries.id, deliveryId),

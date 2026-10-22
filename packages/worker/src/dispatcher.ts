@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
+import { dispatchConfig } from '@taskflow/config';
 import {
   claimPendingDeliveries,
+  getQueuesWithClaimableDeliveries,
   markDeliveryPublished,
   renewDeliveryClaim,
   releaseDeliveryForRetry,
@@ -13,9 +15,12 @@ import { createLogger } from '@taskflow/logger';
 import {
   enqueueJob,
   getRedisClient,
+  getStreamInFlight,
   getStreamKey,
   WORKER_CONSUMER_GROUP,
 } from '@taskflow/queue';
+
+import { workerMetrics } from './metrics';
 
 const logger = createLogger({ component: 'Dispatcher' });
 
@@ -63,6 +68,20 @@ export interface DispatcherConfig {
   claimTimeoutMs?: number;
 
   /**
+   * Maximum entries kept in flight (delivered-but-unacknowledged plus
+   * undelivered) in each queue's Redis stream. Priority is applied here: the
+   * rest of the backlog stays in PostgreSQL, ordered by priority, and is
+   * released as the window drains. A smaller window gives stricter priority at
+   * the cost of more dispatch round trips; 0 disables the window and publishes
+   * everything immediately, which makes Redis FIFO the effective order.
+   *
+   * The bound is soft: concurrent dispatchers each budget from the same
+   * snapshot, so it can be exceeded by up to one batch per extra dispatcher.
+   * Default: DISPATCH_MAX_IN_FLIGHT_PER_QUEUE (200)
+   */
+  maxInFlightPerQueue?: number;
+
+  /**
    * Whether to run the stale-delivery republish scan on each cycle. This is
    * enabled by default because database state, rather than Redis persistence
    * configuration, is the durable source of truth.
@@ -89,6 +108,8 @@ export interface DispatcherStats {
   deliveriesRetried: number;
   deliveriesFailed: number;
   staleRepublished: number;
+  /** Cycles in which at least one queue's window was full. */
+  windowLimitedCycles: number;
   lastCycleAt?: Date;
   lastCycleDurationMs?: number;
 }
@@ -123,6 +144,7 @@ export class Dispatcher {
   private readonly maxRedisRetries: number;
   private readonly retryBaseDelayMs: number;
   private readonly claimTimeoutMs: number;
+  private readonly maxInFlightPerQueue: number;
   private readonly enableStaleRepublish: boolean;
   private readonly stalePublishedThresholdMs: number;
   private staleDeliveryCursor?: StaleDeliveryCursor;
@@ -135,7 +157,9 @@ export class Dispatcher {
     deliveriesRetried: 0,
     deliveriesFailed: 0,
     staleRepublished: 0,
+    windowLimitedCycles: 0,
   };
+  private windowLimited = false;
 
   constructor(config: DispatcherConfig = {}) {
     this.dispatcherId = config.dispatcherId ?? `dispatcher-${randomUUID()}`;
@@ -144,6 +168,14 @@ export class Dispatcher {
     this.maxRedisRetries = config.maxRedisRetries ?? 5;
     this.retryBaseDelayMs = config.retryBaseDelayMs ?? 200;
     this.claimTimeoutMs = config.claimTimeoutMs ?? 30_000;
+    this.maxInFlightPerQueue =
+      config.maxInFlightPerQueue ?? dispatchConfig.maxInFlightPerQueue;
+    if (
+      !Number.isInteger(this.maxInFlightPerQueue) ||
+      this.maxInFlightPerQueue < 0
+    ) {
+      throw new RangeError('maxInFlightPerQueue must be an integer >= 0');
+    }
     this.enableStaleRepublish = config.enableStaleRepublish ?? true;
     this.stalePublishedThresholdMs =
       config.stalePublishedThresholdMs ?? 120_000;
@@ -152,6 +184,7 @@ export class Dispatcher {
       dispatcherId: this.dispatcherId,
       batchSize: this.batchSize,
       pollIntervalMs: this.pollIntervalMs,
+      maxInFlightPerQueue: this.maxInFlightPerQueue,
       enableStaleRepublish: this.enableStaleRepublish,
     });
   }
@@ -203,8 +236,15 @@ export class Dispatcher {
       try {
         const dispatched = await this.runCycle();
         if (dispatched === 0) {
-          // Nothing to do — back off before checking again
-          await sleep(this.pollIntervalMs);
+          // Nothing to do — back off before checking again. When the window
+          // is full there IS work waiting, and completions free room within
+          // milliseconds, so re-check quickly instead of idling a full
+          // interval (which would cap throughput at window / interval).
+          await sleep(
+            this.windowLimited
+              ? Math.min(this.pollIntervalMs, WINDOW_RECHECK_MS)
+              : this.pollIntervalMs
+          );
         }
       } catch (error) {
         logger.error('Dispatcher cycle failed', {
@@ -225,14 +265,96 @@ export class Dispatcher {
       await this.republishStaleDeliveries();
     }
 
-    // 2. Claim PENDING delivery rows
-    const claimed = await claimPendingDeliveries(
-      this.dispatcherId,
-      this.batchSize,
+    // 2 + 3. Claim PENDING delivery rows and publish them to Redis
+    const { claimed, published: publishedCount } = await this.claimAndPublish();
+    published = publishedCount;
+
+    if (published > 0 || claimed > 0) {
+      logger.debug('Dispatch cycle completed', {
+        dispatcherId: this.dispatcherId,
+        claimed,
+        published,
+      });
+    }
+
+    this.stats.cyclesCompleted++;
+    this.stats.deliveriesPublished += published;
+    this.stats.lastCycleAt = new Date();
+    this.stats.lastCycleDurationMs = Date.now() - cycleStart;
+
+    return published;
+  }
+
+  /**
+   * Claim due deliveries and publish them.
+   *
+   * With a window, each queue is budgeted independently: it may add only as
+   * many entries as keep its stream at `maxInFlightPerQueue`, and claims are
+   * highest-priority-first, so the entries released into the window are always
+   * the most urgent ones waiting in PostgreSQL.
+   */
+  private async claimAndPublish(): Promise<{
+    claimed: number;
+    published: number;
+  }> {
+    this.windowLimited = false;
+
+    if (this.maxInFlightPerQueue === 0) {
+      const claimed = await claimPendingDeliveries(
+        this.dispatcherId,
+        this.batchSize,
+        this.claimTimeoutMs
+      );
+      return {
+        claimed: claimed.length,
+        published: await this.publishAll(claimed),
+      };
+    }
+
+    const queueNames = await getQueuesWithClaimableDeliveries(
       this.claimTimeoutMs
     );
 
-    // 3. Publish each one to Redis
+    let claimedTotal = 0;
+    let publishedTotal = 0;
+    for (const queueName of queueNames) {
+      let inFlight: number;
+      try {
+        inFlight = await getStreamInFlight(queueName, this.maxInFlightPerQueue);
+      } catch (error) {
+        // One queue's Redis trouble must not starve the others.
+        logger.warn('Could not measure queue window; skipping queue', {
+          queueName,
+          error,
+        });
+        continue;
+      }
+
+      const budget = this.maxInFlightPerQueue - inFlight;
+      if (budget <= 0) {
+        this.windowLimited = true;
+        workerMetrics.dispatcherWindowLimited(queueName);
+        continue;
+      }
+
+      const claimed = await claimPendingDeliveries(
+        this.dispatcherId,
+        Math.min(this.batchSize, budget),
+        this.claimTimeoutMs,
+        queueName
+      );
+      claimedTotal += claimed.length;
+      publishedTotal += await this.publishAll(claimed);
+    }
+
+    if (this.windowLimited) this.stats.windowLimitedCycles++;
+    return { claimed: claimedTotal, published: publishedTotal };
+  }
+
+  private async publishAll(
+    claimed: Awaited<ReturnType<typeof claimPendingDeliveries>>
+  ): Promise<number> {
+    let published = 0;
     for (const delivery of claimed) {
       const success = await this.publishDelivery(
         delivery.id,
@@ -243,20 +365,6 @@ export class Dispatcher {
       );
       if (success) published++;
     }
-
-    if (published > 0 || claimed.length > 0) {
-      logger.debug('Dispatch cycle completed', {
-        dispatcherId: this.dispatcherId,
-        claimed: claimed.length,
-        published,
-      });
-    }
-
-    this.stats.cyclesCompleted++;
-    this.stats.deliveriesPublished += published;
-    this.stats.lastCycleAt = new Date();
-    this.stats.lastCycleDurationMs = Date.now() - cycleStart;
-
     return published;
   }
 
@@ -314,6 +422,7 @@ export class Dispatcher {
           });
           return false;
         }
+        workerMetrics.dispatcherPublished(queueName);
         logger.debug('Delivery published', {
           deliveryId,
           jobId,
@@ -422,6 +531,9 @@ export class Dispatcher {
 export function createDispatcher(config?: DispatcherConfig): Dispatcher {
   return new Dispatcher(config);
 }
+
+/** Re-check interval while a queue's window is full (milliseconds). */
+const WINDOW_RECHECK_MS = 50;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

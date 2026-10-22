@@ -3,7 +3,7 @@ import { parseRedisJobMessage, REDIS_JOB_MESSAGE_FIELD } from '@taskflow/types';
 import type { RedisJobMessage } from '@taskflow/types';
 
 import { quarantineEntry } from './quarantine';
-import { getRedisClient } from './redis-client';
+import { getBlockingRedisClient, getRedisClient } from './redis-client';
 import {
   getConsumerName,
   getStreamKey,
@@ -131,7 +131,8 @@ export async function consumeJobs(
 ): Promise<ConsumedMessage[]> {
   const { batchSize = 10, blockMs = 5000 } = options;
 
-  const redis = getRedisClient();
+  // Blocking read: must not share a connection with other commands.
+  const redis = getBlockingRedisClient();
   const groupName = WORKER_CONSUMER_GROUP;
   const consumerName = getConsumerName(workerId);
 
@@ -221,36 +222,6 @@ export async function acknowledgeMessage(
     logger.error('Failed to acknowledge message', {
       queue: queueName,
       messageId,
-      error,
-    });
-    throw error;
-  }
-}
-
-/**
- * Acknowledge multiple messages in batch
- */
-export async function acknowledgeMessageBatch(
-  queueName: string,
-  messageIds: string[]
-): Promise<number> {
-  const redis = getRedisClient();
-  const streamKey = getStreamKey(queueName);
-  const groupName = WORKER_CONSUMER_GROUP;
-
-  try {
-    const acknowledged = await redis.xack(streamKey, groupName, ...messageIds);
-
-    logger.debug('Messages acknowledged', {
-      queue: queueName,
-      count: acknowledged,
-    });
-
-    return acknowledged;
-  } catch (error) {
-    logger.error('Failed to acknowledge message batch', {
-      queue: queueName,
-      count: messageIds.length,
       error,
     });
     throw error;

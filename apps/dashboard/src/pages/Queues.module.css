@@ -84,7 +84,9 @@
   border-radius: 8px;
   padding: 24px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
 }
 
 .queueCard:hover {
@@ -318,4 +320,74 @@
   .queuesGrid {
     grid-template-columns: 1fr;
   }
+}
+
+.stateBadge {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.stateActive {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.statePaused {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.config {
+  display: flex;
+  gap: 24px;
+  margin: 16px 0;
+  font-size: 13px;
+}
+
+.config dt {
+  color: var(--gray-500);
+}
+
+.config dd {
+  font-weight: 600;
+  color: var(--gray-800);
+}
+
+.actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pauseButton,
+.resumeButton {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.pauseButton {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.resumeButton {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.pauseButton:hover:not(:disabled),
+.resumeButton:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+.pauseButton:disabled,
+.resumeButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }

@@ -1,0 +1,24 @@
+# Keep the build context small and free of secrets.
+**/node_modules
+**/dist
+**/.turbo
+**/*.tsbuildinfo
+.turbo
+.git
+.github
+.husky
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+.env.prod.local
+coverage
+**/coverage
+**/*.log
+.DS_Store
+.vscode
+.idea
+docs
+infrastructure/prometheus/secrets
+**/*.md

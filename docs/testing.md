@@ -14,7 +14,7 @@ The suites are intentionally separated so a passing unit suite cannot be mistake
 | `pnpm test:worker-integration`        | actual worker processes with Docker PostgreSQL/Redis            |
 | `pnpm test:chaos`                     | failure-injection subset of the worker-process suite            |
 
-Run `pnpm typecheck`, `pnpm lint`, and `pnpm build` separately. Tests under `tests/load/**` are deferred and excluded from Vitest; they are not benchmark evidence.
+Run `pnpm typecheck`, `pnpm lint`, and `pnpm build` separately. Tests under `tests/load/**` are excluded from Vitest. The measured benchmarks (`tests/load/bench*.sh`, `bench.js`) are described in `docs/benchmarking/RESULTS.md`; the older k6 scripts in that directory are unverified.
 
 The worker-process suite asserts database states/events/attempts, Redis pending entries and ACK ordering, retry timing/exhaustion, duplicate handler invocations, and separately the idempotent local database effect. It also exercises queue pause/resume, API-requested worker shutdown, and manual dead-letter retry.
 

@@ -133,31 +133,6 @@ variable "redis_automatic_failover" {
   default     = true
 }
 
-# MSK (Kafka) Configuration
-variable "kafka_version" {
-  description = "Kafka version"
-  type        = string
-  default     = "3.5.1"
-}
-
-variable "kafka_broker_nodes" {
-  description = "Number of broker nodes"
-  type        = number
-  default     = 3
-}
-
-variable "kafka_instance_type" {
-  description = "Kafka broker instance type"
-  type        = string
-  default     = "kafka.t3.small"
-}
-
-variable "kafka_ebs_volume_size" {
-  description = "EBS volume size per broker in GB"
-  type        = number
-  default     = 100
-}
-
 # ECS Configuration
 variable "api_image" {
   description = "Docker image for API service"

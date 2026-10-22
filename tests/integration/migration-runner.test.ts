@@ -162,6 +162,76 @@ describe.sequential('authoritative migration runner', () => {
     ).toBe('job_deliveries');
   }, 30_000);
 
+  it('backfills delivery priority from existing jobs when upgrading to 0010', async () => {
+    const directory = await createMigrationDirectory();
+    const names = (await readdir(sourceMigrations))
+      .filter((name) => /^\d+.*\.sql$/.test(name))
+      .sort();
+    const priorityMigration = names.findIndex((name) =>
+      name.startsWith('0010_')
+    );
+    expect(priorityMigration).toBeGreaterThan(0);
+
+    // Build a database as it existed before 0010, with deliveries in it.
+    await Promise.all(
+      names
+        .slice(0, priorityMigration)
+        .map((name) =>
+          cp(path.join(sourceMigrations, name), path.join(directory, name))
+        )
+    );
+    expect((await runMigrations(directory)).exitCode).toBe(0);
+    await pool.query(
+      `INSERT INTO users (id, email, password_hash)
+       VALUES ('10000000-0000-4000-8000-000000000001', 'm@example.test', 'x')`
+    );
+    await pool.query(
+      `INSERT INTO queues (id, name, display_name)
+       VALUES ('20000000-0000-4000-8000-000000000001', 'default', 'Default')`
+    );
+    for (const priority of ['CRITICAL', 'HIGH', 'NORMAL', 'LOW']) {
+      const job = await pool.query<{ id: string }>(
+        `INSERT INTO jobs (user_id, queue_id, type, payload, status, priority)
+         VALUES ('10000000-0000-4000-8000-000000000001',
+                 '20000000-0000-4000-8000-000000000001',
+                 $1, '{}', 'QUEUED', $2::job_priority)
+         RETURNING id`,
+        [`backfill-${priority}`, priority]
+      );
+      await pool.query(
+        `INSERT INTO job_deliveries (job_id, queue_name) VALUES ($1, 'default')`,
+        [job.rows[0]!.id]
+      );
+    }
+
+    await cp(
+      path.join(sourceMigrations, names[priorityMigration]!),
+      path.join(directory, names[priorityMigration]!)
+    );
+    expect((await runMigrations(directory)).exitCode).toBe(0);
+
+    const backfilled = await pool.query<{
+      type: string;
+      priority_rank: number;
+    }>(
+      `SELECT job.type, delivery.priority_rank
+         FROM job_deliveries AS delivery
+         JOIN jobs AS job ON job.id = delivery.job_id
+        ORDER BY delivery.priority_rank DESC`
+    );
+    expect(backfilled.rows).toEqual([
+      { type: 'backfill-CRITICAL', priority_rank: 4 },
+      { type: 'backfill-HIGH', priority_rank: 3 },
+      { type: 'backfill-NORMAL', priority_rank: 2 },
+      { type: 'backfill-LOW', priority_rank: 1 },
+    ]);
+
+    // The CHECK constraint rejects ranks outside 1..4.
+    await expect(
+      pool.query(`UPDATE job_deliveries SET priority_rank = 9`)
+    ).rejects.toThrow(/job_deliveries_priority_rank_valid/);
+  }, 60_000);
+
   it('serializes concurrent migration starts with a PostgreSQL advisory lock', async () => {
     const directory = await createMigrationDirectory();
     const names = await copyAllMigrations(directory);

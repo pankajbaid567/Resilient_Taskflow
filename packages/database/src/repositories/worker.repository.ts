@@ -296,20 +296,3 @@ export async function unregisterWorker(
 ): Promise<Worker | null> {
   return updateWorkerStatus(workerId, WorkerStatus.STOPPED);
 }
-
-/**
- * Delete old stopped workers (cleanup)
- */
-export async function deleteOldStoppedWorkers(
-  olderThanDays: number = 7
-): Promise<number> {
-  const cutoffDate = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
-
-  const result = await db
-    .delete(workers)
-    .where(
-      and(eq(workers.status, 'STOPPED'), lt(workers.stoppedAt, cutoffDate))
-    );
-
-  return result.length;
-}

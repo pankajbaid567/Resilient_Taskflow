@@ -213,7 +213,7 @@ The custom queue implementation must demonstrate:
 
 After building the custom queue, we will:
 
-1. **Benchmark**: Compare performance against BullMQ
+1. **Benchmark**: Measure this implementation (done: `docs/benchmarking/RESULTS.md`). No comparison against BullMQ has been made, so no claim about relative performance is made here
 2. **Feature Gap Analysis**: Document what BullMQ has that we don't
 3. **Lessons Learned**: Document challenges encountered
 4. **Decision Review**: Evaluate if decision was correct
@@ -299,16 +299,14 @@ As part of this decision, we will produce:
 
 1. **Queue Design Document**: Complete Redis Streams usage
 2. **Failure Recovery Guide**: How every failure is handled
-3. **Performance Analysis**: Benchmarks vs BullMQ
+3. **Performance Analysis**: `docs/benchmarking/RESULTS.md` (this system only; not compared with BullMQ)
 4. **Code Comments**: Explain every non-obvious decision
 5. **Testing Strategy**: Comprehensive test coverage
 6. **README Section**: "Why We Built Our Own Queue"
 
 ## Related Decisions
 
-- [ADR-002: Use Redis Streams for Job Delivery](./002-redis-streams-for-delivery.md) - Choice of Redis Streams
 - [ADR-004: At-Least-Once Delivery Semantics](./004-at-least-once-delivery.md) - Delivery guarantees
-- [ADR-005: Lease-Based Worker Coordination](./005-lease-based-coordination.md) - Worker coordination
 
 ## References
 
@@ -316,16 +314,3 @@ As part of this decision, we will produce:
 - [Redis Streams Tutorial](https://redis.io/docs/data-types/streams-tutorial/)
 - [BullMQ Documentation](https://docs.bullmq.io/) - Know what we're comparing against
 - [Building Reliable Distributed Systems](https://www.oreilly.com/library/view/building-microservices-2nd/9781492034018/)
-
-## Appendix: Interview Question Preparation
-
-Questions this decision helps answer:
-
-**Q: "Why didn't you use BullMQ?"**  
-A: "I wanted to demonstrate deep understanding of distributed queue internals rather than just integrating a library. I implemented the queue directly on Redis Streams using XREADGROUP, XACK, and XCLAIM. This forced me to solve problems like consumer group coordination, stale message recovery, and at-least-once delivery semantics. Here's how..."
-
-**Q: "How does your queue compare to BullMQ?"**  
-A: "I actually benchmarked them. BullMQ has more features like rate limiting and repeatable jobs, but for core job processing, performance was comparable. My implementation gives full control and understanding. I documented the trade-offs in my ADR..."
-
-**Q: "What would you do differently in production?"**  
-A: "For production, I'd evaluate BullMQ for advanced features, but I'd keep the custom core if performance and reliability meet requirements. The key insight is that building from scratch taught me exactly what to look for in a production queue library..."

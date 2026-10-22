@@ -1,216 +1,106 @@
 # TaskFlow Dashboard
 
-React-based monitoring dashboard for the Resilient TaskFlow distributed task queue system.
+A React single-page app for operating TaskFlow: watch jobs, queues and workers,
+and act on them (cancel, retry dead-lettered jobs, pause queues, stop workers).
+It only calls the public API; it holds no state of its own.
 
-## Features
+## Pages
 
-- **Real-time Monitoring**: Auto-refreshing views with configurable polling intervals
-- **Dashboard Overview**: Key metrics including active workers, job counts, success rates, and latency
-- **Job Management**: Browse, filter, and manage jobs with detailed views
-- **Worker Monitoring**: Track worker health, status, and performance metrics
-- **Queue Statistics**: View queue depths, success rates, and priority breakdowns
-- **Dead Letter Queue**: Manage failed jobs with requeue functionality
-- **System Health**: Monitor database, Redis, and Kafka service status
+| Page              | Shows                                                                 | Actions                |
+| ----------------- | --------------------------------------------------------------------- | ---------------------- |
+| Dashboard         | Active workers, queued/processing, success rate, run time, throughput | none                   |
+| Jobs              | Your jobs, filterable by status, paginated; detail with result/error  | cancel                 |
+| Queues            | Per-queue counts, run time, stream entries, config, paused state      | pause / resume (admin) |
+| Workers           | Workers by status, load, success rate, heartbeat health               | stop (admin)           |
+| Dead Letter Queue | Dead-lettered jobs with their error                                   | retry as a new job     |
 
-## Tech Stack
+Admin-only buttons are visible to everyone; the API answers 403 for non-admin
+keys and the page says so.
 
-- **React 18** with TypeScript
-- **Vite** for fast development and optimized builds
-- **React Router** for client-side routing
-- **CSS Modules** for component-scoped styling
-- **Type-safe API client** with automatic error handling
-
-## Development
-
-### Prerequisites
-
-- Node.js 20+
-- pnpm 8+
-
-### Install Dependencies
+## Running it
 
 ```bash
 pnpm install
+pnpm dev:api        # API on :3000
+pnpm dev:dashboard  # dashboard on :3001
 ```
 
-### Environment Variables
-
-Create a `.env` file in the dashboard directory:
+Open <http://localhost:3001> and sign in with an API key. Create one with:
 
 ```bash
-VITE_API_URL=http://localhost:3000/api/v1
+pnpm db:create-api-key -- --email you@example.com --role admin --name dashboard
 ```
 
-### Start Development Server
+The key is kept in `sessionStorage` for the tab only. It is never compiled into
+the bundle (a `VITE_*` variable would be public). If the server rejects a stored
+key (revoked, expired), the app returns to the sign-in screen.
 
-```bash
-# From the dashboard directory
-pnpm dev
+The Vite dev server proxies `/api` and `/health` to `http://localhost:3000`, so
+no CORS setup is needed in development.
 
-# Or from the workspace root
-pnpm dev:dashboard
-```
+## Configuration
 
-The dashboard will be available at `http://localhost:3001`.
+| Variable       | Default   | Notes                                                                                                      |
+| -------------- | --------- | ---------------------------------------------------------------------------------------------------------- |
+| `VITE_API_URL` | `/api/v1` | Vite inlines it at **build** time. Probe URLs (`/health/ready`) are derived from it by dropping `/api/v1`. |
 
-### Build for Production
+## What the numbers mean
 
-```bash
-pnpm build
-```
+Nothing on the Dashboard is estimated.
 
-Built files will be in the `dist/` directory.
+- **Active workers** counts workers marked `ACTIVE` that also have a heartbeat
+  in the last 30 s. A crashed worker stays `ACTIVE` in the database, so status
+  alone would overcount.
+- **Success rate** is succeeded / (succeeded + failed + dead-lettered) over jobs
+  still retained in PostgreSQL (retention purges old ones).
+- **Avg run time** is the mean of started-to-finished for succeeded jobs,
+  weighted by count across queues.
+- **Throughput** is the change in the succeeded count between the last two
+  5-second refreshes. It shows "—" until two samples exist, or if the count fell
+  (for example after a retention purge).
+- **Redis stream entries** is the stream length, which includes acknowledged
+  entries until retention trims them. It is not a backlog measure; use "Queued".
+- Percentile latency (p95/p99) is not shown: the API does not expose it.
+  Prometheus/Grafana is the place for that.
 
-### Preview Production Build
+## Data fetching
 
-```bash
-pnpm preview
-```
+`useAPI(key, fetcher, options)` (`src/hooks/useAPI.ts`):
 
-## Docker Deployment
+- refetches only when `key`, `skip` or `pollingInterval` change, so inline
+  fetcher arrows are safe;
+- keeps one request in flight per hook: the next poll is scheduled after the
+  previous one settles;
+- discards a response that arrives for an outdated key or after unmount;
+- pauses polling while the tab is hidden and refreshes when it returns;
+- on a failed refresh keeps the last good data and shows the error beside it.
 
-### Build Docker Image
+Polling: Dashboard and Queues 5 s, Workers 5 s, Jobs 5 s, DLQ 10 s, an open job
+dialog 3 s.
 
-```bash
-docker build -t taskflow-dashboard -f apps/dashboard/Dockerfile .
-```
-
-### Run with Docker Compose
-
-```bash
-# Start all services including dashboard
-docker-compose up -d
-
-# Dashboard will be available at http://localhost:3001
-```
-
-### Environment Variables for Docker
-
-Set in `docker-compose.yml` or `.env` file:
-
-```yaml
-environment:
-  - VITE_API_URL=http://api:3000/api/v1
-```
-
-## Project Structure
+## Structure
 
 ```
-apps/dashboard/
-├── src/
-│   ├── components/       # Reusable UI components
-│   │   ├── ErrorMessage.tsx
-│   │   ├── LoadingSpinner.tsx
-│   │   ├── MetricCard.tsx
-│   │   ├── Modal.tsx
-│   │   ├── StatusBadge.tsx
-│   │   ├── JobDetailModal.tsx
-│   │   └── Layout.tsx
-│   ├── pages/            # Route pages
-│   │   ├── Dashboard.tsx
-│   │   ├── Jobs.tsx
-│   │   ├── Workers.tsx
-│   │   ├── Queues.tsx
-│   │   └── DeadLetterQueue.tsx
-│   ├── hooks/            # Custom React hooks
-│   │   └── useAPI.ts
-│   ├── lib/              # Utilities and API client
-│   │   ├── api-client.ts
-│   │   └── utils.ts
-│   ├── types/            # TypeScript type definitions
-│   │   └── index.ts
-│   ├── App.tsx           # Root component
-│   ├── main.tsx          # Entry point
-│   └── index.css         # Global styles
-├── public/               # Static assets
-├── Dockerfile            # Production Docker image
-├── nginx.conf            # Nginx configuration for production
-├── vite.config.ts        # Vite configuration
-└── tsconfig.json         # TypeScript configuration
+src/
+  auth/        AuthProvider (sessionStorage key, sign-in/out), useAuth
+  components/  Layout, Modal (focus-trapped dialog), StatusBadge, Notice, ...
+  hooks/       useAPI and the per-resource hooks
+  lib/         api-client (typed, one place that knows the API), utils
+  pages/       Dashboard, Jobs, Queues, Workers, DeadLetterQueue, SignIn
+  types/       API response shapes
 ```
 
-## API Integration
+## Accessibility
 
-The dashboard communicates with the TaskFlow API through a type-safe client (`src/lib/api-client.ts`).
+Form controls are labelled, dialogs use `role="dialog"` with focus trapping and
+focus return, statuses are always text (never colour alone), tables have column
+headers, and errors use `role="alert"`. This has not been audited with assistive
+technology; it needs manual screen-reader and keyboard testing.
 
-### Authentication
+## Limitations
 
-Set API key or JWT token:
-
-```typescript
-import { apiClient } from '@/lib/api-client';
-
-// API Key authentication
-apiClient.setAPIKey('your-api-key');
-
-// Or JWT token
-apiClient.setToken('your-jwt-token');
-```
-
-### Custom Hooks
-
-```typescript
-import { useJobs, useWorkers, useDashboardMetrics } from '@/hooks/useAPI';
-
-// With auto-refresh every 5 seconds
-const { data, loading, error, refetch } = useJobs(
-  { status: 'queued' },
-  { pollingInterval: 5000 }
-);
-```
-
-## Polling Intervals
-
-- **Dashboard**: 5s (metrics), 10s (health)
-- **Workers**: 3s (fastest for real-time status)
-- **Jobs**: 5s
-- **Queues**: 5s
-- **DLQ**: 10s
-
-## Production Considerations
-
-### Nginx Configuration
-
-- Gzip compression enabled
-- Static asset caching (1 year)
-- Security headers configured
-- API proxying with proper timeouts
-- SPA fallback routing
-
-### Performance
-
-- Code splitting with React Router
-- CSS modules for minimal CSS
-- Optimized production build with Vite
-- Lazy loading of modals and heavy components
-
-### Security
-
-- No sensitive data in client-side code
-- API authentication via headers
-- CORS handled by API server
-- Security headers in nginx
-
-## Troubleshooting
-
-### Dashboard shows "Network Error"
-
-- Ensure API server is running on `http://localhost:3000`
-- Check `VITE_API_URL` environment variable
-- Verify CORS is enabled on API server
-
-### Real-time updates not working
-
-- Check browser console for errors
-- Verify API endpoints are responding
-- Ensure polling intervals are set correctly
-
-### Docker build fails
-
-- Clear Docker cache: `docker system prune -a`
-- Ensure pnpm lockfile is present
-- Check Node.js version in Dockerfile
-
-## License
-
-MIT
+- The API returns no job `payload`, so the job dialog shows result and error only.
+- The Jobs list cannot filter by queue (the endpoint accepts only status).
+- There is no role endpoint, so admin buttons cannot be hidden up front.
+- The Docker image and nginx config for this app are being reworked separately;
+  until then run it with the dev server.

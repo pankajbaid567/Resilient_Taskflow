@@ -1,9 +1,7 @@
-import {
-  getJobsReadyToQueue,
-  promoteJobToQueued,
-  type Job,
-} from '@taskflow/database';
+import { promoteDueScheduledJobs, type Job } from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
+
+import { workerMetrics } from './metrics';
 
 const logger = createLogger({ component: 'Scheduler' });
 
@@ -158,63 +156,42 @@ export class Scheduler {
     try {
       this.stats.totalRuns++;
 
-      // Get jobs ready to queue
-      const jobs = await getJobsReadyToQueue(this.config.batchSize);
+      // One transaction claims due rows with SKIP LOCKED and promotes each
+      // (QUEUED + outbox row) in its own savepoint.
+      const { promoted, failed } = await promoteDueScheduledJobs(
+        this.config.batchSize
+      );
+      workerMetrics.schedulerCycle({
+        durationMs: Date.now() - startTime,
+        promotedPriorities: promoted.map((job) => job.priority),
+        failures: failed.length,
+      });
+      const total = promoted.length + failed.length;
 
-      if (jobs.length === 0) {
+      if (total === 0) {
         logger.debug('No jobs ready to queue');
         return;
       }
 
-      logger.info('Found jobs ready to queue', {
-        count: jobs.length,
-        priorities: this.countByPriority(jobs),
-      });
-
-      // Enqueue each job atomically — QUEUED status + delivery row in one tx
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (const job of jobs) {
-        try {
-          // promoteJobToQueued resolves the authoritative queue name through
-          // jobs.queue_id inside the same transaction as the state transition.
-          await promoteJobToQueued(job.id);
-
-          successCount++;
-
-          logger.debug('Job promoted to QUEUED', {
-            jobId: job.id,
-            type: job.type,
-            priority: job.priority,
-            queueId: job.queueId,
-            scheduledAt: job.scheduledAt,
-          });
-        } catch (error) {
-          errorCount++;
-          this.stats.totalErrors++;
-
-          logger.error('Failed to promote job to QUEUED', {
-            jobId: job.id,
-            error: error instanceof Error ? error.message : error,
-          });
-        }
+      for (const failure of failed) {
+        this.stats.totalErrors++;
+        logger.error('Failed to promote job to QUEUED', failure);
       }
 
-      // Update stats
-      this.stats.totalJobsScheduled += successCount;
+      this.stats.totalJobsScheduled += promoted.length;
       this.stats.lastRunAt = new Date();
       this.stats.lastRunDurationMs = Date.now() - startTime;
-      this.stats.lastRunJobCount = jobs.length;
+      this.stats.lastRunJobCount = total;
 
       logger.info('Scheduling cycle completed', {
         duration: this.stats.lastRunDurationMs,
-        successful: successCount,
-        failed: errorCount,
-        total: jobs.length,
+        successful: promoted.length,
+        failed: failed.length,
+        priorities: this.countByPriority(promoted),
       });
     } catch (error) {
       this.stats.totalErrors++;
+      workerMetrics.schedulerCycleFailed();
       logger.error('Scheduling cycle failed', {
         error: error instanceof Error ? error.message : error,
       });

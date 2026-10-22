@@ -5,8 +5,6 @@ import {
   CancellationError,
   createCancellationToken,
   checkCancellation,
-  createTimeoutCancellationToken,
-  combineCancellationTokens,
 } from '../cancellation-token';
 
 describe('CancellationToken', () => {
@@ -216,88 +214,5 @@ describe('checkCancellation', () => {
     setTimeout(() => token.cancel(), 50);
 
     await expect(promise).rejects.toThrow(CancellationError);
-  });
-});
-
-describe('createTimeoutCancellationToken', () => {
-  it('should create token that cancels after timeout', async () => {
-    vi.useFakeTimers();
-
-    const token = createTimeoutCancellationToken(1000);
-
-    expect(token.isCancellationRequested).toBe(false);
-
-    vi.advanceTimersByTime(1000);
-
-    expect(token.isCancellationRequested).toBe(true);
-
-    vi.useRealTimers();
-  });
-
-  it('should cancel after specified time', async () => {
-    const token = createTimeoutCancellationToken(100);
-
-    expect(token.isCancellationRequested).toBe(false);
-
-    await new Promise((resolve) => setTimeout(resolve, 150));
-
-    expect(token.isCancellationRequested).toBe(true);
-  });
-});
-
-describe('combineCancellationTokens', () => {
-  it('should create combined token', () => {
-    const token1 = createCancellationToken();
-    const token2 = createCancellationToken();
-
-    const combined = combineCancellationTokens(token1, token2);
-
-    expect(combined).toBeInstanceOf(CancellationToken);
-    expect(combined.isCancellationRequested).toBe(false);
-  });
-
-  it('should cancel when first token is cancelled', () => {
-    const token1 = createCancellationToken();
-    const token2 = createCancellationToken();
-
-    const combined = combineCancellationTokens(token1, token2);
-
-    token1.cancel();
-
-    expect(combined.isCancellationRequested).toBe(true);
-  });
-
-  it('should cancel when second token is cancelled', () => {
-    const token1 = createCancellationToken();
-    const token2 = createCancellationToken();
-
-    const combined = combineCancellationTokens(token1, token2);
-
-    token2.cancel();
-
-    expect(combined.isCancellationRequested).toBe(true);
-  });
-
-  it('should be already cancelled if any source is cancelled', () => {
-    const token1 = createCancellationToken();
-    const token2 = createCancellationToken();
-
-    token1.cancel();
-
-    const combined = combineCancellationTokens(token1, token2);
-
-    expect(combined.isCancellationRequested).toBe(true);
-  });
-
-  it('should work with multiple tokens', () => {
-    const token1 = createCancellationToken();
-    const token2 = createCancellationToken();
-    const token3 = createCancellationToken();
-
-    const combined = combineCancellationTokens(token1, token2, token3);
-
-    token2.cancel();
-
-    expect(combined.isCancellationRequested).toBe(true);
   });
 });

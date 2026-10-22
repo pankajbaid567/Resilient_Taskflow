@@ -1,64 +1,29 @@
-# syntax=docker/dockerfile:1.4
+# syntax=docker/dockerfile:1.7
+# Build context: repository root.  docker build -f apps/dashboard/Dockerfile .
 
-# Build stage
 FROM node:20-alpine AS builder
-
+RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
 WORKDIR /app
 
-# Copy package files for dependency installation
-COPY package.json pnpm-lock.yaml* ./
-COPY apps/dashboard/package.json ./apps/dashboard/
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps ./apps
+COPY packages ./packages
+COPY tests/package.json ./tests/package.json
+RUN pnpm install --frozen-lockfile --filter "@taskflow/dashboard..."
 
-# Install pnpm
-RUN npm install -g pnpm@8.15.0
+# Leave unset to call the API through the same origin (/api/v1, proxied by
+# nginx). Set only when the API lives on a different origin.
+ARG VITE_API_URL
+ENV VITE_API_URL=${VITE_API_URL}
 
-# Install dependencies
-RUN pnpm install --frozen-lockfile --prefer-offline
-
-# Copy source code
-COPY apps/dashboard ./apps/dashboard
 COPY tsconfig.json ./
+RUN pnpm --filter @taskflow/dashboard build
 
-# Build the application
-WORKDIR /app/apps/dashboard
-RUN pnpm build
-
-# Production stage
-FROM nginx:alpine
-
-# Create non-root user
-RUN addgroup -g 101 -S nginx && \
-    adduser -S nginx -u 101 -G nginx
-
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
-
-# Copy custom nginx config
+# nginx-unprivileged already runs as a non-root user (uid 101) on port 8080.
+FROM nginxinc/nginx-unprivileged:1.27-alpine AS production
 COPY apps/dashboard/nginx.conf /etc/nginx/conf.d/default.conf
-
-# Copy built assets from builder stage
 COPY --from=builder /app/apps/dashboard/dist /usr/share/nginx/html
 
-# Set proper permissions
-RUN chown -R nginx:nginx /usr/share/nginx/html && \
-    chown -R nginx:nginx /var/cache/nginx && \
-    chown -R nginx:nginx /var/log/nginx && \
-    chown -R nginx:nginx /etc/nginx/conf.d && \
-    touch /var/run/nginx.pid && \
-    chown -R nginx:nginx /var/run/nginx.pid
-
-# Switch to non-root user
-USER nginx
-
-# Add healthcheck
+EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --quiet --tries=1 --spider http://localhost:80/health || exit 1
-
-# Expose port
-EXPOSE 80
-
-# Use dumb-init for proper signal handling
-ENTRYPOINT ["dumb-init", "--"]
-
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+  CMD wget --quiet --tries=1 --spider http://127.0.0.1:8080/ || exit 1

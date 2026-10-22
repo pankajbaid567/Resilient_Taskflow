@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { rateLimitConfig } from '@taskflow/config';
 import { createLogger } from '@taskflow/logger';
 import { createRedisClient } from '@taskflow/queue';
 import { FastifyReply, FastifyRequest } from 'fastify';
@@ -227,32 +228,32 @@ export function extractUserId(request: FastifyRequest): string {
 export const rateLimiters = {
   jobSubmission: createRateLimiter({
     scope: 'job-submission',
-    maxRequests: 50,
-    windowSeconds: 60,
+    maxRequests: rateLimitConfig.jobSubmissionPerWindow,
+    windowSeconds: rateLimitConfig.windowSeconds,
     failureMode: 'closed',
     keyExtractor: extractUserId,
   }),
 
   mutation: createRateLimiter({
     scope: 'mutation',
-    maxRequests: 50,
-    windowSeconds: 60,
+    maxRequests: rateLimitConfig.mutationPerWindow,
+    windowSeconds: rateLimitConfig.windowSeconds,
     failureMode: 'closed',
     keyExtractor: extractUserId,
   }),
 
   read: createRateLimiter({
     scope: 'read',
-    maxRequests: 200,
-    windowSeconds: 60,
+    maxRequests: rateLimitConfig.readPerWindow,
+    windowSeconds: rateLimitConfig.windowSeconds,
     failureMode: 'open',
     keyExtractor: extractUserId,
   }),
 
   health: createRateLimiter({
     scope: 'observability',
-    maxRequests: 1000,
-    windowSeconds: 60,
+    maxRequests: rateLimitConfig.metricsPerWindow,
+    windowSeconds: rateLimitConfig.windowSeconds,
     failureMode: 'open',
   }),
 };

@@ -29,7 +29,6 @@ Chaos testing validates that Resilient TaskFlow behaves correctly under failure 
 - Worker crashes and restarts
 - Database connection failures
 - Redis unavailability
-- Kafka outages
 - Network partitions
 - Resource exhaustion
 - Data corruption
@@ -82,8 +81,6 @@ docker exec taskflow-postgres pg_isready
 # Check Redis
 docker exec taskflow-redis redis-cli ping
 
-# Check Kafka
-docker exec taskflow-redpanda rpk cluster health
 ```
 
 ### System State
@@ -184,8 +181,8 @@ docker logs taskflow-api | grep "database connection"
 
 **Metrics to Watch**:
 
-- `taskflow_db_connection_pool_size` - Drops to 0, then recovers
-- `taskflow_db_queries_total` - Dips during restart
+- `taskflow_http_requests_total{status=~"5.."}` - Rises while Postgres is down, then stops
+- `taskflow_worker_heartbeats_total` - Pauses while the worker cannot reach Postgres
 
 ### 3. Redis Restart
 
@@ -228,46 +225,7 @@ docker exec taskflow-redis redis-cli XINFO GROUPS taskflow:queue:default
 **Metrics to Watch**:
 
 - `taskflow_queue_depth` - Drops to 0, then refills
-- `taskflow_redis_commands_total` - Drops during restart
-
-### 4. Kafka Restart
-
-**Scenario**: Kafka unavailable
-
-**Expected Behavior**:
-
-- Job processing continues
-- Events fail to publish
-- Errors logged (not thrown)
-- System remains available
-
-**Command**:
-
-```bash
-pnpm chaos kafka-restart
-```
-
-**What Happens**:
-
-1. Kafka container restarts
-2. Event publishing fails
-3. Jobs complete successfully anyway (fire-and-forget)
-4. Events logged as failed
-5. Kafka recovers, events resume
-
-**Verification**:
-
-```bash
-# Check event publish failures
-docker logs taskflow-worker-1 | grep "event publish failed"
-
-# Verify job completion unaffected
-```
-
-**Metrics to Watch**:
-
-- `taskflow_event_publish_failures_total` - Increases
-- `taskflow_jobs_completed_total` - Continues growing (unaffected)
+- `taskflow_dispatcher_published_total` - Pauses, then resumes as the outbox is re-published
 
 ### 5. API Restart
 
@@ -418,8 +376,7 @@ docker logs taskflow-api | grep "connection pool"
 
 **Metrics to Watch**:
 
-- `taskflow_db_connection_pool_size{state="used"}` - Maxes out
-- `taskflow_db_query_duration_seconds` - Increases
+- `taskflow_http_request_duration_seconds` - Latency rises when the database pool is exhausted
 
 ### 8. Data Corruption
 
