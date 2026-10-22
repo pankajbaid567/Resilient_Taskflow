@@ -6,9 +6,11 @@
       "@taskflow/config": ["packages/config/src/index.ts"],
       "@taskflow/database": ["packages/database/src/index.ts"],
       "@taskflow/database/*": ["packages/database/src/*"],
-      "@taskflow/events": ["packages/events/src/index.ts"],
       "@taskflow/logger": ["packages/logger/src/index.ts"],
       "@taskflow/observability": ["packages/observability/src/index.ts"],
+      "@taskflow/observability/dist/metrics": [
+        "packages/observability/src/metrics.ts"
+      ],
       "@taskflow/queue": ["packages/queue/src/index.ts"],
       "@taskflow/retry": ["packages/retry/src/index.ts"],
       "@taskflow/types": ["packages/types/src/index.ts"],

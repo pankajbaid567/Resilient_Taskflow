@@ -47,15 +47,3 @@ export type {
   CanonicalRetryDecision,
   CanonicalRetryOptions,
 } from './retry-policy';
-
-// Dead Letter Queue
-export {
-  DeadLetterEntry,
-  DeadLetterReason,
-  DeadLetterDecision,
-  DLQStats,
-  shouldDeadLetterJob,
-  createDeadLetterEntry,
-  calculateDLQStats,
-  isDLQAlerting,
-} from './dead-letter';

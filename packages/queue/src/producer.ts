@@ -151,66 +151,6 @@ export async function enqueueJob(
 }
 
 /**
- * Enqueue multiple jobs in a batch (using pipeline)
- *
- * More efficient than individual enqueues.
- */
-export async function enqueueJobBatch(
-  jobs: Array<{
-    jobId: string;
-    queueName: string;
-    attempt?: number;
-  }>
-): Promise<string[]> {
-  const redis = getRedisClient();
-  const pipeline = redis.pipeline();
-
-  // Add all XADD commands to pipeline
-  jobs.forEach(({ jobId, queueName, attempt = 1 }) => {
-    const streamKey = getStreamKey(queueName);
-    const message = createJobMessage(jobId, queueName, attempt);
-
-    pipeline.xadd(
-      streamKey,
-      '*',
-      REDIS_JOB_MESSAGE_FIELD,
-      JSON.stringify(message)
-    );
-  });
-
-  try {
-    // Execute all pipeline commands. NOTE: A Redis pipeline is NOT atomic—
-    // it is a network efficiency optimization that batches commands into one
-    // round trip. Partial failures are possible: if one XADD fails, the
-    // others may have succeeded. Callers must handle partial results.
-    const results = await pipeline.exec();
-
-    if (!results) {
-      throw new Error('Pipeline execution failed');
-    }
-
-    // Extract message IDs
-    const messageIds = results.map((result) => {
-      const [error, messageId] = result;
-      if (error) {
-        throw error;
-      }
-      if (typeof messageId !== 'string') {
-        throw new Error('Redis XADD returned an invalid message ID');
-      }
-      return messageId;
-    });
-
-    logger.info('Job batch enqueued', { count: jobs.length });
-
-    return messageIds;
-  } catch (error) {
-    logger.error('Failed to enqueue job batch', { count: jobs.length, error });
-    throw error;
-  }
-}
-
-/**
  * Get stream length (queue depth)
  */
 export async function getQueueDepth(queueName: string): Promise<number> {
@@ -224,6 +164,91 @@ export async function getQueueDepth(queueName: string): Promise<number> {
     logger.error('Failed to get queue depth', { queue: queueName, error });
     throw error;
   }
+}
+
+/**
+ * Count the entries of a queue's stream that are "in flight" for the worker
+ * consumer group: delivered to a consumer but not yet acknowledged (the PEL),
+ * plus entries not yet delivered to anyone. Acknowledged history that merely
+ * has not been trimmed is NOT counted, which is why this is not XLEN.
+ *
+ * The dispatcher uses it to keep each queue's Redis backlog small, so the
+ * remaining backlog stays in PostgreSQL where it can be ordered by priority.
+ *
+ * The result is capped: counting stops at `cap` because callers only need to
+ * know whether the window is full, and an uncapped count over a huge backlog
+ * would be expensive.
+ */
+export async function getStreamInFlight(
+  queueName: string,
+  cap: number
+): Promise<number> {
+  if (!Number.isSafeInteger(cap) || cap <= 0) {
+    throw new Error('cap must be a positive safe integer');
+  }
+
+  const redis = getRedisClient();
+  const streamKey = getStreamKey(queueName);
+
+  let rawGroups: unknown;
+  try {
+    rawGroups = await redis.xinfo('GROUPS', streamKey);
+  } catch (error) {
+    // No stream yet means nothing has ever been published to this queue.
+    if (error instanceof Error && /no such key/i.test(error.message)) {
+      return 0;
+    }
+    throw error;
+  }
+
+  if (!Array.isArray(rawGroups)) {
+    throw new Error('Redis XINFO GROUPS returned an invalid response');
+  }
+  const groups: unknown[][] = rawGroups.every(Array.isArray)
+    ? (rawGroups as unknown[][])
+    : [rawGroups];
+  const group = groups.find(
+    (candidate) => readGroupField(candidate, 'name') === WORKER_CONSUMER_GROUP
+  );
+
+  if (!group) {
+    // The group has not been created yet, so every entry is undelivered.
+    return Math.min(Number(await redis.xlen(streamKey)), cap);
+  }
+
+  const pending = Number(readGroupField(group, 'pending'));
+  if (!Number.isSafeInteger(pending) || pending < 0) {
+    throw new Error('Redis XINFO GROUPS returned an invalid pending count');
+  }
+  if (pending >= cap) {
+    return cap;
+  }
+
+  // Redis >= 7 reports an exact `lag` (entries not yet delivered) unless
+  // deletions made it unknowable, in which case it is null.
+  const lag = readGroupField(group, 'lag');
+  if (typeof lag === 'number' && Number.isSafeInteger(lag) && lag >= 0) {
+    return Math.min(pending + lag, cap);
+  }
+
+  const lastDeliveredId = readGroupField(group, 'last-delivered-id');
+  if (typeof lastDeliveredId !== 'string') {
+    throw new Error(
+      `Redis consumer group ${WORKER_CONSUMER_GROUP} omitted last-delivered-id`
+    );
+  }
+  parseStreamId(lastDeliveredId, 'consumer-group last-delivered ID');
+
+  // Count undelivered entries exactly, but only as far as the cap needs.
+  const undelivered = (await redis.xrange(
+    streamKey,
+    `(${lastDeliveredId}`,
+    '+',
+    'COUNT',
+    cap - pending
+  )) as unknown[];
+
+  return Math.min(pending + undelivered.length, cap);
 }
 
 /**

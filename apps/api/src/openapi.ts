@@ -441,11 +441,6 @@ GET /api/v1/jobs?limit=50&offset=100
                     enum: ['up', 'down'],
                     example: 'up',
                   },
-                  kafka: {
-                    type: 'string',
-                    enum: ['up', 'down'],
-                    example: 'up',
-                  },
                 },
               },
               uptime: {

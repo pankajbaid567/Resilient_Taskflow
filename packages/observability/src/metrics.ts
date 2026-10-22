@@ -1,5 +1,11 @@
 import { createLogger } from '@taskflow/logger';
-import { Counter, Gauge, Histogram, register, Summary } from 'prom-client';
+import {
+  collectDefaultMetrics,
+  Counter,
+  Gauge,
+  Histogram,
+  register,
+} from 'prom-client';
 
 const logger = createLogger({ component: 'Metrics' });
 
@@ -110,7 +116,9 @@ export const jobDurationSeconds = new Histogram({
   name: 'taskflow_job_duration_seconds',
   help: 'Job execution duration in seconds',
   labelNames: ['queue', 'type', 'status'],
-  buckets: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300], // 100ms to 5min
+  // Starts at 5ms: most real handlers finish well under 100ms, and a first
+  // bucket of 0.1s would put them all in one bin and make percentiles useless.
+  buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300],
   registers: [register],
 });
 
@@ -121,18 +129,8 @@ export const jobWaitDurationSeconds = new Histogram({
   name: 'taskflow_job_wait_duration_seconds',
   help: 'Time from job submission to start in seconds',
   labelNames: ['queue', 'priority'],
-  buckets: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 600], // 100ms to 10min
-  registers: [register],
-});
-
-/**
- * Job retry attempts distribution
- */
-export const jobRetryAttempts = new Histogram({
-  name: 'taskflow_job_retry_attempts',
-  help: 'Number of retry attempts per job',
-  labelNames: ['queue', 'type'],
-  buckets: [0, 1, 2, 3, 5, 10, 20],
+  // Fine low buckets: priority shows up as a difference of milliseconds.
+  buckets: [0.005, 0.025, 0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 600],
   registers: [register],
 });
 
@@ -161,16 +159,6 @@ export const queueLagSeconds = new Gauge({
 });
 
 /**
- * Redis Streams consumer group lag
- */
-export const redisConsumerLag = new Gauge({
-  name: 'taskflow_redis_consumer_lag',
-  help: 'Number of pending messages in Redis consumer group',
-  labelNames: ['queue', 'consumer_group', 'consumer'],
-  registers: [register],
-});
-
-/**
  * Dead letter queue depth
  */
 export const dlqDepth = new Gauge({
@@ -191,6 +179,16 @@ export const workersActive = new Gauge({
   name: 'taskflow_workers_active',
   help: 'Number of active workers',
   labelNames: ['queue'],
+  registers: [register],
+});
+
+/**
+ * Workers that are ACTIVE and heartbeating. Unlike `workers_active` (per queue,
+ * and a worker serves several queues), this counts each worker once.
+ */
+export const workersLive = new Gauge({
+  name: 'taskflow_workers_live',
+  help: 'Distinct workers that are ACTIVE and have a fresh heartbeat',
   registers: [register],
 });
 
@@ -287,12 +285,28 @@ export const schedulerRunDurationSeconds = new Histogram({
   registers: [register],
 });
 
+// ========================================
+// Dispatcher Metrics
+// ========================================
+
 /**
- * Scheduler lag (how late jobs are being scheduled)
+ * Deliveries the dispatcher published from the outbox to Redis
  */
-export const schedulerLagSeconds = new Gauge({
-  name: 'taskflow_scheduler_lag_seconds',
-  help: 'How late jobs are being scheduled (seconds)',
+export const dispatcherPublishedTotal = new Counter({
+  name: 'taskflow_dispatcher_published_total',
+  help: 'Total deliveries published to Redis by the dispatcher',
+  labelNames: ['queue'],
+  registers: [register],
+});
+
+/**
+ * Dispatch cycles in which a queue's in-flight window was full, so its
+ * backlog stayed in PostgreSQL (ordered by priority) instead of Redis.
+ */
+export const dispatcherWindowLimitedTotal = new Counter({
+  name: 'taskflow_dispatcher_window_limited_total',
+  help: 'Total dispatch cycles in which a queue window was full',
+  labelNames: ['queue'],
   registers: [register],
 });
 
@@ -321,162 +335,6 @@ export const httpRequestDurationSeconds = new Histogram({
   registers: [register],
 });
 
-/**
- * Rate limit hits
- */
-export const rateLimitHitsTotal = new Counter({
-  name: 'taskflow_rate_limit_hits_total',
-  help: 'Total rate limit checks',
-  labelNames: ['status'], // 'allowed' or 'denied'
-  registers: [register],
-});
-
-/**
- * Rate limit duration (overhead)
- */
-export const rateLimitDurationSeconds = new Histogram({
-  name: 'taskflow_rate_limit_duration_seconds',
-  help: 'Rate limit check duration in seconds',
-  buckets: [0.0001, 0.0005, 0.001, 0.002, 0.005, 0.01],
-  registers: [register],
-});
-
-/**
- * Idempotency key hits
- */
-export const idempotencyKeyHitsTotal = new Counter({
-  name: 'taskflow_idempotency_key_hits_total',
-  help: 'Total idempotency key checks',
-  labelNames: ['status'], // 'new', 'replay', 'conflict'
-  registers: [register],
-});
-
-// ========================================
-// Kafka/Event Metrics
-// ========================================
-
-/**
- * Events published to Kafka
- */
-export const eventsPublishedTotal = new Counter({
-  name: 'taskflow_events_published_total',
-  help: 'Total events published to Kafka',
-  labelNames: ['topic', 'event_type'],
-  registers: [register],
-});
-
-/**
- * Event publish failures
- */
-export const eventPublishFailuresTotal = new Counter({
-  name: 'taskflow_event_publish_failures_total',
-  help: 'Total event publish failures',
-  labelNames: ['topic', 'event_type', 'error_type'],
-  registers: [register],
-});
-
-/**
- * Event publish duration
- */
-export const eventPublishDurationSeconds = new Histogram({
-  name: 'taskflow_event_publish_duration_seconds',
-  help: 'Event publish duration in seconds',
-  labelNames: ['topic'],
-  buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1],
-  registers: [register],
-});
-
-/**
- * Event batch size
- */
-export const eventBatchSize = new Summary({
-  name: 'taskflow_event_batch_size',
-  help: 'Number of events in batch',
-  labelNames: ['topic'],
-  percentiles: [0.5, 0.9, 0.95, 0.99],
-  registers: [register],
-});
-
-// ========================================
-// Database Metrics
-// ========================================
-
-/**
- * Database queries total
- */
-export const dbQueriesTotal = new Counter({
-  name: 'taskflow_db_queries_total',
-  help: 'Total database queries',
-  labelNames: ['operation', 'table'],
-  registers: [register],
-});
-
-/**
- * Database query duration
- */
-export const dbQueryDurationSeconds = new Histogram({
-  name: 'taskflow_db_query_duration_seconds',
-  help: 'Database query duration in seconds',
-  labelNames: ['operation', 'table'],
-  buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2],
-  registers: [register],
-});
-
-/**
- * Database connection pool size
- */
-export const dbConnectionPoolSize = new Gauge({
-  name: 'taskflow_db_connection_pool_size',
-  help: 'Current database connection pool size',
-  labelNames: ['state'], // 'idle' or 'active'
-  registers: [register],
-});
-
-/**
- * Database transaction duration
- */
-export const dbTransactionDurationSeconds = new Histogram({
-  name: 'taskflow_db_transaction_duration_seconds',
-  help: 'Database transaction duration in seconds',
-  buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 5],
-  registers: [register],
-});
-
-// ========================================
-// Redis Metrics
-// ========================================
-
-/**
- * Redis commands total
- */
-export const redisCommandsTotal = new Counter({
-  name: 'taskflow_redis_commands_total',
-  help: 'Total Redis commands',
-  labelNames: ['command'],
-  registers: [register],
-});
-
-/**
- * Redis command duration
- */
-export const redisCommandDurationSeconds = new Histogram({
-  name: 'taskflow_redis_command_duration_seconds',
-  help: 'Redis command duration in seconds',
-  labelNames: ['command'],
-  buckets: [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1],
-  registers: [register],
-});
-
-/**
- * Redis connection pool size
- */
-export const redisConnectionPoolSize = new Gauge({
-  name: 'taskflow_redis_connection_pool_size',
-  help: 'Current Redis connection pool size',
-  labelNames: ['state'], // 'ready', 'wait', 'connect'
-  registers: [register],
-});
-
 // ========================================
 // System Metrics
 // ========================================
@@ -493,6 +351,20 @@ export const buildInfo = new Gauge({
 
 // Set build info once on startup
 buildInfo.labels('1.0.0', 'taskflow', process.version).set(1);
+
+let processMetricsStarted = false;
+
+/**
+ * Start Node.js process metrics (CPU, memory, event-loop lag, GC, handles).
+ * Safe to call more than once; prom-client would otherwise throw on the
+ * duplicate registration. Call it from each service's entry point rather than
+ * at import time, so importing this module stays side-effect free in tests.
+ */
+export function collectProcessMetrics(): void {
+  if (processMetricsStarted) return;
+  processMetricsStarted = true;
+  collectDefaultMetrics({ register });
+}
 
 /**
  * Export all metrics in Prometheus text format

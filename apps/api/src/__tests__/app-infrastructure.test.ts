@@ -1,7 +1,7 @@
 import {
   cleanupExpiredIdempotencyKeys,
   findActiveUserByApiKey,
-  getJobCounts,
+  getMetricsSnapshot,
   getQueueByName,
   getWorkerById,
 } from '@taskflow/database';
@@ -19,7 +19,7 @@ vi.mock('@taskflow/database', () => ({
   getActiveWorkers: vi.fn(),
   getJobById: vi.fn(),
   getJobByIdempotencyKey: vi.fn(),
-  getJobCounts: vi.fn(),
+  getMetricsSnapshot: vi.fn(),
   getJobsByUserId: vi.fn(),
   getQueueByName: vi.fn(),
   getQueueStats: vi.fn(),
@@ -75,16 +75,11 @@ describe('API route infrastructure policy', () => {
       }
       return Promise.resolve(undefined);
     });
-    vi.mocked(getJobCounts).mockResolvedValue({
-      CREATED: 0,
-      QUEUED: 0,
-      PROCESSING: 0,
-      SUCCEEDED: 0,
-      FAILED: 0,
-      RETRY_SCHEDULED: 0,
-      DEAD_LETTERED: 0,
-      CANCEL_REQUESTED: 0,
-      CANCELLED: 0,
+    vi.mocked(getMetricsSnapshot).mockResolvedValue({
+      jobs: [],
+      backlog: [],
+      liveWorkers: [],
+      liveWorkerTotal: 0,
     });
     const app = await createApp({ enableSwagger: false });
     openApps.push(app);

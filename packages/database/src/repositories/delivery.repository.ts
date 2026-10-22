@@ -8,12 +8,14 @@ import {
   Job,
   JobAttempt,
   jobAttempts,
+  jobDeliveries,
   jobEvents,
   jobs,
   Queue,
   queues,
   type JobDelivery,
 } from '../schema';
+import { validateTransition } from '../state-machine';
 
 import { insertPendingDelivery } from './dispatch.repository';
 
@@ -66,6 +68,17 @@ export class JobCancellationNotRequestedError extends Error {
       `Cannot complete cancellation for job ${jobId}: current status is ${status}`
     );
     this.name = 'JobCancellationNotRequestedError';
+  }
+}
+
+/**
+ * Raised when a failure is reported for a job whose owner must instead
+ * complete a pending cancellation request.
+ */
+export class JobCancellationRequestedError extends Error {
+  constructor(jobId: string) {
+    super(`Job ${jobId} has a pending cancellation request`);
+    this.name = 'JobCancellationRequestedError';
   }
 }
 
@@ -128,6 +141,7 @@ export async function acquireJobForDelivery(
         return { kind: 'BUSY', job };
       }
 
+      validateTransition(job.status, JobStatus.CANCELLED);
       const [cancelledJob] = await tx
         .update(jobs)
         .set({
@@ -232,6 +246,7 @@ export async function acquireJobForDelivery(
         return { kind: 'NOT_READY', job };
       }
 
+      validateTransition(job.status, JobStatus.QUEUED);
       const [promotedJob] = await tx
         .update(jobs)
         .set({
@@ -326,6 +341,7 @@ export async function acquireJobForDelivery(
       }
 
       if (job.attempts >= job.maxAttempts) {
+        validateTransition(job.status, JobStatus.DEAD_LETTERED);
         const [deadLetteredJob] = await tx
           .update(jobs)
           .set({
@@ -391,6 +407,7 @@ export async function acquireJobForDelivery(
         return { kind: 'TERMINAL', job: deadLetteredJob };
       }
 
+      validateTransition(job.status, JobStatus.QUEUED);
       const [recoveredJob] = await tx
         .update(jobs)
         .set({
@@ -450,6 +467,7 @@ export async function acquireJobForDelivery(
       return { kind: 'NOT_READY', job };
     }
 
+    validateTransition(job.status, JobStatus.PROCESSING);
     const [leasedJob] = await tx
       .update(jobs)
       .set({
@@ -606,6 +624,11 @@ export async function startJobAttempt(
  * Renew a lease only while the caller still owns an unexpired fence. A
  * cancellation request retains that fence so the owner can observe the state,
  * stop its handler, and durably complete cancellation.
+ *
+ * Renewal is a single fenced UPDATE and deliberately writes no job_event: a
+ * heartbeat is not a state transition, and logging one every
+ * leaseDuration/3 per running job made job_events grow with execution time
+ * instead of with lifecycle changes.
  */
 export async function renewJobDeliveryLease(
   jobId: string,
@@ -615,49 +638,27 @@ export async function renewJobDeliveryLease(
 ): Promise<Job | null> {
   assertPositiveDuration(duration, 'duration');
 
-  return db.transaction(async (tx) => {
-    const [job] = await tx
-      .update(jobs)
-      .set({
-        leaseExpiresAt: sql`clock_timestamp() + (${duration} * INTERVAL '1 millisecond')`,
-        version: sql`${jobs.version} + 1`,
-        eventSequence: sql`${jobs.eventSequence} + 1`,
-      })
-      .where(
-        and(
-          eq(jobs.id, jobId),
-          or(
-            eq(jobs.status, JobStatus.PROCESSING),
-            eq(jobs.status, JobStatus.CANCEL_REQUESTED)
-          ),
-          eq(jobs.workerId, workerId),
-          eq(jobs.leaseId, leaseId),
-          sql`${jobs.leaseExpiresAt} > clock_timestamp()`
-        )
+  const [job] = await db
+    .update(jobs)
+    .set({
+      leaseExpiresAt: sql`clock_timestamp() + (${duration} * INTERVAL '1 millisecond')`,
+      version: sql`${jobs.version} + 1`,
+    })
+    .where(
+      and(
+        eq(jobs.id, jobId),
+        or(
+          eq(jobs.status, JobStatus.PROCESSING),
+          eq(jobs.status, JobStatus.CANCEL_REQUESTED)
+        ),
+        eq(jobs.workerId, workerId),
+        eq(jobs.leaseId, leaseId),
+        sql`${jobs.leaseExpiresAt} > clock_timestamp()`
       )
-      .returning();
+    )
+    .returning();
 
-    if (!job) {
-      return null;
-    }
-
-    await tx.insert(jobEvents).values({
-      jobId,
-      eventType: 'lease_renewed',
-      sequence: job.eventSequence,
-      fromStatus: job.status,
-      toStatus: job.status,
-      workerId,
-      userId: job.userId,
-      metadata: {
-        leaseId,
-        leaseExpiresAt: job.leaseExpiresAt?.toISOString(),
-        attemptNumber: job.attempts,
-      },
-    });
-
-    return job;
-  });
+  return job ?? null;
 }
 
 /**
@@ -677,7 +678,10 @@ export async function completeJobDelivery(
       .where(
         and(
           eq(jobs.id, jobId),
-          eq(jobs.status, JobStatus.PROCESSING),
+          or(
+            eq(jobs.status, JobStatus.PROCESSING),
+            eq(jobs.status, JobStatus.CANCEL_REQUESTED)
+          ),
           eq(jobs.workerId, workerId),
           eq(jobs.leaseId, leaseId),
           sql`${jobs.leaseExpiresAt} > clock_timestamp()`
@@ -690,6 +694,7 @@ export async function completeJobDelivery(
       throw new JobDeliveryLeaseLostError(jobId, 'complete');
     }
 
+    validateTransition(ownedJob.status, JobStatus.SUCCEEDED);
     const [completedJob] = await tx
       .update(jobs)
       .set({
@@ -705,7 +710,10 @@ export async function completeJobDelivery(
       .where(
         and(
           eq(jobs.id, jobId),
-          eq(jobs.status, JobStatus.PROCESSING),
+          or(
+            eq(jobs.status, JobStatus.PROCESSING),
+            eq(jobs.status, JobStatus.CANCEL_REQUESTED)
+          ),
           eq(jobs.workerId, workerId),
           eq(jobs.leaseId, leaseId),
           eq(jobs.version, ownedJob.version),
@@ -745,13 +753,16 @@ export async function completeJobDelivery(
       jobId,
       eventType: 'completed',
       sequence: completedJob.eventSequence,
-      fromStatus: JobStatus.PROCESSING,
+      fromStatus: ownedJob.status,
       toStatus: JobStatus.SUCCEEDED,
       workerId,
       userId: ownedJob.userId,
       metadata: {
         leaseId,
         attemptNumber: ownedJob.attempts,
+        // A result produced before the owner observed the cancel request wins.
+        lateCancellationRequestIgnored:
+          ownedJob.status === JobStatus.CANCEL_REQUESTED,
       },
     });
 
@@ -783,7 +794,10 @@ export async function failJobDelivery(
       .where(
         and(
           eq(jobs.id, jobId),
-          eq(jobs.status, JobStatus.PROCESSING),
+          or(
+            eq(jobs.status, JobStatus.PROCESSING),
+            eq(jobs.status, JobStatus.CANCEL_REQUESTED)
+          ),
           eq(jobs.workerId, workerId),
           eq(jobs.leaseId, leaseId),
           sql`${jobs.leaseExpiresAt} > clock_timestamp()`
@@ -794,6 +808,12 @@ export async function failJobDelivery(
 
     if (!ownedJob) {
       throw new JobDeliveryLeaseLostError(jobId, 'fail');
+    }
+
+    // The user asked to cancel: a failed attempt must not schedule a retry.
+    // The owner still holds the lease and should complete cancellation.
+    if (ownedJob.status === JobStatus.CANCEL_REQUESTED) {
+      throw new JobCancellationRequestedError(jobId);
     }
 
     const retryDecision = decideJobRetry({
@@ -814,6 +834,7 @@ export async function failJobDelivery(
     const nextStatus = terminal
       ? JobStatus.DEAD_LETTERED
       : JobStatus.RETRY_SCHEDULED;
+    validateTransition(ownedJob.status, nextStatus);
     const [failedJob] = await tx
       .update(jobs)
       .set({
@@ -1001,6 +1022,7 @@ export async function completeCancellation(
       throw new JobCancellationNotRequestedError(jobId, ownedJob.status);
     }
 
+    validateTransition(ownedJob.status, JobStatus.CANCELLED);
     const [cancelledJob] = await tx
       .update(jobs)
       .set({
@@ -1077,6 +1099,138 @@ export async function completeCancellation(
     });
 
     return cancelledJob;
+  });
+}
+
+/**
+ * Hand an owned PROCESSING job back to the queue without consuming its
+ * attempt budget. Used for operator-initiated shutdown after the drain window
+ * expires: a deploy must not dead-letter a job that was on its last attempt.
+ *
+ * In one fenced transaction this:
+ * - returns the job to QUEUED and refunds the in-flight attempt,
+ * - removes the open attempt row (its timing is preserved in the
+ *   `lease_released` event, which is the immutable audit trail),
+ * - re-arms the outbox row for that attempt so a dispatcher republishes it.
+ *
+ * The caller may XACK the Redis entry only after this resolves non-null.
+ * Returns null when the lease is no longer owned (expired, cancelled, or
+ * recovered elsewhere); lease-expiry recovery then remains authoritative.
+ */
+export async function releaseJobDelivery(
+  jobId: string,
+  workerId: string,
+  leaseId: string,
+  reason: string = 'worker_shutdown'
+): Promise<Job | null> {
+  return db.transaction(async (tx) => {
+    const [ownedJob] = await tx
+      .select()
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(jobs.status, JobStatus.PROCESSING),
+          eq(jobs.workerId, workerId),
+          eq(jobs.leaseId, leaseId),
+          sql`${jobs.leaseExpiresAt} > clock_timestamp()`
+        )
+      )
+      .limit(1)
+      .for('update');
+
+    if (!ownedJob) return null;
+
+    const [openAttempt] = await tx
+      .delete(jobAttempts)
+      .where(
+        and(
+          eq(jobAttempts.jobId, jobId),
+          eq(jobAttempts.attemptNumber, ownedJob.attempts),
+          eq(jobAttempts.workerId, workerId),
+          eq(jobAttempts.status, JobStatus.PROCESSING)
+        )
+      )
+      .returning({ startedAt: jobAttempts.startedAt });
+
+    validateTransition(ownedJob.status, JobStatus.QUEUED);
+    const [released] = await tx
+      .update(jobs)
+      .set({
+        status: JobStatus.QUEUED,
+        workerId: null,
+        leaseId: null,
+        leaseExpiresAt: null,
+        attempts: sql`GREATEST(0, ${jobs.attempts} - 1)`,
+        // A first attempt that never completed did not really start the job.
+        startedAt: sql`CASE WHEN ${jobs.attempts} <= 1 THEN NULL ELSE ${jobs.startedAt} END`,
+        version: sql`${jobs.version} + 1`,
+        eventSequence: sql`${jobs.eventSequence} + 1`,
+      })
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(jobs.status, JobStatus.PROCESSING),
+          eq(jobs.workerId, workerId),
+          eq(jobs.leaseId, leaseId),
+          eq(jobs.version, ownedJob.version)
+        )
+      )
+      .returning();
+
+    if (!released) {
+      throw new JobDeliveryLeaseLostError(jobId, 'release');
+    }
+
+    // Keep the outbox invariant: a QUEUED job owns a delivery whose attempt is
+    // jobs.attempts + 1, i.e. the attempt that was just refunded.
+    const [rearmed] = await tx
+      .update(jobDeliveries)
+      .set({
+        status: 'PENDING',
+        redisMessageId: null,
+        publishedAt: null,
+        claimedBy: null,
+        claimedAt: null,
+        availableAt: sql`clock_timestamp()`,
+      })
+      .where(
+        and(
+          eq(jobDeliveries.jobId, jobId),
+          eq(jobDeliveries.attempt, ownedJob.attempts)
+        )
+      )
+      .returning({ id: jobDeliveries.id });
+
+    if (!rearmed) {
+      const [queue] = await tx
+        .select({ name: queues.name })
+        .from(queues)
+        .where(eq(queues.id, ownedJob.queueId))
+        .limit(1);
+      if (!queue) {
+        throw new Error(`Queue ${ownedJob.queueId} not found for job ${jobId}`);
+      }
+      await insertPendingDelivery(tx, jobId, queue.name, ownedJob.attempts);
+    }
+
+    await tx.insert(jobEvents).values({
+      jobId,
+      eventType: 'lease_released',
+      sequence: released.eventSequence,
+      fromStatus: JobStatus.PROCESSING,
+      toStatus: JobStatus.QUEUED,
+      workerId,
+      userId: ownedJob.userId,
+      metadata: {
+        leaseId,
+        reason,
+        refundedAttemptNumber: ownedJob.attempts,
+        attemptStartedAt: openAttempt?.startedAt.toISOString() ?? null,
+      },
+    });
+
+    return released;
   });
 }
 

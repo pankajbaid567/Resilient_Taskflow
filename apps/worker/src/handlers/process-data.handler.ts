@@ -7,6 +7,7 @@
 
 import { createLogger } from '@taskflow/logger';
 import type { JobHandlerContext } from '@taskflow/types';
+import { PermanentJobError } from '@taskflow/worker';
 
 const logger = createLogger({ component: 'ProcessDataHandler' });
 
@@ -111,24 +112,39 @@ function validateDataPayload(
   payload: Record<string, unknown>
 ): ProcessDataPayload {
   if (!payload.operation || typeof payload.operation !== 'string') {
-    throw new Error('Operation field is required');
+    throw new PermanentJobError(
+      'Operation field is required',
+      'INVALID_PAYLOAD'
+    );
   }
 
   const validOperations = ['transform', 'aggregate', 'validate', 'enrich'];
   if (!validOperations.includes(payload.operation)) {
-    throw new Error(`Invalid operation: ${payload.operation}`);
+    throw new PermanentJobError(
+      `Invalid operation: ${payload.operation}`,
+      'INVALID_PAYLOAD'
+    );
   }
 
   if (!Array.isArray(payload.data)) {
-    throw new Error('Data field must be an array');
+    throw new PermanentJobError(
+      'Data field must be an array',
+      'INVALID_PAYLOAD'
+    );
   }
 
   if (payload.data.length === 0) {
-    throw new Error('Data array cannot be empty');
+    throw new PermanentJobError(
+      'Data array cannot be empty',
+      'INVALID_PAYLOAD'
+    );
   }
 
   if (payload.data.length > 10000) {
-    throw new Error('Data array too large (max 10,000 records)');
+    throw new PermanentJobError(
+      'Data array too large (max 10,000 records)',
+      'INVALID_PAYLOAD'
+    );
   }
 
   return payload as unknown as ProcessDataPayload;

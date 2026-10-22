@@ -13,7 +13,22 @@ import {
   it,
 } from 'vitest';
 
-import { closeConnection, hashApiKey } from '@taskflow/database';
+import {
+  cleanupBoundedDeadLetters,
+  cleanupBoundedJobAttempts,
+  cleanupBoundedJobDeliveries,
+  cleanupBoundedJobEvents,
+  cleanupBoundedJobs,
+  cleanupBoundedWorkers,
+  closeConnection,
+  hashApiKey,
+  runDatabaseRetention,
+} from '@taskflow/database';
+import {
+  executeFullRetention,
+  RETENTION_LOCK_KEY,
+  RetentionScheduler,
+} from '@taskflow/worker';
 import {
   closeRedisConnection,
   getStreamKey,
@@ -160,6 +175,9 @@ function startWorker(overrides: Record<string, string> = {}): RuntimeProcess {
       JWT_SECRET: jwtSecret,
       API_KEY_HASH_SALT: 'integration-test-salt',
       WORKER_QUEUES: 'default',
+      // Several workers run at once in these tests and a dev worker may be
+      // running on this machine; none of them need the metrics port.
+      WORKER_METRICS_PORT: '0',
       WORKER_CONCURRENCY: '1',
       WORKER_HEARTBEAT_INTERVAL_MS: '100',
       WORKER_LEASE_DURATION_MS: '600',
@@ -266,6 +284,7 @@ async function submitJob(
     maxAttempts?: number;
     timeoutMs?: number;
     scheduledAt?: string;
+    priority?: 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW';
     expectedStatus?: JobStatus;
   } = {}
 ): Promise<string> {
@@ -286,6 +305,7 @@ async function submitJob(
       ...(options.scheduledAt === undefined
         ? {}
         : { scheduledAt: options.scheduledAt }),
+      ...(options.priority === undefined ? {} : { priority: options.priority }),
     },
   });
 
@@ -1048,13 +1068,37 @@ describe.sequential('authoritative worker delivery', () => {
       ]);
     }, 30_000);
 
-    it('bounds SIGTERM shutdown and redispatches an expired PROCESSING job after Redis loss', async () => {
+    it('drains an in-flight job to SUCCEEDED before a SIGTERM-ed worker exits', async () => {
+      const worker = startWorker();
+      await waitForWorkerReady(worker);
+      const jobId = await submitJob({
+        payload: { effectKey: 'graceful-drain', delayMs: 1_500 },
+      });
+
+      await waitForJobStatus(jobId, JobStatus.PROCESSING);
+      await stopWorker(worker);
+
+      const drained = await readJob(jobId);
+      expect(drained?.status).toBe(JobStatus.SUCCEEDED);
+      expect(drained?.attempts).toBe(1);
+      expect(await pendingEntries()).toHaveLength(0);
+      expect(await counts(jobId)).toEqual({
+        executions: 1,
+        effectAttempts: 1,
+        effects: 1,
+        attempts: 1,
+        deadLetters: 0,
+      });
+    }, 30_000);
+
+    it('releases a non-cooperative job on bounded SIGTERM shutdown without consuming its attempt budget', async () => {
       const firstWorker = startWorker({
         WORKER_LEASE_DURATION_MS: '1000',
         TASKFLOW_TEST_SHUTDOWN_TIMEOUT_MS: '200',
       });
       await waitForWorkerReady(firstWorker);
       const jobId = await submitJob({
+        maxAttempts: 1,
         payload: {
           effectKey: 'graceful-replacement',
           delayFirstAttemptMs: 10_000,
@@ -1073,25 +1117,32 @@ describe.sequential('authoritative worker delivery', () => {
       const stoppingAt = Date.now();
       await stopWorker(firstWorker);
       expect(Date.now() - stoppingAt).toBeLessThan(3_000);
-      expect((await readJob(jobId))?.status).toBe(JobStatus.PROCESSING);
-      expect(await pendingEntries()).toHaveLength(1);
-      expect(await redis.del(stream)).toBe(1);
+
+      // The lease was handed back durably: no lease-expiry wait, no attempt
+      // consumed (maxAttempts=1 would otherwise dead-letter), Redis ACKed.
+      const released = await readJob(jobId);
+      expect(released?.status).toBe(JobStatus.QUEUED);
+      expect(released?.attempts).toBe(0);
+      expect(await pendingEntries()).toHaveLength(0);
+
+      // Redis loss after release is still recovered from the outbox.
+      await redis.del(stream);
 
       const replacement = startWorker({
         WORKER_LEASE_DURATION_MS: '1000',
         TASKFLOW_TEST_DISPATCH_STALE_THRESHOLD_MS: '100',
       });
       await waitForWorkerReady(replacement);
-      await waitForJobStatus(jobId, JobStatus.SUCCEEDED, 20_000);
+      await waitForJobStatus(jobId, JobStatus.SUCCEEDED, 25_000);
       await waitForPendingCount(0);
       expect(await counts(jobId)).toEqual({
         executions: 2,
         effectAttempts: 1,
         effects: 1,
-        attempts: 2,
+        attempts: 1,
         deadLetters: 0,
       });
-    }, 30_000);
+    }, 40_000);
 
     it('leaves a delivery pending during transient lease-database failure and later completes it', async () => {
       const worker = startWorker({
@@ -1292,5 +1343,586 @@ describe.sequential('authoritative worker delivery', () => {
         null,
       ]);
     }, 30_000);
+  });
+
+  describe('bounded lifecycle retention', () => {
+    it('purges expired terminal jobs while strictly protecting active leases, pending deliveries, and scheduled retries', async () => {
+      const now = Date.now();
+      const expiredCompletedAt = new Date(now - 40 * 86_400_000);
+      const activeLeaseExpiry = new Date(now + 3_600_000);
+      const futureScheduledAt = new Date(now + 600_000);
+
+      // 1. Expired terminal job (safe to purge)
+      const res1 = await pool.query<{ id: string }>(
+        `INSERT INTO jobs (user_id, queue_id, type, payload, status, completed_at, created_at)
+         VALUES ($1, $2, 'retention-test', '{}', 'SUCCEEDED', $3, $3)
+         RETURNING id`,
+        [userId, queueId, expiredCompletedAt]
+      );
+      const expiredJobId = res1.rows[0]!.id;
+
+      // Create an active worker to own the active lease
+      const workerRes = await pool.query<{ id: string }>(
+        `INSERT INTO workers (worker_name, hostname, process_id, queues, status)
+         VALUES ('retention-worker-active', 'test-host', 999, '{"default"}', 'ACTIVE')
+         RETURNING id`
+      );
+      const activeWorkerId = workerRes.rows[0]!.id;
+
+      // 2. Active lease job in PROCESSING (MUST NOT BE PURGED)
+      const res2 = await pool.query<{ id: string }>(
+        `INSERT INTO jobs (user_id, queue_id, type, payload, status, worker_id, lease_id, lease_expires_at, created_at)
+         VALUES ($1, $2, 'retention-test', '{}', 'PROCESSING', $3, gen_random_uuid(), $4, $5)
+         RETURNING id`,
+        [userId, queueId, activeWorkerId, activeLeaseExpiry, expiredCompletedAt]
+      );
+      const activeLeaseJobId = res2.rows[0]!.id;
+
+      // 3. Expired terminal job but has a PENDING outbox delivery (MUST NOT BE PURGED)
+      const res3 = await pool.query<{ id: string }>(
+        `INSERT INTO jobs (user_id, queue_id, type, payload, status, completed_at, created_at)
+         VALUES ($1, $2, 'retention-test', '{}', 'SUCCEEDED', $3, $3)
+         RETURNING id`,
+        [userId, queueId, expiredCompletedAt]
+      );
+      const pendingDeliveryJobId = res3.rows[0]!.id;
+      await pool.query(
+        `INSERT INTO job_deliveries (job_id, queue_name, status, attempt, available_at)
+         VALUES ($1, 'default', 'PENDING', 1, $2)`,
+        [pendingDeliveryJobId, expiredCompletedAt]
+      );
+
+      // 4. Job with future scheduled retry (MUST NOT BE PURGED)
+      const res4 = await pool.query<{ id: string }>(
+        `INSERT INTO jobs (user_id, queue_id, type, payload, status, scheduled_at, created_at)
+         VALUES ($1, $2, 'retention-test', '{}', 'RETRY_SCHEDULED', $3, $4)
+         RETURNING id`,
+        [userId, queueId, futureScheduledAt, expiredCompletedAt]
+      );
+      const scheduledJobId = res4.rows[0]!.id;
+
+      // Run bounded job cleanup
+      const deletedCount = await cleanupBoundedJobs(
+        new Date(now - 30 * 86_400_000),
+        50
+      );
+      expect(deletedCount).toBe(1);
+
+      // Verify that expiredJobId is gone
+      const checkExpired = await pool.query(
+        `SELECT 1 FROM jobs WHERE id = $1`,
+        [expiredJobId]
+      );
+      expect(checkExpired.rows).toHaveLength(0);
+
+      // Verify protected jobs remain in the database
+      const checkProtected = await pool.query<{ id: string }>(
+        `SELECT id FROM jobs WHERE id = ANY($1) ORDER BY id`,
+        [[activeLeaseJobId, pendingDeliveryJobId, scheduledJobId]]
+      );
+      expect(checkProtected.rows.map((r) => r.id).sort()).toEqual(
+        [activeLeaseJobId, pendingDeliveryJobId, scheduledJobId].sort()
+      );
+    });
+
+    it('purges dead-letter jobs and releases requeued replacement references safely', async () => {
+      const now = Date.now();
+      const expiredDate = new Date(now - 40 * 86_400_000);
+
+      // Original job that dead-lettered
+      const origRes = await pool.query<{ id: string }>(
+        `INSERT INTO jobs (user_id, queue_id, type, payload, status, failed_at, created_at)
+         VALUES ($1, $2, 'retention-dlq-orig', '{}', 'DEAD_LETTERED', $3, $3)
+         RETURNING id`,
+        [userId, queueId, expiredDate]
+      );
+      const origJobId = origRes.rows[0]!.id;
+
+      // Requeued replacement job that also finished long ago
+      const repRes = await pool.query<{ id: string }>(
+        `INSERT INTO jobs (user_id, queue_id, type, payload, status, completed_at, created_at)
+         VALUES ($1, $2, 'retention-dlq-rep', '{}', 'SUCCEEDED', $3, $3)
+         RETURNING id`,
+        [userId, queueId, expiredDate]
+      );
+      const repJobId = repRes.rows[0]!.id;
+
+      // Dead letter record referencing original and requeued job
+      await pool.query(
+        `INSERT INTO dead_letter_jobs (
+           original_job_id, user_id, queue_id, type, payload, attempts,
+           failed_at, requeued, requeued_at, requeued_job_id
+         ) VALUES (
+           $1, $2, $3, 'retention-dlq-orig', '{}', 3,
+           $4, true, $4, $5
+         )`,
+        [origJobId, userId, queueId, expiredDate, repJobId]
+      );
+
+      // First, purge expired dead letters
+      const deletedDeadLetters = await cleanupBoundedDeadLetters(
+        new Date(now - 30 * 86_400_000),
+        50
+      );
+      expect(deletedDeadLetters).toBe(1);
+
+      // The dead-letter record no longer protects either job, so both the
+      // replacement (SUCCEEDED) and the original (DEAD_LETTERED) are purgeable.
+      const deletedJobs = await cleanupBoundedJobs(
+        new Date(now - 30 * 86_400_000),
+        50
+      );
+      expect(deletedJobs).toBe(2);
+
+      // Verify dead letter is deleted
+      const checkDlq = await pool.query(
+        `SELECT 1 FROM dead_letter_jobs WHERE original_job_id = $1`,
+        [origJobId]
+      );
+      expect(checkDlq.rows).toHaveLength(0);
+
+      // Verify runDatabaseRetention completes cleanly
+      const summary = await runDatabaseRetention({
+        deadLettersDays: 30,
+        jobsCompletedDays: 30,
+      });
+      expect(summary.deletedDeadLetters).toBe(0);
+      expect(summary.deletedJobs).toBe(0);
+    });
+
+    it('never purges workers that own active leases on nonterminal jobs', async () => {
+      const now = Date.now();
+      const expiredDate = new Date(now - 14 * 86_400_000);
+
+      // Worker 1: stopped 14 days ago, but has an active job lease
+      const w1Res = await pool.query<{ id: string }>(
+        `INSERT INTO workers (worker_name, hostname, process_id, queues, status, stopped_at, last_heartbeat_at)
+         VALUES ('active-lease-worker', 'test-host', 111, '{"default"}', 'STOPPED', $1, $1)
+         RETURNING id`,
+        [expiredDate]
+      );
+      const workerWithActiveLease = w1Res.rows[0]!.id;
+
+      await pool.query(
+        `INSERT INTO jobs (user_id, queue_id, type, payload, status, worker_id, lease_id, lease_expires_at, created_at)
+         VALUES ($1, $2, 'active-lease-job', '{}', 'PROCESSING', $3, gen_random_uuid(), clock_timestamp() + interval '1 hour', $4)`,
+        [userId, queueId, workerWithActiveLease, expiredDate]
+      );
+
+      // Worker 2: stopped 14 days ago, no active lease
+      const w2Res = await pool.query<{ id: string }>(
+        `INSERT INTO workers (worker_name, hostname, process_id, queues, status, stopped_at, last_heartbeat_at)
+         VALUES ('idle-stopped-worker', 'test-host', 222, '{"default"}', 'STOPPED', $1, $1)
+         RETURNING id`,
+        [expiredDate]
+      );
+      const workerIdle = w2Res.rows[0]!.id;
+
+      const deletedCount = await cleanupBoundedWorkers(
+        new Date(now - 7 * 86_400_000),
+        50
+      );
+      expect(deletedCount).toBe(1);
+
+      const checkIdle = await pool.query(
+        `SELECT 1 FROM workers WHERE id = $1`,
+        [workerIdle]
+      );
+      expect(checkIdle.rows).toHaveLength(0);
+
+      const checkActive = await pool.query(
+        `SELECT 1 FROM workers WHERE id = $1`,
+        [workerWithActiveLease]
+      );
+      expect(checkActive.rows).toHaveLength(1);
+    });
+
+    it('executes full retention across PostgreSQL and Redis with PEL boundary preservation', async () => {
+      // 1. Add stream entries to Redis
+      await redis.xadd(stream, '*', 'field', '1');
+      await redis.xadd(stream, '*', 'field', '2');
+      await redis.xadd(stream, '*', 'field', '3');
+
+      // Create consumer group if not existing
+      await redis
+        .xgroup('CREATE', stream, WORKER_CONSUMER_GROUP, '0', 'MKSTREAM')
+        .catch(() => {});
+
+      // Read via XREADGROUP to create a pending entry in the PEL
+      await redis.xreadgroup(
+        'GROUP',
+        WORKER_CONSUMER_GROUP,
+        'test-consumer',
+        'COUNT',
+        '1',
+        'STREAMS',
+        stream,
+        '>'
+      );
+
+      // 2. Execute full retention with redisStreamMaxLen: 1
+      const report = await executeFullRetention({
+        policy: {
+          jobsCompletedDays: 30,
+          redisStreamMaxLen: 1,
+        },
+        queues: ['default'],
+      });
+
+      // The stream has pending entries; trimStream must NOT trim past the oldest pending PEL ID
+      const pel = (await redis.xpending(stream, WORKER_CONSUMER_GROUP)) as [
+        number,
+        string,
+        string,
+        unknown,
+      ];
+      expect(pel[0]).toBeGreaterThanOrEqual(1);
+
+      // Stream length must retain at least the unacknowledged entry
+      const streamLen = await redis.xlen(stream);
+      expect(streamLen).toBeGreaterThanOrEqual(1);
+      expect(report.trimmedRedisEntries.default).toBeDefined();
+      expect(report.errors).toEqual([]);
+    });
+
+    const OLD = () => new Date(Date.now() - 40 * 86_400_000);
+    const CUTOFF = () => new Date(Date.now() - 30 * 86_400_000);
+
+    async function insertJob(
+      status: string,
+      options: { workerId?: string; completedAt?: Date | null } = {}
+    ): Promise<string> {
+      const old = OLD();
+      const lease =
+        status === 'PROCESSING' ? `, lease_id, lease_expires_at` : '';
+      const leaseValues =
+        status === 'PROCESSING'
+          ? `, gen_random_uuid(), clock_timestamp() + interval '1 hour'`
+          : '';
+      const result = await pool.query<{ id: string }>(
+        `INSERT INTO jobs (user_id, queue_id, type, payload, status, worker_id, completed_at, failed_at, created_at, attempts${lease})
+         VALUES ($1, $2, 'retention-history', '{}', $3, $4, $5, $5, $6, 1${leaseValues})
+         RETURNING id`,
+        [
+          userId,
+          queueId,
+          status,
+          options.workerId ?? null,
+          options.completedAt === undefined ? old : options.completedAt,
+          old,
+        ]
+      );
+      return result.rows[0]!.id;
+    }
+
+    async function insertHistory(
+      jobId: string,
+      workerId: string | null,
+      jobStatus: string
+    ): Promise<void> {
+      await pool.query(
+        `INSERT INTO job_attempts (job_id, attempt_number, worker_id, started_at, status)
+         VALUES ($1, 1, $2, $3, $4)`,
+        [
+          jobId,
+          workerId,
+          OLD(),
+          jobStatus === 'PROCESSING' ? 'PROCESSING' : 'SUCCEEDED',
+        ]
+      );
+      await pool.query(
+        `INSERT INTO job_events (job_id, event_type, to_status, event_sequence, worker_id, created_at)
+         VALUES ($1, 'completed', $2, 1, $3, $4)`,
+        [jobId, jobStatus, workerId, OLD()]
+      );
+    }
+
+    async function insertWorker(name: string): Promise<string> {
+      const old = OLD();
+      const result = await pool.query<{ id: string }>(
+        `INSERT INTO workers (worker_name, hostname, process_id, queues, status, stopped_at, last_heartbeat_at)
+         VALUES ($1, 'test-host', 4242, '{"default"}', 'STOPPED', $2, $2)
+         RETURNING id`,
+        [name, old]
+      );
+      return result.rows[0]!.id;
+    }
+
+    it('purges a stopped worker that retained history still references, clearing the references', async () => {
+      const workerId = await insertWorker('history-worker');
+      const jobId = await insertJob('SUCCEEDED', { workerId });
+      await insertHistory(jobId, workerId, 'SUCCEEDED');
+
+      // Before migration 0009 this raised a foreign-key violation (23503).
+      expect(await cleanupBoundedWorkers(CUTOFF(), 50)).toBe(1);
+
+      const refs = await pool.query<{ tbl: string; worker_id: string | null }>(
+        `SELECT 'jobs' AS tbl, worker_id FROM jobs WHERE id = $1
+         UNION ALL SELECT 'job_attempts', worker_id FROM job_attempts WHERE job_id = $1
+         UNION ALL SELECT 'job_events', worker_id FROM job_events WHERE job_id = $1`,
+        [jobId]
+      );
+      expect(refs.rows).toHaveLength(3);
+      expect(refs.rows.every((row) => row.worker_id === null)).toBe(true);
+    });
+
+    it('keeps a PUBLISHED delivery while its job is live, and purges it once the job is terminal', async () => {
+      const liveJobId = await insertJob('QUEUED', { completedAt: null });
+      const doneJobId = await insertJob('SUCCEEDED');
+      for (const jobId of [liveJobId, doneJobId]) {
+        await pool.query(
+          `INSERT INTO job_deliveries (job_id, queue_name, status, attempt, available_at, published_at)
+           VALUES ($1, 'default', 'PUBLISHED', 1, $2, $2)`,
+          [jobId, OLD()]
+        );
+      }
+
+      expect(await cleanupBoundedJobDeliveries(CUTOFF(), 50)).toBe(1);
+
+      const remaining = await pool.query<{ job_id: string }>(
+        `SELECT job_id FROM job_deliveries`
+      );
+      // The QUEUED job's row is the evidence the stale-delivery scan needs to
+      // republish it if its Redis entry is lost.
+      expect(remaining.rows.map((row) => row.job_id)).toEqual([liveJobId]);
+    });
+
+    it('never purges events or attempts of a running job, only of terminal ones', async () => {
+      const runningWorker = await pool.query<{ id: string }>(
+        `INSERT INTO workers (worker_name, hostname, process_id, queues, status)
+         VALUES ('running-worker', 'test-host', 4343, '{"default"}', 'ACTIVE') RETURNING id`
+      );
+      const runningJobId = await insertJob('PROCESSING', {
+        workerId: runningWorker.rows[0]!.id,
+        completedAt: null,
+      });
+      const doneJobId = await insertJob('SUCCEEDED');
+      await insertHistory(
+        runningJobId,
+        runningWorker.rows[0]!.id,
+        'PROCESSING'
+      );
+      await insertHistory(doneJobId, null, 'SUCCEEDED');
+
+      expect(await cleanupBoundedJobEvents(CUTOFF(), 50)).toBe(1);
+      expect(await cleanupBoundedJobAttempts(CUTOFF(), 50)).toBe(1);
+
+      const events = await pool.query<{ job_id: string }>(
+        `SELECT job_id FROM job_events`
+      );
+      const attempts = await pool.query<{ job_id: string }>(
+        `SELECT job_id FROM job_attempts`
+      );
+      // Completing the running job needs its open attempt row.
+      expect(events.rows.map((row) => row.job_id)).toEqual([runningJobId]);
+      expect(attempts.rows.map((row) => row.job_id)).toEqual([runningJobId]);
+    });
+
+    it('purges a DEAD_LETTERED job only after its dead-letter record is gone', async () => {
+      const jobId = await insertJob('DEAD_LETTERED');
+      await pool.query(
+        `INSERT INTO dead_letter_jobs (original_job_id, user_id, queue_id, type, payload, attempts, failed_at)
+         VALUES ($1, $2, $3, 'retention-history', '{}', 3, $4)`,
+        [jobId, userId, queueId, OLD()]
+      );
+
+      // Protected while the dead-letter record exists.
+      expect(await cleanupBoundedJobs(CUTOFF(), 50)).toBe(0);
+
+      expect(await cleanupBoundedDeadLetters(CUTOFF(), 50)).toBe(1);
+      expect(await cleanupBoundedJobs(CUTOFF(), 50)).toBe(1);
+      const left = await pool.query(`SELECT 1 FROM jobs WHERE id = $1`, [
+        jobId,
+      ]);
+      expect(left.rows).toHaveLength(0);
+    });
+
+    it('purges across every table in one runDatabaseRetention pass with no step errors', async () => {
+      const workerId = await insertWorker('full-pass-worker');
+      const jobId = await insertJob('SUCCEEDED', { workerId });
+      await insertHistory(jobId, workerId, 'SUCCEEDED');
+      await pool.query(
+        `INSERT INTO job_deliveries (job_id, queue_name, status, attempt, available_at, published_at)
+         VALUES ($1, 'default', 'PUBLISHED', 1, $2, $2)`,
+        [jobId, OLD()]
+      );
+
+      const summary = await runDatabaseRetention({
+        jobsCompletedDays: 30,
+        jobEventsDays: 30,
+        jobAttemptsDays: 30,
+        deliveriesDays: 30,
+        workersDays: 30,
+      });
+
+      expect(summary.errors).toEqual([]);
+      expect(summary).toMatchObject({
+        deletedJobs: 1,
+        deletedJobEvents: 1,
+        deletedJobAttempts: 1,
+        deletedJobDeliveries: 1,
+        deletedWorkers: 1,
+      });
+    });
+
+    it('lets exactly one of two concurrent retention schedulers run, using the real Redis lock', async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const emptyReport = {
+        deletedJobs: 0,
+        deletedJobEvents: 0,
+        deletedJobAttempts: 0,
+        deletedDeadLetters: 0,
+        deletedJobDeliveries: 0,
+        deletedWorkers: 0,
+        deletedIdempotencyKeys: 0,
+        deletedAuditLogs: 0,
+        trimmedRedisEntries: {},
+        errors: [],
+        completedAt: new Date().toISOString(),
+      };
+      let executions = 0;
+      const run = async () => {
+        executions += 1;
+        await gate;
+        return emptyReport;
+      };
+      const first = new RetentionScheduler({ run, getRedis: () => redis });
+      const second = new RetentionScheduler({ run, getRedis: () => redis });
+
+      const firstRun = first.runOnce();
+      await waitFor(
+        async () => redis.exists(RETENTION_LOCK_KEY),
+        (held) => held === 1,
+        { label: 'retention lock held' }
+      );
+      const secondOutcome = await second.runOnce();
+
+      expect(secondOutcome).toEqual({ ran: false, reason: 'LOCKED' });
+      release();
+      await expect(firstRun).resolves.toMatchObject({ ran: true });
+      expect(executions).toBe(1);
+      // The owner released the lock, so the next run is admitted.
+      expect(await redis.exists(RETENTION_LOCK_KEY)).toBe(0);
+    });
+  });
+
+  describe('priority dispatch window', () => {
+    /** Tags of SUCCEEDED jobs, in the order they finished. */
+    async function completionOrder(): Promise<string[]> {
+      const result = await pool.query<{ tag: string }>(
+        `SELECT payload->>'effectKey' AS tag
+           FROM jobs
+          WHERE status = 'SUCCEEDED'
+          ORDER BY completed_at, id`
+      );
+      return result.rows.map((row) => row.tag);
+    }
+
+    async function waitForSucceeded(count: number): Promise<void> {
+      await waitFor(
+        async () => {
+          const result = await pool.query<{ count: number }>(
+            `SELECT count(*)::int AS count FROM jobs WHERE status = 'SUCCEEDED'`
+          );
+          return result.rows[0]!.count;
+        },
+        (done) => done === count,
+        { timeoutMs: 40_000, label: `${count} jobs succeeded` }
+      );
+    }
+
+    const submit = (
+      tag: string,
+      priority: 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW',
+      delayMs = 100
+    ): Promise<string> =>
+      submitJob({ priority, payload: { effectKey: tag, delayMs } });
+
+    it('releases a queued backlog strictly by priority, then by age', async () => {
+      // Queue the backlog while NO worker runs: the outbox holds it all.
+      await submit('low-1', 'LOW');
+      await submit('low-2', 'LOW');
+      await submit('normal-1', 'NORMAL');
+      await submit('low-3', 'LOW');
+      await submit('high-1', 'HIGH');
+      await submit('critical-1', 'CRITICAL');
+      await submit('normal-2', 'NORMAL');
+
+      const worker = startWorker({
+        DISPATCH_MAX_IN_FLIGHT_PER_QUEUE: '1',
+        WORKER_CONCURRENCY: '1',
+      });
+      await waitForWorkerReady(worker);
+      await waitForSucceeded(7);
+
+      expect(await completionOrder()).toEqual([
+        'critical-1',
+        'high-1',
+        'normal-1',
+        'normal-2',
+        'low-1',
+        'low-2',
+        'low-3',
+      ]);
+    }, 60_000);
+
+    it('lets a late CRITICAL job overtake a backlog that is already waiting', async () => {
+      const worker = startWorker({
+        DISPATCH_MAX_IN_FLIGHT_PER_QUEUE: '1',
+        WORKER_CONCURRENCY: '1',
+      });
+      await waitForWorkerReady(worker);
+
+      const lowTags = Array.from({ length: 10 }, (_, i) => `low-${i}`);
+      const firstJobId = await submit(lowTags[0]!, 'LOW', 300);
+      for (const tag of lowTags.slice(1)) await submit(tag, 'LOW', 300);
+      await waitForJobStatus(firstJobId, JobStatus.PROCESSING);
+      await submit('critical-late', 'CRITICAL', 300);
+
+      await waitForSucceeded(11);
+
+      const order = await completionOrder();
+      // At most the job already running and one already published can finish
+      // first; the other eight low jobs must still be behind it.
+      expect(order.indexOf('critical-late')).toBeLessThanOrEqual(2);
+    }, 60_000);
+
+    it('is FIFO without the window: a late CRITICAL job waits behind the published backlog', async () => {
+      const worker = startWorker({
+        DISPATCH_MAX_IN_FLIGHT_PER_QUEUE: '0',
+        WORKER_CONCURRENCY: '1',
+      });
+      await waitForWorkerReady(worker);
+
+      const lowTags = Array.from({ length: 10 }, (_, i) => `low-${i}`);
+      const firstJobId = await submit(lowTags[0]!, 'LOW', 300);
+      for (const tag of lowTags.slice(1)) await submit(tag, 'LOW', 300);
+      await waitForJobStatus(firstJobId, JobStatus.PROCESSING);
+      // Claims are priority-ordered either way, so the CRITICAL job must
+      // arrive only after every LOW job has really been published to Redis.
+      await waitFor(
+        async () => {
+          const result = await pool.query<{ count: number }>(
+            `SELECT count(*)::int AS count FROM job_deliveries
+              WHERE status = 'PUBLISHED'`
+          );
+          return result.rows[0]!.count;
+        },
+        (published) => published === lowTags.length,
+        { label: 'all low jobs published' }
+      );
+      await submit('critical-late', 'CRITICAL', 300);
+
+      await waitForSucceeded(11);
+
+      // Control for the test above: with everything already in Redis the
+      // stream's FIFO order wins, so the same scenario ends with CRITICAL last
+      // (or very nearly). This is the behaviour the window exists to fix.
+      const order = await completionOrder();
+      expect(order.indexOf('critical-late')).toBeGreaterThanOrEqual(8);
+    }, 60_000);
   });
 });

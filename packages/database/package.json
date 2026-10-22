@@ -17,6 +17,7 @@
     "db:generate": "drizzle-kit generate:pg",
     "db:migrate": "tsx src/migrate.ts",
     "db:seed": "tsx src/seed.ts",
+    "db:create-api-key": "tsx src/create-api-key.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {

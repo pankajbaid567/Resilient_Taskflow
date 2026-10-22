@@ -7,6 +7,7 @@ vi.mock('@taskflow/database', () => ({
 }));
 
 vi.mock('@taskflow/observability', () => ({
+  collectProcessMetrics: vi.fn(),
   initializeTracing: vi.fn(),
   shutdownTracing: vi.fn(),
 }));

@@ -35,7 +35,9 @@ export const jobEvents = pgTable(
     toStatus: jobStatusEnum('to_status').notNull(),
 
     // Context
-    workerId: uuid('worker_id').references(() => workers.id),
+    workerId: uuid('worker_id').references(() => workers.id, {
+      onDelete: 'set null',
+    }),
     userId: uuid('user_id').references(() => users.id),
 
     // Timing

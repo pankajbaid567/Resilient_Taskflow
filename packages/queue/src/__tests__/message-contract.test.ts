@@ -31,6 +31,7 @@ const redis = vi.hoisted(() => ({
 
 vi.mock('../redis-client', () => ({
   getRedisClient: () => redis,
+  getBlockingRedisClient: () => redis,
 }));
 
 function envelope(

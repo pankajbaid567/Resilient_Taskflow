@@ -1,7 +1,11 @@
 import { apiConfig, observabilityConfig } from '@taskflow/config';
 import { closeConnection, initDatabase } from '@taskflow/database';
 import { logger } from '@taskflow/logger';
-import { initializeTracing, shutdownTracing } from '@taskflow/observability';
+import {
+  collectProcessMetrics,
+  initializeTracing,
+  shutdownTracing,
+} from '@taskflow/observability';
 import { closeRedisConnection, initRedis } from '@taskflow/queue';
 import { FastifyInstance } from 'fastify';
 
@@ -89,6 +93,8 @@ export function createApiRuntimeController(
   const start = async (): Promise<ApiRuntime> => {
     try {
       assertStartupActive();
+      // Node.js process metrics (CPU, memory, event-loop lag) for this process.
+      collectProcessMetrics();
       await dependencies.initTracing();
 
       assertStartupActive();

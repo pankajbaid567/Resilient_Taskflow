@@ -74,7 +74,7 @@ export type JobEventType =
   | 'timeout'
   | 'lease_acquired'
   | 'lease_expired'
-  | 'lease_renewed'
+  | 'lease_released'
   | 'attempt_started';
 
 /**
@@ -260,23 +260,6 @@ export function parseRedisJobMessage(value: unknown): RedisJobMessage {
 }
 
 /**
- * Kafka Job Event
- */
-export interface KafkaJobEvent {
-  schemaVersion: number;
-  eventType: JobEventType;
-  eventId: string;
-  timestamp: string;
-  jobId: string;
-  queue: string;
-  type: string;
-  workerId: string | null;
-  duration: number | null;
-  attempts: number;
-  metadata: Record<string, unknown>;
-}
-
-/**
  * Job Handler Context
  *
  * Additional context passed to job handlers.
@@ -432,7 +415,6 @@ export interface HealthCheck {
   checks: {
     postgres: boolean;
     redis: boolean;
-    kafka: boolean;
   };
 }
 
@@ -469,4 +451,66 @@ export interface PaginatedResponse<T> {
     hasNext: boolean;
     hasPrev: boolean;
   };
+}
+
+/**
+ * Retention Policy
+ *
+ * Configurable retention windows for independent lifecycle purging.
+ */
+export interface RetentionPolicy {
+  /** Maximum age in days for completed/terminal jobs (SUCCEEDED, CANCELLED, FAILED). Defaults to 30. */
+  jobsCompletedDays?: number;
+  /** Maximum age in days for job events. Defaults to 14. */
+  jobEventsDays?: number;
+  /** Maximum age in days for job execution attempts. Defaults to 14. */
+  jobAttemptsDays?: number;
+  /** Maximum age in days for dead letter job records. Defaults to 30. */
+  deadLettersDays?: number;
+  /** Maximum age in days for completed/failed outbox deliveries. Defaults to 7. */
+  deliveriesDays?: number;
+  /** Maximum age in days for stopped/failed workers without active leases. Defaults to 7. */
+  workersDays?: number;
+  /** Maximum age in hours for expired idempotency keys. Defaults to 24. */
+  idempotencyKeysHours?: number;
+  /** Maximum age in days for operational audit records. Defaults to 90. */
+  auditLogsDays?: number;
+  /** Approximate maximum length for Redis stream history. Defaults to 100,000. */
+  redisStreamMaxLen?: number;
+}
+
+/**
+ * Options for executing bounded retention batches.
+ */
+export interface RetentionBatchOptions {
+  /** Maximum number of records deleted per entity query batch. Defaults to 500. */
+  batchSize?: number;
+  /** Maximum number of batches to process per run. Defaults to 10. */
+  maxBatches?: number;
+}
+
+/**
+ * A retention step that failed. Steps are isolated: one failure is recorded
+ * here and the remaining steps still run.
+ */
+export interface RetentionStepError {
+  step: string;
+  message: string;
+}
+
+/**
+ * Report summarizing deleted records across authoritative tables and trimmed streams.
+ */
+export interface RetentionCleanupReport {
+  deletedJobs: number;
+  deletedJobEvents: number;
+  deletedJobAttempts: number;
+  deletedDeadLetters: number;
+  deletedJobDeliveries: number;
+  deletedWorkers: number;
+  deletedIdempotencyKeys: number;
+  deletedAuditLogs: number;
+  trimmedRedisEntries: Record<string, number>;
+  errors: RetentionStepError[];
+  completedAt: string;
 }

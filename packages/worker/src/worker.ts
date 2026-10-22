@@ -5,7 +5,9 @@ import {
   completeJobDelivery,
   completeCancellation,
   failJobDelivery,
+  JobCancellationRequestedError,
   registerWorker,
+  releaseJobDelivery,
   renewJobDeliveryLease,
   startJobAttempt,
   updateWorkerHeartbeat,
@@ -30,6 +32,7 @@ import {
 
 import { CancellationError, CancellationToken } from './cancellation-token';
 import { HandlerRegistry } from './handler-registry';
+import { workerMetrics, type DeadLetterReason } from './metrics';
 import { createWorkerConfig, type WorkerConfig } from './worker-config';
 
 export type WorkerState =
@@ -55,6 +58,16 @@ class HandlerTimeoutError extends Error {
     super(`Job timeout after ${timeoutMs}ms`);
     this.name = 'HandlerTimeoutError';
   }
+}
+
+/** Metric label for jobs whose type has no registered handler. */
+const UNREGISTERED_JOB_TYPE = 'unregistered';
+
+/** Why a terminal failure was dead-lettered, as a low-cardinality label. */
+function deadLetterReasonOf(error: unknown): DeadLetterReason {
+  if (error instanceof PermanentJobError) return 'permanent';
+  if (error instanceof HandlerTimeoutError) return 'timeout';
+  return 'max_attempts';
 }
 
 class HandlerInterruptedError extends Error {
@@ -83,6 +96,8 @@ export class Worker {
   private readonly logger: ReturnType<typeof createWorkerLogger>;
   private readonly activeJobs = new Map<string, ActiveJob>();
   private readonly activeMessages = new Set<string>();
+  /** Resolvers of poll loops waiting for a concurrency slot to free up. */
+  private slotWaiters: Array<() => void> = [];
   private readonly handlerPromises = new Set<Promise<void>>();
   private readonly rawHandlerPromises = new Set<Promise<unknown>>();
   private readonly unresolvedReclaims = new Map<string, number>();
@@ -179,11 +194,31 @@ export class Worker {
       this.logger.error('Could not persist STOPPING worker status', { error });
     });
 
-    // Stop lease ownership immediately. Cooperative handlers receive the
-    // signal, but a JavaScript promise cannot forcibly terminate arbitrary
-    // handler code or external effects already in progress.
+    // Phase 1 — drain. Polling has stopped, but leases keep renewing so
+    // in-flight handlers can finish and commit through the normal path.
+    // A reserve is kept for phase 2 so releases complete inside the budget.
+    const stopStartedAt = Date.now();
+    const releaseReserveMs = Math.min(
+      5_000,
+      Math.floor(this.config.shutdownTimeoutMs / 2)
+    );
+    const drainBudgetMs = this.config.shutdownTimeoutMs - releaseReserveMs;
+    if (this.activeJobs.size > 0 && drainBudgetMs > 0) {
+      let drainTimer: NodeJS.Timeout | undefined;
+      await Promise.race([
+        Promise.allSettled(Array.from(this.handlerPromises)),
+        new Promise<void>((resolve) => {
+          drainTimer = setTimeout(resolve, drainBudgetMs);
+        }),
+      ]);
+      if (drainTimer) clearTimeout(drainTimer);
+    }
+
+    // Phase 2 — interrupt whatever is still running. processMessage hands
+    // each owned lease back to the queue (refunding the attempt) and ACKs.
+    // Cooperative handlers receive the signal, but a JavaScript promise
+    // cannot forcibly terminate arbitrary handler code or external effects.
     for (const activeJob of this.activeJobs.values()) {
-      this.stopLeaseRenewal(activeJob);
       this.interruptActiveJob(activeJob, 'SHUTDOWN');
     }
 
@@ -201,7 +236,10 @@ export class Worker {
     const deadline = new Promise<false>((resolve) => {
       deadlineTimer = setTimeout(
         () => resolve(false),
-        this.config.shutdownTimeoutMs
+        Math.max(
+          1,
+          this.config.shutdownTimeoutMs - (Date.now() - stopStartedAt)
+        )
       );
     });
     const handlersStopped = await Promise.race([drained, deadline]).catch(
@@ -247,6 +285,7 @@ export class Worker {
             totalJobsSucceeded: this.stats.totalSucceeded,
             totalJobsFailed: this.stats.totalFailed,
           });
+          workerMetrics.heartbeat(this.config.workerId);
           if (worker?.status === WorkerStatus.STOPPING) {
             this.logger.info('Durable worker stop request observed');
             if (this.config.onStopRequested) {
@@ -291,7 +330,10 @@ export class Worker {
   private async pollOnce(): Promise<void> {
     let capacity = this.config.concurrency - this.activeMessages.size;
     if (capacity <= 0) {
-      await sleep(this.config.pollIntervalMs);
+      // Wake as soon as a handler settles. Sleeping a fixed interval here
+      // capped each worker at concurrency / pollIntervalMs jobs per second
+      // (20 / 250 ms = 80/s) however fast the handlers were.
+      await this.waitForFreeSlot(this.config.pollIntervalMs);
       return;
     }
 
@@ -321,6 +363,24 @@ export class Worker {
     this.dispatch(messages);
   }
 
+  private waitForFreeSlot(timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const done = (): void => {
+        clearTimeout(timer);
+        this.slotWaiters = this.slotWaiters.filter((wake) => wake !== done);
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      this.slotWaiters.push(done);
+    });
+  }
+
+  private notifySlotFreed(): void {
+    const waiters = this.slotWaiters;
+    this.slotWaiters = [];
+    for (const wake of waiters) wake();
+  }
+
   private dispatch(messages: ConsumedMessage[]): void {
     if (this.state !== 'RUNNING') return;
 
@@ -346,6 +406,7 @@ export class Worker {
             const releaseCapacity = () => {
               this.rawHandlerPromises.delete(raw);
               this.activeMessages.delete(deliveryKey);
+              this.notifySlotFreed();
             };
             // Use both settlement branches instead of an ignored finally()
             // promise, which would itself reject when the handler rejected.
@@ -360,6 +421,7 @@ export class Worker {
         } finally {
           if (!rawHandlerStarted) {
             this.activeMessages.delete(deliveryKey);
+            this.notifySlotFreed();
           }
         }
       })();
@@ -391,11 +453,25 @@ export class Worker {
       this.config.leaseDurationMs
     );
 
-    // stop() can race an in-progress database call. Do not start a handler or
-    // renew a newly acquired lease after shutdown has begun; leave the Redis
-    // entry pending and let the lease expire for a replacement worker.
+    // stop() can race an in-progress database call. Do not start a handler
+    // after shutdown has begun; hand a newly acquired lease straight back so
+    // the job neither waits for lease expiry nor loses an attempt.
     if (this.stopRequested) {
+      if (lease.kind === 'ACQUIRED' && lease.job.leaseId) {
+        await this.releaseForShutdown(jobId, lease.job.leaseId, message);
+      }
       return;
+    }
+
+    if (
+      lease.kind === 'NOT_FOUND' ||
+      lease.kind === 'NOT_READY' ||
+      lease.kind === 'BUSY'
+    ) {
+      workerMetrics.leaseNotAcquired(
+        this.config.workerId,
+        lease.kind.toLowerCase()
+      );
     }
 
     if (lease.kind === 'TERMINAL') {
@@ -477,18 +553,34 @@ export class Worker {
       cancellationToken: new CancellationToken(),
     };
     this.activeJobs.set(jobId, activeJob);
+    workerMetrics.runningJobs(this.config.workerId, this.activeJobs.size);
     this.startLeaseRenewal(activeJob);
     const startedAt = Date.now();
+    // Job types are caller-supplied. Only registered handler names may become
+    // a metric label, or any client could create unbounded time series.
+    const jobType = this.handlers.has(lease.job.type)
+      ? lease.job.type
+      : UNREGISTERED_JOB_TYPE;
 
     try {
       // This insert is the exact handler-execution boundary. If it cannot be
       // persisted, no handler or external effect is invoked.
       await startJobAttempt(jobId, this.config.workerId, leaseId);
+      workerMetrics.jobStarted(message.queue, jobType, this.config.workerId);
+      workerMetrics.jobWaited(
+        message.queue,
+        lease.job.priority,
+        startedAt - new Date(lease.job.scheduledAt).getTime()
+      );
 
       if (activeJob.interruptionReason === 'USER_CANCELLATION') {
         throw new CancellationError(
           'Job cancellation requested before execution'
         );
+      }
+      if (activeJob.interruptionReason === 'SHUTDOWN') {
+        await this.releaseForShutdown(jobId, leaseId, message);
+        return;
       }
       if (activeJob.interruptionReason) {
         return;
@@ -506,14 +598,18 @@ export class Worker {
         }
         result = normalizeResult(rawResult);
       } catch (error) {
-        // A non-user interruption relinquishes this delivery without changing
-        // its database state or acknowledging Redis. Recovery is fenced by the
-        // current lease expiry.
+        // Shutdown hands the lease back without consuming an attempt. Lease
+        // loss/renewal failure relinquishes the delivery without changing
+        // database state or acknowledging Redis; recovery is then fenced by
+        // the current lease expiry.
         if (
           error instanceof HandlerInterruptedError ||
           (activeJob.interruptionReason &&
             activeJob.interruptionReason !== 'USER_CANCELLATION')
         ) {
+          if (activeJob.interruptionReason === 'SHUTDOWN') {
+            await this.releaseForShutdown(jobId, leaseId, message);
+          }
           return;
         }
 
@@ -523,18 +619,43 @@ export class Worker {
           throw new CancellationError('Job cancellation requested');
         }
 
-        const failure = await failJobDelivery(
-          jobId,
-          this.config.workerId,
-          leaseId,
-          activeJob.timeoutError ?? error,
-          {
-            baseDelayMs: this.config.retryBaseDelayMs,
-            maxDelayMs: this.config.retryMaxDelayMs,
+        let failure: Awaited<ReturnType<typeof failJobDelivery>>;
+        try {
+          failure = await failJobDelivery(
+            jobId,
+            this.config.workerId,
+            leaseId,
+            activeJob.timeoutError ?? error,
+            {
+              baseDelayMs: this.config.retryBaseDelayMs,
+              maxDelayMs: this.config.retryMaxDelayMs,
+            }
+          );
+        } catch (persistError) {
+          // A cancel request landed before this worker observed it. Do not
+          // retry a job the user cancelled; complete the cancellation instead.
+          if (persistError instanceof JobCancellationRequestedError) {
+            activeJob.interruptionReason ??= 'USER_CANCELLATION';
+            throw new CancellationError('Job cancellation requested');
           }
-        );
+          throw persistError;
+        }
 
         this.updateStats(false, Date.now() - startedAt);
+        const failedError = activeJob.timeoutError ?? error;
+        if (activeJob.timeoutError) {
+          workerMetrics.jobTimedOut(message.queue, jobType);
+        }
+        workerMetrics.jobFailed({
+          queue: message.queue,
+          type: jobType,
+          errorType:
+            failedError instanceof Error ? failedError.name : 'NonErrorThrown',
+          durationMs: Date.now() - startedAt,
+          attempt: failure.job.attempts,
+          terminal: failure.terminal,
+          deadLetterReason: deadLetterReasonOf(failedError),
+        });
         if (failure.terminal) {
           if (failure.job.status !== JobStatus.DEAD_LETTERED) {
             throw new Error(
@@ -569,7 +690,13 @@ export class Worker {
       if (activeJob.interruptionReason === 'USER_CANCELLATION') {
         throw new CancellationError('Job cancellation requested');
       }
-      if (activeJob.interruptionReason) {
+      // A handler that finished during shutdown still owns a live lease, so
+      // its result is committed rather than discarded. Only an unowned lease
+      // forbids completion.
+      if (
+        activeJob.interruptionReason &&
+        activeJob.interruptionReason !== 'SHUTDOWN'
+      ) {
         return;
       }
 
@@ -585,6 +712,11 @@ export class Worker {
         );
       }
       this.updateStats(true, Date.now() - startedAt);
+      workerMetrics.jobSucceeded(
+        message.queue,
+        jobType,
+        Date.now() - startedAt
+      );
       await this.config.afterTerminalPersist?.({
         jobId,
         status: completed.status as JobStatus,
@@ -602,6 +734,7 @@ export class Worker {
         try {
           await completeCancellation(jobId, this.config.workerId, leaseId);
           this.logger.info('Job cancelled', { jobId });
+          workerMetrics.jobCancelled(message.queue, jobType);
         } catch (persistError) {
           // If we lost the lease (e.g., it expired during handler teardown),
           // leave the message pending. The replacement worker will see CANCELLED
@@ -619,6 +752,7 @@ export class Worker {
     } finally {
       this.stopLeaseRenewal(activeJob);
       this.activeJobs.delete(jobId);
+      workerMetrics.runningJobs(this.config.workerId, this.activeJobs.size);
     }
   }
 
@@ -713,6 +847,39 @@ export class Worker {
     }
   }
 
+  /**
+   * Return an owned lease to the queue during shutdown, then ACK the Redis
+   * entry. Failures are logged, not thrown: lease-expiry recovery remains the
+   * fallback, so the worst case is the pre-existing delayed redelivery.
+   */
+  private async releaseForShutdown(
+    jobId: string,
+    leaseId: string,
+    message: ConsumedMessage
+  ): Promise<void> {
+    try {
+      const released = await releaseJobDelivery(
+        jobId,
+        this.config.workerId,
+        leaseId,
+        'worker_shutdown'
+      );
+      if (!released) {
+        this.logger.warn('Shutdown release skipped; lease no longer owned', {
+          jobId,
+        });
+        return;
+      }
+      await acknowledgeMessage(message.queue, message.messageId);
+      this.logger.info('Released job lease for shutdown', { jobId });
+    } catch (error) {
+      this.logger.error('Could not release job lease during shutdown', {
+        jobId,
+        error,
+      });
+    }
+  }
+
   private startLeaseRenewal(activeJob: ActiveJob): void {
     let stopped = false;
     activeJob.stopRenewal = () => {
@@ -724,7 +891,10 @@ export class Worker {
     };
 
     const scheduleNext = () => {
-      if (stopped || this.state !== 'RUNNING') return;
+      // Keep renewing while STOPPING so draining handlers retain ownership.
+      if (stopped || (this.state !== 'RUNNING' && this.state !== 'STOPPING')) {
+        return;
+      }
       activeJob.leaseRenewalTimer = setTimeout(async () => {
         if (stopped) return;
         try {
@@ -741,6 +911,7 @@ export class Worker {
             return;
           }
 
+          workerMetrics.leaseRenewed(this.config.workerId);
           if (renewed.status === JobStatus.CANCEL_REQUESTED) {
             this.logger.info('Cancellation detected on lease renewal', {
               jobId: activeJob.jobId,

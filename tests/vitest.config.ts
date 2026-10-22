@@ -52,6 +52,12 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // More specific alias first: the worker imports the metrics module by its
+      // built path to avoid loading the OpenTelemetry SDK.
+      '@taskflow/observability/dist/metrics': path.resolve(
+        __dirname,
+        '../packages/observability/src/metrics.ts'
+      ),
       '@taskflow/config': path.resolve(__dirname, '../packages/config/src'),
       '@taskflow/database': path.resolve(__dirname, '../packages/database/src'),
       '@taskflow/queue': path.resolve(__dirname, '../packages/queue/src'),
@@ -59,7 +65,6 @@ export default defineConfig({
       '@taskflow/logger': path.resolve(__dirname, '../packages/logger/src'),
       '@taskflow/worker': path.resolve(__dirname, '../packages/worker/src'),
       '@taskflow/retry': path.resolve(__dirname, '../packages/retry/src'),
-      '@taskflow/events': path.resolve(__dirname, '../packages/events/src'),
       '@taskflow/observability': path.resolve(
         __dirname,
         '../packages/observability/src'

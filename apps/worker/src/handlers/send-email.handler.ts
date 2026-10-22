@@ -7,6 +7,7 @@
 
 import { createLogger } from '@taskflow/logger';
 import type { JobHandlerContext } from '@taskflow/types';
+import { PermanentJobError } from '@taskflow/worker';
 
 const logger = createLogger({ component: 'SendEmailHandler' });
 
@@ -103,21 +104,33 @@ export async function sendEmailHandler(
  */
 function validateEmailPayload(payload: Record<string, unknown>): EmailPayload {
   if (!payload.to || typeof payload.to !== 'string') {
-    throw new Error('Email "to" field is required');
+    throw new PermanentJobError(
+      'Email "to" field is required',
+      'INVALID_PAYLOAD'
+    );
   }
 
   if (!payload.subject || typeof payload.subject !== 'string') {
-    throw new Error('Email "subject" field is required');
+    throw new PermanentJobError(
+      'Email "subject" field is required',
+      'INVALID_PAYLOAD'
+    );
   }
 
   if (!payload.body || typeof payload.body !== 'string') {
-    throw new Error('Email "body" field is required');
+    throw new PermanentJobError(
+      'Email "body" field is required',
+      'INVALID_PAYLOAD'
+    );
   }
 
   // Basic email validation
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(payload.to)) {
-    throw new Error('Invalid email address format');
+    throw new PermanentJobError(
+      'Invalid email address format',
+      'INVALID_PAYLOAD'
+    );
   }
 
   return payload as unknown as EmailPayload;

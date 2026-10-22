@@ -45,11 +45,6 @@ const envSchema = z.object({
   REDIS_MAX_RETRIES: z.coerce.number().int().nonnegative().default(3),
   REDIS_RETRY_DELAY_MS: z.coerce.number().int().positive().default(1000),
 
-  // Kafka/Redpanda
-  KAFKA_BROKERS: z.string().default('localhost:9092'),
-  KAFKA_CLIENT_ID: z.string().default('taskflow'),
-  KAFKA_GROUP_ID: z.string().default('taskflow-workers'),
-
   // Worker
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(10),
   WORKER_QUEUES: z.string().default('default'),
@@ -67,8 +62,16 @@ const envSchema = z.object({
   JOB_RETRY_MAX_DELAY_MS: z.coerce.number().int().positive().default(60000),
 
   // Rate Limiting
-  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
-  RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(100),
+  // Requests allowed per user per minute (per IP for /metrics). Each class has
+  // its own budget; defaults match the documented limits.
+  RATE_LIMIT_JOB_SUBMISSION_PER_MIN: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(50),
+  RATE_LIMIT_MUTATION_PER_MIN: z.coerce.number().int().positive().default(50),
+  RATE_LIMIT_READ_PER_MIN: z.coerce.number().int().positive().default(200),
+  RATE_LIMIT_METRICS_PER_MIN: z.coerce.number().int().positive().default(1000),
 
   // Security
   JWT_SECRET: z.string().min(32),
@@ -77,11 +80,42 @@ const envSchema = z.object({
   // Observability
   ENABLE_METRICS: environmentBoolean.default(true),
   METRICS_PORT: z.coerce.number().int().positive().default(9090),
+  // Worker /metrics endpoint. Unauthenticated, so it listens on loopback by
+  // default; bind 0.0.0.0 only on a private network (for example a Docker
+  // network that is not published). 0 disables it.
+  WORKER_METRICS_PORT: z.coerce.number().int().min(0).max(65535).default(9464),
+  WORKER_METRICS_HOST: z.string().min(1).default('127.0.0.1'),
   ENABLE_TRACING: environmentBoolean.default(false),
   OTEL_EXPORTER_OTLP_ENDPOINT: z
     .string()
     .url()
     .default('http://localhost:4318'),
+
+  // Retention & Lifecycle Cleanup
+  RETENTION_JOBS_DAYS: z.coerce.number().int().positive().default(30),
+  RETENTION_EVENTS_DAYS: z.coerce.number().int().positive().default(14),
+  RETENTION_ATTEMPTS_DAYS: z.coerce.number().int().positive().default(14),
+  RETENTION_DEAD_LETTERS_DAYS: z.coerce.number().int().positive().default(30),
+  RETENTION_DELIVERIES_DAYS: z.coerce.number().int().positive().default(7),
+  RETENTION_WORKERS_DAYS: z.coerce.number().int().positive().default(7),
+  RETENTION_IDEMPOTENCY_KEYS_HOURS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(24),
+  RETENTION_AUDIT_LOGS_DAYS: z.coerce.number().int().positive().default(90),
+  RETENTION_REDIS_STREAM_MAX_LEN: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(100000),
+  RETENTION_BATCH_SIZE: z.coerce.number().int().positive().default(500),
+  // Dispatch: how many entries the dispatcher keeps in flight in each queue's
+  // Redis stream. The rest of the backlog stays in PostgreSQL, where it is
+  // ordered by priority. 0 disables the window (publish everything at once).
+  DISPATCH_MAX_IN_FLIGHT_PER_QUEUE: z.coerce.number().int().min(0).default(200),
+  RETENTION_ENABLED: environmentBoolean.default(true),
+  RETENTION_INTERVAL_MS: z.coerce.number().int().min(1000).default(3_600_000),
 });
 
 /**
@@ -148,15 +182,6 @@ export const apiConfig = {
 } as const;
 
 /**
- * Kafka Configuration
- */
-export const kafkaConfig = {
-  brokers: env.KAFKA_BROKERS.split(','),
-  clientId: env.KAFKA_CLIENT_ID,
-  groupId: env.KAFKA_GROUP_ID,
-} as const;
-
-/**
  * Worker Configuration
  */
 export const workerConfig = {
@@ -180,8 +205,11 @@ export const jobConfig = {
  * Rate Limiting Configuration
  */
 export const rateLimitConfig = {
-  windowMs: env.RATE_LIMIT_WINDOW_MS,
-  maxRequests: env.RATE_LIMIT_MAX_REQUESTS,
+  windowSeconds: 60,
+  jobSubmissionPerWindow: env.RATE_LIMIT_JOB_SUBMISSION_PER_MIN,
+  mutationPerWindow: env.RATE_LIMIT_MUTATION_PER_MIN,
+  readPerWindow: env.RATE_LIMIT_READ_PER_MIN,
+  metricsPerWindow: env.RATE_LIMIT_METRICS_PER_MIN,
 } as const;
 
 /**
@@ -198,8 +226,35 @@ export const securityConfig = {
 export const observabilityConfig = {
   enableMetrics: env.ENABLE_METRICS,
   metricsPort: env.METRICS_PORT,
+  workerMetricsPort: env.WORKER_METRICS_PORT,
+  workerMetricsHost: env.WORKER_METRICS_HOST,
   enableTracing: env.ENABLE_TRACING,
   otelEndpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT,
+} as const;
+
+/**
+ * Dispatch Configuration
+ */
+export const dispatchConfig = {
+  maxInFlightPerQueue: env.DISPATCH_MAX_IN_FLIGHT_PER_QUEUE,
+} as const;
+
+/**
+ * Retention Configuration
+ */
+export const retentionConfig = {
+  jobsCompletedDays: env.RETENTION_JOBS_DAYS,
+  jobEventsDays: env.RETENTION_EVENTS_DAYS,
+  jobAttemptsDays: env.RETENTION_ATTEMPTS_DAYS,
+  deadLettersDays: env.RETENTION_DEAD_LETTERS_DAYS,
+  deliveriesDays: env.RETENTION_DELIVERIES_DAYS,
+  workersDays: env.RETENTION_WORKERS_DAYS,
+  idempotencyKeysHours: env.RETENTION_IDEMPOTENCY_KEYS_HOURS,
+  auditLogsDays: env.RETENTION_AUDIT_LOGS_DAYS,
+  redisStreamMaxLen: env.RETENTION_REDIS_STREAM_MAX_LEN,
+  batchSize: env.RETENTION_BATCH_SIZE,
+  enabled: env.RETENTION_ENABLED,
+  intervalMs: env.RETENTION_INTERVAL_MS,
 } as const;
 
 /**

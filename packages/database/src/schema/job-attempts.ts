@@ -31,7 +31,9 @@ export const jobAttempts = pgTable(
     attemptNumber: integer('attempt_number').notNull(),
 
     // Execution
-    workerId: uuid('worker_id').references(() => workers.id),
+    workerId: uuid('worker_id').references(() => workers.id, {
+      onDelete: 'set null',
+    }),
     startedAt: timestamp('started_at', { withTimezone: true })
       .notNull()
       .defaultNow(),

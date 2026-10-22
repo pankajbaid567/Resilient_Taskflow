@@ -9,6 +9,7 @@ import Fastify, {
   FastifyRequest,
 } from 'fastify';
 
+import { recordHttpRequest } from './metrics';
 import { authenticate, requireAdmin } from './middleware/auth';
 import { errorHandler } from './middleware/error-handler';
 import { extractIdempotencyKey } from './middleware/idempotency';
@@ -181,6 +182,7 @@ export async function createApp(
 
   // Custom middleware
   app.addHook('onRequest', requestLogger);
+  app.addHook('onResponse', recordHttpRequest);
 
   // Error handler
   app.setErrorHandler(errorHandler);

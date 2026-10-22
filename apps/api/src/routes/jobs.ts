@@ -20,6 +20,8 @@ import {
 import { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
+import { recordJobSubmitted } from '../metrics';
+
 const logger = createLogger({ component: 'JobRoutes' });
 
 const jobIdParamsSchema = z.object({ id: z.string().uuid() }).strict();
@@ -106,6 +108,10 @@ export function jobRoutes(app: FastifyInstance): Promise<void> {
     } else {
       const job = await createJob(jobData);
       result = { job, queueName: queue.name };
+    }
+
+    if (disposition === 'created') {
+      recordJobSubmitted(result.queueName, result.job.priority);
     }
 
     logger.info(

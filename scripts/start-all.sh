@@ -24,8 +24,8 @@ echo "2. Starting infrastructure services..."
 cd "$(dirname "$0")/.."
 
 # Remove dashboard from docker-compose temporarily
-echo "   Starting PostgreSQL, Redis, Redpanda, Prometheus, Grafana..."
-docker-compose up -d postgres redis redpanda prometheus grafana 2>&1 | grep -v "WARNING"
+echo "   Starting PostgreSQL, Redis, Prometheus, Grafana..."
+docker compose up -d postgres redis prometheus grafana 2>&1 | grep -v "WARNING"
 
 echo "   Waiting for services to be healthy..."
 sleep 10
@@ -48,13 +48,6 @@ else
     echo "   ✗ Redis is not ready"
 fi
 
-# Check Redpanda
-if docker exec taskflow-redpanda rpk cluster info > /dev/null 2>&1; then
-    echo "   ✓ Redpanda is ready"
-else
-    echo "   ⚠ Redpanda might still be starting..."
-fi
-
 echo ""
 echo "4. Running database migrations..."
 pnpm db:migrate
@@ -64,7 +57,6 @@ echo "5. Infrastructure ready!"
 echo ""
 echo "   PostgreSQL: localhost:5432"
 echo "   Redis:      localhost:6379"
-echo "   Redpanda:   localhost:19092"
 echo "   Prometheus: http://localhost:9091"
 echo "   Grafana:    http://localhost:3002 (admin/admin)"
 echo ""

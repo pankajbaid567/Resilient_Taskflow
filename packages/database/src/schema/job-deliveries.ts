@@ -3,6 +3,7 @@ import {
   index,
   integer,
   pgTable,
+  smallint,
   text,
   timestamp,
   unique,
@@ -56,6 +57,11 @@ export const jobDeliveries = pgTable(
     claimedBy: text('claimed_by'),
     claimedAt: timestamp('claimed_at', { withTimezone: true }),
 
+    // Dispatch priority: 4 CRITICAL .. 1 LOW, computed by the database
+    // function job_priority_rank() from the job's priority. Higher rows are
+    // claimed first, so backlog order honours priority (migration 0010).
+    priorityRank: smallint('priority_rank').notNull().default(2),
+
     // Failure details
     error: text('error'),
     retryCount: integer('retry_count').notNull().default(0),
@@ -72,6 +78,9 @@ export const jobDeliveries = pgTable(
     pendingIdx: index('idx_job_deliveries_pending')
       .on(table.availableAt, table.createdAt)
       .where(sql`${table.status} = 'PENDING'`),
+    // idx_job_deliveries_pending_priority (queue_name, priority_rank DESC,
+    // available_at, created_at) WHERE status = 'PENDING' is migration-owned
+    // (0010): drizzle-kit 0.20 cannot express per-column ordering.
     publishedJobIdx: index('idx_job_deliveries_published_job')
       .on(table.jobId)
       .where(sql`${table.status} = 'PUBLISHED'`),

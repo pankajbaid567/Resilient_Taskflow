@@ -11,6 +11,8 @@ import {
   acquireJobForDelivery,
   completeJobDelivery,
   failJobDelivery,
+  JobCancellationRequestedError,
+  releaseJobDelivery,
   renewJobDeliveryLease,
   startJobAttempt,
 } from '../repositories/delivery.repository';
@@ -23,7 +25,9 @@ import {
   createJobWithIdempotency,
   getJobCounts,
   IdempotencyConflictError,
+  promoteDueScheduledJobs,
 } from '../repositories/job.repository';
+import { getMetricsSnapshot } from '../repositories/metrics.repository';
 
 const runIntegration =
   process.env.TASKFLOW_DATABASE_INTEGRATION === 'true'
@@ -106,15 +110,15 @@ runIntegration.sequential('delivery repository PostgreSQL contract', () => {
       WHERE job_id = ${created.id}
       ORDER BY event_sequence
     `;
+    // Lease renewal is a heartbeat, not a lifecycle event.
     expect(events.map((event) => event.event_sequence)).toEqual([
-      1, 2, 3, 4, 5, 6,
+      1, 2, 3, 4, 5,
     ]);
     expect(events.map((event) => event.event_type)).toEqual([
       'created',
       'queued',
       'lease_acquired',
       'attempt_started',
-      'lease_renewed',
       'completed',
     ]);
 
@@ -456,6 +460,321 @@ runIntegration.sequential('delivery repository PostgreSQL contract', () => {
       WHERE user_id = ${userId} AND idempotency_key = 'reusable-key'
     `;
     expect(remaining?.count).toBe(0);
+  });
+
+  it('claims the highest priority first, then oldest, and can scope a claim to one queue', async () => {
+    const otherQueueId = '20000000-0000-4000-8000-000000000002';
+    await sql`
+      INSERT INTO queues (id, name, display_name)
+      VALUES (${otherQueueId}, 'other', 'Other')
+    `;
+    const create = (
+      priority: string,
+      targetQueue = queueId
+    ): ReturnType<typeof createJob> =>
+      createJob({
+        userId,
+        queueId: targetQueue,
+        type: `priority-${priority}`,
+        payload: {},
+        maxAttempts: 1,
+        priority: priority as 'LOW',
+      });
+
+    // Created oldest-first; priority must win over age.
+    const low1 = await create('LOW');
+    const low2 = await create('LOW');
+    const normal = await create('NORMAL');
+    const critical = await create('CRITICAL');
+    const high = await create('HIGH');
+    const otherCritical = await create('CRITICAL', otherQueueId);
+
+    const ranks = await sql<Array<{ job_id: string; priority_rank: number }>>`
+      SELECT job_id, priority_rank FROM job_deliveries
+    `;
+    const rankOf = (jobId: string): number | undefined =>
+      ranks.find((row) => row.job_id === jobId)?.priority_rank;
+    expect([
+      rankOf(critical.id),
+      rankOf(high.id),
+      rankOf(normal.id),
+      rankOf(low1.id),
+    ]).toEqual([4, 3, 2, 1]);
+
+    const scoped = await claimPendingDeliveries(
+      'dispatcher-scoped',
+      10,
+      30_000,
+      'default'
+    );
+    expect(scoped.map(({ jobId }) => jobId)).toEqual([
+      critical.id,
+      high.id,
+      normal.id,
+      low1.id,
+      low2.id,
+    ]);
+    expect(scoped.map(({ jobId }) => jobId)).not.toContain(otherCritical.id);
+
+    // The other queue's row was untouched by the scoped claim.
+    const rest = await claimPendingDeliveries('dispatcher-rest', 10, 30_000);
+    expect(rest.map(({ jobId }) => jobId)).toEqual([otherCritical.id]);
+  });
+
+  it('gives a retry successor the same priority as its job', async () => {
+    const created = await createJob({
+      userId,
+      queueId,
+      type: 'priority-retry',
+      payload: {},
+      maxAttempts: 3,
+      priority: 'HIGH',
+    });
+    const acquired = await acquireJobForDelivery(
+      created.id,
+      workerOneId,
+      5_000
+    );
+    if (acquired.kind !== 'ACQUIRED') throw new Error('expected lease');
+    await startJobAttempt(created.id, workerOneId, acquired.job.leaseId!);
+
+    const outcome = await failJobDelivery(
+      created.id,
+      workerOneId,
+      acquired.job.leaseId!,
+      new Error('transient'),
+      { baseDelayMs: 100, maxDelayMs: 1_000 }
+    );
+
+    expect(outcome.terminal).toBe(false);
+    const [successor] = await sql<Array<{ priority_rank: number }>>`
+      SELECT priority_rank FROM job_deliveries
+      WHERE job_id = ${created.id} AND attempt = 2
+    `;
+    expect(successor?.priority_rank).toBe(3);
+  });
+
+  it('releases an owned lease on shutdown without consuming the attempt budget', async () => {
+    const created = await createQueuedJob(1);
+    await sql`
+      UPDATE job_deliveries
+      SET status = 'PUBLISHED', redis_message_id = '1-0',
+          published_at = clock_timestamp()
+      WHERE job_id = ${created.id}
+    `;
+    const acquired = await acquireJobForDelivery(
+      created.id,
+      workerOneId,
+      5_000
+    );
+    expect(acquired.kind).toBe('ACQUIRED');
+    if (acquired.kind !== 'ACQUIRED') return;
+    await startJobAttempt(created.id, workerOneId, acquired.job.leaseId!);
+
+    // A stale lease ID cannot release someone else's ownership.
+    await expect(
+      releaseJobDelivery(created.id, workerOneId, crypto.randomUUID())
+    ).resolves.toBeNull();
+
+    const released = await releaseJobDelivery(
+      created.id,
+      workerOneId,
+      acquired.job.leaseId!
+    );
+    expect(released).toMatchObject({
+      status: JobStatus.QUEUED,
+      attempts: 0,
+      leaseId: null,
+      workerId: null,
+      startedAt: null,
+    });
+
+    const [state] = await sql<
+      Array<{ attempt_rows: number; delivery_status: string; event: string }>
+    >`
+      SELECT
+        (SELECT count(*)::integer FROM job_attempts WHERE job_id = ${created.id}) AS attempt_rows,
+        (SELECT status FROM job_deliveries WHERE job_id = ${created.id} AND attempt = 1) AS delivery_status,
+        (SELECT event_type FROM job_events WHERE job_id = ${created.id}
+          ORDER BY event_sequence DESC LIMIT 1) AS event
+    `;
+    expect(state).toEqual({
+      attempt_rows: 0,
+      delivery_status: 'PENDING',
+      event: 'lease_released',
+    });
+
+    // maxAttempts=1: the refunded job is still executable, not stranded.
+    const again = await acquireJobForDelivery(created.id, workerTwoId, 5_000);
+    expect(again.kind).toBe('ACQUIRED');
+  });
+
+  it('lets a result win over an unobserved cancel request, and cancels instead of retrying a failure', async () => {
+    const completing = await createQueuedJob(3);
+    const failing = await createQueuedJob(3);
+    const leases: Record<string, string> = {};
+    for (const job of [completing, failing]) {
+      const acquired = await acquireJobForDelivery(job.id, workerOneId, 5_000);
+      if (acquired.kind !== 'ACQUIRED') throw new Error('expected lease');
+      leases[job.id] = acquired.job.leaseId!;
+      await startJobAttempt(job.id, workerOneId, leases[job.id]!);
+      await sql`UPDATE jobs SET status = 'CANCEL_REQUESTED' WHERE id = ${job.id}`;
+    }
+
+    const completed = await completeJobDelivery(
+      completing.id,
+      workerOneId,
+      leases[completing.id]!,
+      { done: true }
+    );
+    expect(completed.status).toBe(JobStatus.SUCCEEDED);
+
+    await expect(
+      failJobDelivery(
+        failing.id,
+        workerOneId,
+        leases[failing.id]!,
+        new Error('transient'),
+        { baseDelayMs: 100, maxDelayMs: 1_000 }
+      )
+    ).rejects.toBeInstanceOf(JobCancellationRequestedError);
+    const [unchanged] = await sql<
+      Array<{ status: string; successors: number }>
+    >`
+      SELECT status,
+        (SELECT count(*)::integer FROM job_deliveries
+          WHERE job_id = ${failing.id} AND attempt > 1) AS successors
+      FROM jobs WHERE id = ${failing.id}
+    `;
+    expect(unchanged).toEqual({ status: 'CANCEL_REQUESTED', successors: 0 });
+  });
+
+  it('gives concurrent schedulers disjoint due jobs, oldest first, on the database clock', async () => {
+    const due = [];
+    for (let i = 0; i < 20; i += 1) {
+      due.push(
+        await createJob({
+          userId,
+          queueId,
+          type: 'scheduled-contract-test',
+          payload: { i },
+          maxAttempts: 1,
+          scheduledAt: new Date(Date.now() + 60_000),
+        })
+      );
+    }
+    await sql`
+      UPDATE jobs
+      SET scheduled_at = clock_timestamp() - (interval '1 second' * (100 - (payload->>'i')::int))
+      WHERE type = 'scheduled-contract-test'
+    `;
+    // One job stays in the future and must not be promoted.
+    const future = await createJob({
+      userId,
+      queueId,
+      type: 'future-contract-test',
+      payload: {},
+      maxAttempts: 1,
+      scheduledAt: new Date(Date.now() + 3_600_000),
+    });
+
+    const batches = await Promise.all(
+      Array.from({ length: 4 }, () => promoteDueScheduledJobs(10))
+    );
+    const promotedIds = batches.flatMap((b) => b.promoted.map(({ id }) => id));
+    expect(batches.flatMap((b) => b.failed)).toEqual([]);
+    expect(promotedIds).toHaveLength(20);
+    expect(new Set(promotedIds).size).toBe(20);
+    expect(promotedIds).not.toContain(future.id);
+
+    const [counts] = await sql<Array<{ queued: number; deliveries: number }>>`
+      SELECT
+        count(*) FILTER (WHERE status = 'QUEUED')::integer AS queued,
+        (SELECT count(*)::integer FROM job_deliveries
+          WHERE job_id IN (SELECT id FROM jobs WHERE type = 'scheduled-contract-test')) AS deliveries
+      FROM jobs WHERE type = 'scheduled-contract-test'
+    `;
+    expect(counts).toEqual({ queued: 20, deliveries: 20 });
+    expect(due).toHaveLength(20);
+  });
+
+  it('reports per-queue job counts, a priority backlog with its age, and only live workers', async () => {
+    const otherQueueId = '20000000-0000-4000-8000-000000000003';
+    await sql`
+      INSERT INTO queues (id, name, display_name)
+      VALUES (${otherQueueId}, 'other', 'Other')
+    `;
+    const make = (
+      priority: string,
+      targetQueue = queueId
+    ): ReturnType<typeof createJob> =>
+      createJob({
+        userId,
+        queueId: targetQueue,
+        type: 'snapshot',
+        payload: {},
+        maxAttempts: 1,
+        priority: priority as 'LOW',
+      });
+    await make('HIGH');
+    await make('HIGH');
+    await make('LOW');
+    await make('NORMAL', otherQueueId);
+    // Age the HIGH backlog so the oldest-age figure is checkable.
+    await sql`
+      UPDATE jobs SET scheduled_at = clock_timestamp() - interval '90 seconds'
+      WHERE priority = 'HIGH'
+    `;
+
+    // workerOne: heartbeating. workerTwo: ACTIVE but silent for 10 minutes
+    // (a crashed process). A third worker has stopped.
+    // workerOne serves two queues; it must still be counted once in the total.
+    await sql`
+      UPDATE workers
+      SET last_heartbeat_at = clock_timestamp(), queues = ARRAY['default', 'other']
+      WHERE id = ${workerOneId}
+    `;
+    await sql`UPDATE workers SET last_heartbeat_at = clock_timestamp() - interval '10 minutes' WHERE id = ${workerTwoId}`;
+    await sql`
+      INSERT INTO workers (worker_name, hostname, process_id, queues, status, last_heartbeat_at)
+      VALUES ('stopped-worker', 'localhost', 3, ARRAY['default'], 'STOPPED', clock_timestamp())
+    `;
+
+    const snapshot = await getMetricsSnapshot();
+
+    expect(snapshot.jobs).toEqual(
+      expect.arrayContaining([
+        { queue: 'default', status: 'QUEUED', count: 3 },
+        { queue: 'other', status: 'QUEUED', count: 1 },
+      ])
+    );
+
+    const high = snapshot.backlog.find(
+      (row) => row.queue === 'default' && row.priority === 'HIGH'
+    );
+    expect(high?.depth).toBe(2);
+    expect(high?.oldestAgeSeconds).toBeGreaterThanOrEqual(89);
+    expect(high?.oldestAgeSeconds).toBeLessThan(120);
+    expect(
+      snapshot.backlog.find(
+        (row) => row.queue === 'default' && row.priority === 'LOW'
+      )?.depth
+    ).toBe(1);
+
+    // Only the heartbeating worker counts: not the silent one, not the stopped one.
+    expect(snapshot.liveWorkers).toHaveLength(2);
+    expect(snapshot.liveWorkers).toEqual(
+      expect.arrayContaining([
+        { queue: 'default', workers: 1 },
+        { queue: 'other', workers: 1 },
+      ])
+    );
+    // One worker serving two queues is still one worker.
+    expect(snapshot.liveWorkerTotal).toBe(1);
+
+    await expect(getMetricsSnapshot({ workerStaleAfterMs: 0 })).rejects.toThrow(
+      RangeError
+    );
   });
 
   it('authenticates only a live hashed key owned by an active user', async () => {

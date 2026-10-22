@@ -152,10 +152,6 @@ async function main() {
         `   ✓ Redis: ${health.redis ? 'connected' : 'disconnected'}`,
         'green'
       );
-      print(
-        `   ✓ Kafka: ${health.kafka ? 'connected' : 'disconnected'}`,
-        'green'
-      );
     } else {
       print('   ✗ API is not healthy', 'red');
       return;

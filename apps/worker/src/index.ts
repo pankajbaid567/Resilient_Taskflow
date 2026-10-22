@@ -12,10 +12,14 @@ import {
   createWorker,
   createDispatcher,
   createScheduler,
+  createRetentionScheduler,
+  startMetricsServer,
   type Worker,
   type WorkerConfig,
   type Dispatcher,
   type Scheduler,
+  type RetentionScheduler,
+  type MetricsServer,
 } from '@taskflow/worker';
 
 import { registerHandlers } from './handlers';
@@ -178,12 +182,23 @@ async function main(): Promise<void> {
     intervalMs: schedulerIntervalMs > 0 ? schedulerIntervalMs : undefined,
   });
 
+  // Periodic lifecycle cleanup. Every worker process runs one, but a Redis
+  // lock admits at most one active run across all of them.
+  const retention: RetentionScheduler = createRetentionScheduler();
+
+  // Prometheus endpoint. Best-effort: resolves to null (and logs) if disabled
+  // or the port is taken, and the worker carries on either way.
+  const metricsServer: MetricsServer | null = await startMetricsServer();
+
   let shutdownPromise: Promise<void> | undefined;
 
   const shutdown = (signal: string): Promise<void> => {
     if (!shutdownPromise) {
       shutdownPromise = (async () => {
         logger.info('Stopping worker entry point', { signal });
+        // Housekeeping first: it must not hold a database connection while
+        // the rest of the process drains.
+        await retention.stop();
         // Stop creating new delivery intents, and wait for the active scheduler
         // transaction before closing either backing service.
         await scheduler.stop();
@@ -192,6 +207,7 @@ async function main(): Promise<void> {
         // Stop the dispatcher after the worker so any jobs that just
         // completed and created delivery rows still get published.
         await dispatcher.stop();
+        await metricsServer?.close();
         await closeInfrastructure();
         logger.info('Worker entry point stopped');
       })();
@@ -234,6 +250,7 @@ async function main(): Promise<void> {
   await worker.start();
   dispatcher.start();
   scheduler.start();
+  retention.start();
   logger.info('WORKER_READY', {
     workerId: runtimeConfig.workerId,
     handlers: handlers.getRegisteredTypes(),

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@taskflow/database', () => ({
   claimPendingDeliveries: vi.fn(),
+  getQueuesWithClaimableDeliveries: vi.fn(),
   getStaleDeliveries: vi.fn(),
   markDeliveryPublished: vi.fn(),
   renewDeliveryClaim: vi.fn(),
@@ -15,6 +16,7 @@ const xpending = vi.fn();
 
 vi.mock('@taskflow/queue', () => ({
   enqueueJob: vi.fn(),
+  getStreamInFlight: vi.fn(),
   getRedisClient: () => ({ xrange, xinfo, xpending }),
   getStreamKey: (queue: string) => `taskflow:queue:${queue}:jobs`,
   WORKER_CONSUMER_GROUP: 'taskflow:workers',
@@ -31,13 +33,14 @@ vi.mock('@taskflow/logger', () => ({
 
 import {
   claimPendingDeliveries,
+  getQueuesWithClaimableDeliveries,
   getStaleDeliveries,
   markDeliveryPublished,
   renewDeliveryClaim,
   releaseDeliveryForRetry,
   resetDeliveryToPending,
 } from '@taskflow/database';
-import { enqueueJob } from '@taskflow/queue';
+import { enqueueJob, getStreamInFlight } from '@taskflow/queue';
 
 import { Dispatcher } from '../dispatcher';
 
@@ -62,6 +65,8 @@ describe('Dispatcher', () => {
     vi.clearAllMocks();
     vi.mocked(getStaleDeliveries).mockResolvedValue([]);
     vi.mocked(claimPendingDeliveries).mockResolvedValue([]);
+    vi.mocked(getQueuesWithClaimableDeliveries).mockResolvedValue(['default']);
+    vi.mocked(getStreamInFlight).mockResolvedValue(0);
     vi.mocked(markDeliveryPublished).mockResolvedValue(true);
     vi.mocked(renewDeliveryClaim).mockResolvedValue(true);
     vi.mocked(releaseDeliveryForRetry).mockResolvedValue(true);
@@ -87,7 +92,8 @@ describe('Dispatcher', () => {
     expect(claimPendingDeliveries).toHaveBeenCalledWith(
       'dispatcher-a',
       50,
-      45_000
+      45_000,
+      'default'
     );
     expect(enqueueJob).toHaveBeenCalledWith('job-1', 'default', 1);
     expect(renewDeliveryClaim).toHaveBeenCalledWith(
@@ -99,6 +105,141 @@ describe('Dispatcher', () => {
       'dispatcher-a',
       '123-0'
     );
+  });
+
+  describe('priority window', () => {
+    it('claims only as many deliveries as keep the queue within its window', async () => {
+      vi.mocked(getStreamInFlight).mockResolvedValue(190);
+      const dispatcher = new Dispatcher({
+        dispatcherId: 'dispatcher-a',
+        maxInFlightPerQueue: 200,
+      });
+
+      await dispatcher.dispatchOnce();
+
+      // 10 slots left, so the batch of 50 shrinks to 10.
+      expect(getStreamInFlight).toHaveBeenCalledWith('default', 200);
+      expect(claimPendingDeliveries).toHaveBeenCalledWith(
+        'dispatcher-a',
+        10,
+        30_000,
+        'default'
+      );
+    });
+
+    it('leaves the backlog in PostgreSQL when the window is full', async () => {
+      vi.mocked(getStreamInFlight).mockResolvedValue(200);
+      const dispatcher = new Dispatcher({ maxInFlightPerQueue: 200 });
+
+      await expect(dispatcher.dispatchOnce()).resolves.toBe(0);
+
+      expect(claimPendingDeliveries).not.toHaveBeenCalled();
+      expect(enqueueJob).not.toHaveBeenCalled();
+      expect(dispatcher.getStats().windowLimitedCycles).toBe(1);
+    });
+
+    it('budgets every queue independently', async () => {
+      vi.mocked(getQueuesWithClaimableDeliveries).mockResolvedValue([
+        'busy',
+        'idle',
+      ]);
+      vi.mocked(getStreamInFlight).mockImplementation(async (queue) =>
+        queue === 'busy' ? 200 : 5
+      );
+      const dispatcher = new Dispatcher({
+        dispatcherId: 'dispatcher-a',
+        maxInFlightPerQueue: 200,
+      });
+
+      await dispatcher.dispatchOnce();
+
+      expect(claimPendingDeliveries).toHaveBeenCalledTimes(1);
+      expect(claimPendingDeliveries).toHaveBeenCalledWith(
+        'dispatcher-a',
+        50,
+        30_000,
+        'idle'
+      );
+    });
+
+    it('skips only the queue it cannot measure', async () => {
+      vi.mocked(getQueuesWithClaimableDeliveries).mockResolvedValue([
+        'broken',
+        'healthy',
+      ]);
+      vi.mocked(getStreamInFlight).mockImplementation(async (queue) => {
+        if (queue === 'broken') throw new Error('READONLY');
+        return 0;
+      });
+      const dispatcher = new Dispatcher({
+        dispatcherId: 'dispatcher-a',
+        maxInFlightPerQueue: 200,
+      });
+
+      await expect(dispatcher.dispatchOnce()).resolves.toBe(0);
+
+      expect(claimPendingDeliveries).toHaveBeenCalledTimes(1);
+      expect(claimPendingDeliveries).toHaveBeenCalledWith(
+        'dispatcher-a',
+        50,
+        30_000,
+        'healthy'
+      );
+    });
+
+    it('publishes everything with one unscoped claim when the window is disabled', async () => {
+      vi.mocked(claimPendingDeliveries).mockResolvedValue([delivery]);
+      vi.mocked(enqueueJob).mockResolvedValue('123-0');
+      const dispatcher = new Dispatcher({
+        dispatcherId: 'dispatcher-a',
+        maxInFlightPerQueue: 0,
+      });
+
+      await expect(dispatcher.dispatchOnce()).resolves.toBe(1);
+
+      expect(getQueuesWithClaimableDeliveries).not.toHaveBeenCalled();
+      expect(getStreamInFlight).not.toHaveBeenCalled();
+      expect(claimPendingDeliveries).toHaveBeenCalledWith(
+        'dispatcher-a',
+        50,
+        30_000
+      );
+    });
+
+    it('rejects an invalid window', () => {
+      expect(() => new Dispatcher({ maxInFlightPerQueue: -1 })).toThrow(
+        RangeError
+      );
+      expect(() => new Dispatcher({ maxInFlightPerQueue: 1.5 })).toThrow(
+        RangeError
+      );
+    });
+
+    it('re-checks quickly while the window is full instead of idling a whole interval', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(getStreamInFlight).mockResolvedValue(200);
+        const dispatcher = new Dispatcher({
+          maxInFlightPerQueue: 200,
+          pollIntervalMs: 1_000,
+          enableStaleRepublish: false,
+        });
+
+        dispatcher.start();
+        await vi.advanceTimersByTimeAsync(260);
+
+        // Several measurements well inside one 1 s poll interval.
+        expect(
+          vi.mocked(getStreamInFlight).mock.calls.length
+        ).toBeGreaterThanOrEqual(4);
+
+        const stopping = dispatcher.stop();
+        await vi.advanceTimersByTimeAsync(100);
+        await stopping;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('keeps a delivery PENDING and retryable after bounded Redis exhaustion', async () => {

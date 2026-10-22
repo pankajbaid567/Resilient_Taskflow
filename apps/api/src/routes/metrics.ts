@@ -1,8 +1,9 @@
-import { getJobCounts } from '@taskflow/database';
+import { getMetricsSnapshot } from '@taskflow/database';
 import { createLogger } from '@taskflow/logger';
-import { getMetrics, jobsCurrentByStatus } from '@taskflow/observability';
-import { JobStatus } from '@taskflow/types';
+import { getMetrics } from '@taskflow/observability';
 import { FastifyInstance } from 'fastify';
+
+import { publishSystemGauges } from '../metrics';
 
 const logger = createLogger({ component: 'MetricsRoutes' });
 
@@ -20,14 +21,8 @@ export function metricsRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get('/', async (_request, reply) => {
     try {
-      // Update job count gauges from database
-      const jobCounts = await getJobCounts();
-      for (const status of Object.values(JobStatus)) {
-        jobsCurrentByStatus
-          .labels({ status, queue: 'all' })
-          .set(jobCounts[status]);
-      }
-
+      // System-wide gauges are recomputed from PostgreSQL on every scrape.
+      publishSystemGauges(await getMetricsSnapshot());
       // Get all metrics from prom-client registry
       const metricsText = await getMetrics();
 
