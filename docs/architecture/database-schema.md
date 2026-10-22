@@ -293,7 +293,7 @@ CREATE TABLE job_events (
   to_status job_status NOT NULL,
 
   -- Context
-  worker_id UUID REFERENCES workers(id),
+  worker_id UUID REFERENCES workers(id) ON DELETE SET NULL,
   user_id UUID REFERENCES users(id),
 
   -- Timing
@@ -380,6 +380,36 @@ CREATE INDEX idx_workers_hostname ON workers(hostname);
 - Worker discovery for monitoring dashboards
 - Metrics for worker performance analysis
 - `queues` array for multi-queue workers
+
+### 6b. job_deliveries (transactional outbox)
+
+One row per delivery attempt of a job to Redis. The API (or scheduler, or a retry) inserts it in the **same transaction** that makes the job due, so a committed job can never be missing its delivery intent. The dispatcher claims `PENDING` rows, publishes them to the queue's Redis stream and marks them `PUBLISHED`.
+
+```sql
+CREATE TABLE job_deliveries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  queue_name TEXT NOT NULL,
+  attempt INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'PENDING',      -- PENDING | PUBLISHED | FAILED
+  redis_message_id TEXT,                        -- set when published
+  published_at TIMESTAMPTZ,
+  claimed_by TEXT,                              -- dispatcher id (claim lease)
+  claimed_at TIMESTAMPTZ,
+  error TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+  available_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),   -- not published before this
+  priority_rank SMALLINT NOT NULL DEFAULT 2,    -- 1 LOW .. 4 CRITICAL, see below
+  UNIQUE (job_id, attempt),
+  CHECK (priority_rank BETWEEN 1 AND 4)
+);
+```
+
+- **`priority_rank`** is computed on insert by the SQL function `job_priority_rank(priority)` from the job row, so the mapping lives in one place (ADR-012). The partial index `(queue_name, priority_rank DESC, available_at, created_at) WHERE status = 'PENDING'` serves the dispatcher's claim query.
+- **Claiming** uses `FOR UPDATE SKIP LOCKED` plus `claimed_by`/`claimed_at`. A claim abandoned by a crashed dispatcher becomes claimable again after a timeout.
+- **`UNIQUE (job_id, attempt)`** makes re-inserting a delivery idempotent.
+- Retention deletes `PUBLISHED` rows of terminal jobs after `RETENTION_DELIVERIES_DAYS`; `PENDING` rows are never deleted.
 
 ### 7. idempotency_keys
 
@@ -493,16 +523,22 @@ VALUES ($1, 'created', 'CREATED');
 COMMIT;
 ```
 
-### 2. Get Jobs to Process
+### 2. Dispatch Due Jobs
+
+Workers do not select jobs from `jobs`. The dispatcher claims outbox rows, highest priority first, a bounded number per cycle (see ADR-012):
 
 ```sql
-SELECT j.id, j.type, j.payload, j.priority, j.timeout_ms, j.attempts
-FROM jobs j
-WHERE j.queue_id = $1
-  AND j.status = 'QUEUED'
-  AND j.scheduled_at <= NOW()
-ORDER BY j.priority DESC, j.created_at ASC
-LIMIT 100;
+SELECT d.*
+FROM job_deliveries d
+JOIN queues q ON q.name = d.queue_name
+WHERE d.status = 'PENDING'
+  AND q.is_active
+  AND d.available_at <= clock_timestamp()
+  AND (d.claimed_by IS NULL OR d.claimed_at < clock_timestamp() - interval '30 seconds')
+  AND d.queue_name = $1
+ORDER BY d.priority_rank DESC, d.available_at, d.created_at
+LIMIT $2
+FOR UPDATE OF d SKIP LOCKED;
 ```
 
 ### 3. Acquire Job Lease
@@ -528,6 +564,8 @@ RETURNING *;
 **Note:** The `version = $4` check provides optimistic locking.
 
 ### 4. Renew Lease
+
+Renewal extends `lease_expires_at` only. It writes no `job_events` row, so routine renewals do not grow the event log; a release on shutdown does (`lease_released`).
 
 ```sql
 UPDATE jobs
@@ -673,7 +711,14 @@ The table is a control-decision audit trail, not a complete security log. Reques
 
 ### Retention status
 
-Automated retention is not implemented yet. Do not run ad hoc deletes against jobs, attempts, events, deliveries, or dead letters: pending Redis entries, retry wake-ups, leases, and redispatch evidence must be protected together. P2 requires a bounded, resumable cleanup transaction and process tests before documenting deletion commands.
+Bounded, resumable lifecycle retention is implemented in `packages/database/src/repositories/retention.repository.ts` and orchestrated via `executeFullRetention` in `@taskflow/worker`. Retention operates under strict safety invariants:
+
+- **Active Leases Protected**: Terminal jobs with unexpired leases (`lease_expires_at > clock_timestamp()`) are never deleted.
+- **Pending Deliveries Protected**: Terminal jobs with pending outbox entries (`job_deliveries.status = 'PENDING'`) are never deleted.
+- **Scheduled In-Flight Protected**: Jobs with future scheduled dates or non-terminal status are never deleted.
+- **Referential Integrity**: Dead letters referencing replacement jobs (`requeued_job_id`) are safely purged before or alongside replacement jobs to prevent foreign key constraint violations. Workers owning active job leases are protected from deletion.
+- **Bounded Batches**: All deletions run in parameterized batches (`batchSize`, default 500) up to `maxBatches`, avoiding table locks, replication lag, and unbounded WAL growth.
+- **Redis PEL Boundary**: Stream trimming via `trimStream` queries consumer group PELs and never trims below unacknowledged message IDs.
 
 ## Migration Strategy
 

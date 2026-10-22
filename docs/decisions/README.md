@@ -16,15 +16,12 @@ Each ADR follows this structure:
 ## Index
 
 1. [ADR-001: Use PostgreSQL as Source of Truth](./001-postgresql-source-of-truth.md)
-2. [ADR-002: Use Redis Streams for Job Delivery](./002-redis-streams-for-delivery.md)
-3. [ADR-003: Separate Kafka for Event Propagation](./003-kafka-for-events.md)
-4. [ADR-004: At-Least-Once Delivery Semantics](./004-at-least-once-delivery.md)
-5. [ADR-005: Lease-Based Worker Coordination](./005-lease-based-coordination.md)
-6. [ADR-006: Use Fastify Over Express](./006-fastify-over-express.md)
-7. [ADR-007: Use Drizzle ORM](./007-drizzle-orm.md)
-8. [ADR-008: Monorepo with pnpm + Turborepo](./008-monorepo-structure.md)
-9. [ADR-009: Write-Ahead Consistency for Job Creation](./009-write-ahead-consistency.md)
-10. [ADR-010: Build Queue from First Principles](./010-build-queue-from-scratch.md)
+2. [ADR-004: At-Least-Once Delivery Semantics](./004-at-least-once-delivery.md)
+3. [ADR-010: Build Queue from First Principles](./010-build-queue-from-scratch.md)
+4. [ADR-011: Graceful shutdown hands leases back and refunds the attempt](./011-shutdown-releases-leases.md)
+5. [ADR-012: Priority through a Postgres-ordered, bounded in-flight window](./012-priority-window.md)
+
+Numbers 002, 003 and 005 to 009 are unused: those decisions were planned but never written, and their index entries pointed at files that do not exist.
 
 ## ADR Lifecycle
 

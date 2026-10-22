@@ -407,8 +407,6 @@ Every job type must document:
 ## Related Decisions
 
 - [ADR-001: Use PostgreSQL as Source of Truth](./001-postgresql-source-of-truth.md) - Enables durable delivery
-- [ADR-005: Lease-Based Worker Coordination](./005-lease-based-coordination.md) - Minimizes duplicates
-- [ADR-002: Use Redis Streams for Job Delivery](./002-redis-streams-for-delivery.md) - Delivery mechanism
 
 ## References
 

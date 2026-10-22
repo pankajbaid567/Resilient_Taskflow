@@ -16,22 +16,19 @@ It does not claim deployment or production readiness.
 | `@taskflow/types`                      | Shared stream/message/state definitions and public data types                    |
 | `@taskflow/retry`                      | Retry and dead-letter policy used by the worker runtime                          |
 | `@taskflow/logger`                     | Shared structured logging                                                        |
-| `@taskflow/observability`              | Metrics used by the API                                                          |
-| `@taskflow/performance`                | Queue profiling helpers required by the queue package's public surface           |
+| `@taskflow/observability`              | Prometheus metrics (API and worker) and optional tracing                         |
 | `@taskflow/tests`                      | Cross-workspace verification; not a deployable service                           |
 
 The core worker process is started with `pnpm dev:worker`. Delivery behavior is
 owned by `packages/worker`; consumers must not start it as a separate process.
 
-## Deferred workspaces
+## Other workspaces
 
-| Workspace             | Current status                                                                                 |
-| --------------------- | ---------------------------------------------------------------------------------------------- |
-| `@taskflow/events`    | Kafka/Redpanda integration is deferred and is not part of the supported job-delivery path.     |
-| `@taskflow/cache`     | Optional cache package is not wired into the supported API/worker lifecycle.                   |
-| `@taskflow/dashboard` | UI is compile-checked, but dashboard functionality is outside the current lifecycle milestone. |
+| Workspace             | Current status                                                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `@taskflow/dashboard` | React UI for the real API (sign in with an API key; jobs, DLQ, queues, workers). Verified in a browser against a live dev stack. |
 
-Deferred workspaces remain subject to repository build, typecheck, and lint
+Workspaces outside the core remain subject to repository build, typecheck, and lint
 gates so they cannot hide failures in the core. An intentionally empty test
 suite may use Vitest's `--passWithNoTests`; this means only that the workspace
 has no package-local tests, not that its behavior was verified.

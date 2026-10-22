@@ -171,40 +171,21 @@ const handler: JobHandler = async (payload, ctx) => {
 
 ### Cancellation Detection
 
-Workers periodically check (every 2s) if job status is `CANCEL_REQUESTED`:
+A running worker first observes a cancel request when it renews the job's lease
+(every `leaseDuration / 3`, 10 s by default). The renewal returns the row with
+`status = CANCEL_REQUESTED`, and the worker signals the handler's cancellation
+token. There is no separate polling loop.
 
-```typescript
-// Worker polls database
-const job = await getJobById(activeJob.jobId);
+### Handler Execution and Persistence
 
-if (job.status === JobStatus.CANCEL_REQUESTED) {
-  // Trigger cancellation token
-  activeJob.cancellationToken.cancel();
-}
-```
+After the handler settles, the worker persists the outcome with a fenced
+transaction (`completeJobDelivery`, `failJobDelivery`, or
+`completeCancellation`) and only then acknowledges the Redis entry.
 
-### Handler Execution
-
-```typescript
-try {
-  // Handler receives cancellation token
-  const result = await handler(payload, {
-    job: { id, type, attempts, maxAttempts },
-    cancellationToken,
-  });
-
-  await completeJob(jobId, result);
-} catch (error) {
-  if (error instanceof CancellationError) {
-    // Graceful cancellation
-    await updateJobStatus(jobId, JobStatus.CANCELLED);
-    logger.info('Job cancelled', { jobId });
-  } else {
-    // Normal failure
-    await failJob(jobId, error);
-  }
-}
-```
+- Handler observed the cancel request and stopped: `completeCancellation`
+  moves `CANCEL_REQUESTED -> CANCELLED`.
+- Handler returned a result: `completeJobDelivery` (see Scenario 3).
+- Handler failed: `failJobDelivery` (see Scenario 3b).
 
 ## Race Conditions
 
@@ -228,31 +209,48 @@ Result: Job cancelled immediately, never executed
 Timeline:
 t0   Worker acquires lease (PROCESSING)
 t1   Handler starts executing
-t2   User cancels → CANCEL_REQUESTED
-t3   Worker detects cancellation (2s polling)
-t4   Worker signals cancellation token
-t5   Handler checks token → throws CancellationError
-t6   Worker updates status → CANCELLED
+t2   User cancels -> CANCEL_REQUESTED
+t3   Next lease renewal returns CANCEL_REQUESTED (<= leaseDuration / 3 later)
+t4   Worker signals the cancellation token
+t5   Handler checks the token -> throws CancellationError
+t6   Worker calls completeCancellation -> CANCELLED, then ACKs Redis
 
 Result: Handler aborts gracefully
 ```
 
-**Protection**: Cooperative cancellation with token
+**Protection**: Cooperative cancellation; terminal state is committed before ACK
 
-### Scenario 3: Complete Before Cancellation Detected
+### Scenario 3: Result Produced Before the Cancel Request Is Observed
 
 ```
 Timeline:
 t0   Worker acquires lease (PROCESSING)
-t1   Handler starts (fast job)
-t2   User cancels → CANCEL_REQUESTED
-t3   Handler completes → SUCCEEDED
-t4   Worker tries to detect cancellation (too late)
+t1   Handler starts
+t2   User cancels -> CANCEL_REQUESTED
+t3   Handler returns a result (worker has not yet seen the request)
+t4   completeJobDelivery commits -> SUCCEEDED
 
-Result: Job succeeds (cancellation came too late)
+Result: Job succeeds; the cancel request arrived too late
 ```
 
-**Protection**: State machine validates `CANCEL_REQUESTED → SUCCEEDED` (allowed)
+The first durable observation wins. `completeJobDelivery` accepts a row in
+either `PROCESSING` or `CANCEL_REQUESTED` while the caller still owns the
+lease. The `completed` event records `lateCancellationRequestIgnored: true`.
+Discarding a finished result and waiting out a full lease expiry would waste
+the work and delay the job's terminal state.
+
+### Scenario 3b: Failure Under an Unobserved Cancel Request
+
+```
+t2   User cancels -> CANCEL_REQUESTED
+t3   Handler throws a transient error
+t4   failJobDelivery sees CANCEL_REQUESTED -> throws JobCancellationRequestedError
+t5   Worker calls completeCancellation -> CANCELLED, then ACKs Redis
+```
+
+A cancelled job must not be retried, so `failJobDelivery` never schedules a
+retry or successor delivery for a `CANCEL_REQUESTED` job. The worker converts
+the error into the normal cancellation path.
 
 ### Scenario 4: Concurrent Cancellation
 
@@ -608,18 +606,10 @@ const worker = createWorker({
 
 ### Graceful Shutdown
 
-```typescript
-// On SIGTERM, cancel all active jobs
-process.on('SIGTERM', async () => {
-  // Cancel all active jobs
-  for (const [jobId, activeJob] of worker.activeJobs) {
-    activeJob.cancellationToken.cancel();
-  }
-
-  // Wait for jobs to finish (with timeout)
-  await worker.stop();
-});
-```
+Shutdown is not cancellation. On `SIGTERM` the worker first lets in-flight
+handlers finish, then signals the stragglers with reason `SHUTDOWN` and hands
+their leases back to the queue without consuming an attempt. The job is not
+marked `CANCELLED`. See "Release on shutdown" in `leases-and-heartbeats.md`.
 
 ## Summary
 

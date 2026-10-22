@@ -256,8 +256,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 6. UPDATE jobs SET status = 'PROCESSING', worker_id = ?, lease_id = ?, lease_expires_at = NOW() + INTERVAL '30s', started_at = NOW(), attempts = attempts + 1
 7. INSERT INTO job_events (event_type = 'started')
 8. COMMIT
-9. Publish job.started event to Kafka
-10. Execute job handler
+9. Execute job handler
 
 **Race Conditions:**
 
@@ -277,8 +276,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 4. INSERT INTO job_attempts (status = 'SUCCEEDED', duration_ms = ?)
 5. COMMIT
 6. XACK Redis message
-7. Publish job.completed event to Kafka
-8. Update worker metrics
+7. Update worker metrics
 
 **Race Conditions:**
 
@@ -300,7 +298,6 @@ CREATE TRIGGER validate_job_status_transition_trigger
 7. INSERT INTO job_events (event_type = 'retried')
 8. COMMIT
 9. XACK Redis message
-10. Publish job.retried event to Kafka
 
 **Background Process:**
 
@@ -326,8 +323,7 @@ CREATE TRIGGER validate_job_status_transition_trigger
 5. INSERT INTO job_events (event_type = 'dead_lettered')
 6. COMMIT
 7. XACK Redis message
-8. Publish job.dead_lettered event to Kafka
-9. Alert monitoring systems
+8. Alert monitoring systems
 
 **Race Conditions:**
 
@@ -548,5 +544,4 @@ it('prevents duplicate lease acquisition', async () => {
 ## Next Documents
 
 - [Redis Streams Design](./redis-streams.md)
-- [Retry Strategy](./retry-strategy.md)
 - [Failure Model](../failure-model/README.md)

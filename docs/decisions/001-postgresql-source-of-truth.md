@@ -21,7 +21,7 @@ Options considered:
 
 We will use **PostgreSQL** as the single source of truth for all durable job state.
 
-All job records, state transitions, attempts, and metadata will be stored in PostgreSQL. Redis and Kafka will contain derived or ephemeral state only.
+All job records, state transitions, attempts, and metadata will be stored in PostgreSQL. Redis will contain derived or ephemeral state only.
 
 ## Rationale
 
@@ -113,7 +113,7 @@ All job records, state transitions, attempts, and metadata will be stored in Pos
 
 **For Scalability**:
 
-- Start with single PostgreSQL instance (sufficient for 10K+ jobs/sec)
+- Start with a single PostgreSQL instance. Measured on one laptop, a job costs about 5 transactions and the instance saturated at roughly 200 to 300 jobs/s (see `docs/benchmarking/RESULTS.md`); that figure is specific to that machine and Docker setup
 - Add read replicas for query scaling
 - Partition tables if needed (future optimization)
 - Consider PostgreSQL cluster solutions (Citus, pg_partman) at scale
@@ -152,9 +152,7 @@ All job records, state transitions, attempts, and metadata will be stored in Pos
 
 ## Related Decisions
 
-- [ADR-002: Use Redis Streams for Job Delivery](./002-redis-streams-for-delivery.md) - Redis complements PostgreSQL for message delivery
 - [ADR-004: At-Least-Once Delivery Semantics](./004-at-least-once-delivery.md) - Durability enables reliable delivery
-- [ADR-009: Write-Ahead Consistency for Job Creation](./009-write-ahead-consistency.md) - How to keep PostgreSQL and Redis consistent
 
 ## References
 

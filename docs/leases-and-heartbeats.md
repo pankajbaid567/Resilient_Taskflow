@@ -118,29 +118,33 @@ RETURNING *;
 
 ### 2. Lease Renewal
 
-```typescript
-// Worker periodically renews lease while processing
-setInterval(async () => {
-  await renewJobLease(jobId, leaseId, 30000);
-}, 15000); // Renew every 15 seconds (half of lease duration)
+The worker renews each active lease every `leaseDuration / 3` (10 s for the
+default 30 s lease) with a single fenced `UPDATE`:
 
-// Database update:
+```sql
 UPDATE jobs
-SET
-  lease_expires_at = NOW() + INTERVAL '30 seconds',
-  version = version + 1
-WHERE
-  id = $jobId
-  AND lease_id = $leaseId      -- Must match current lease
-  AND lease_expires_at > NOW() -- Lease not expired
+SET lease_expires_at = clock_timestamp() + $duration,
+    version = version + 1
+WHERE id = $jobId
+  AND status IN ('PROCESSING', 'CANCEL_REQUESTED')
+  AND worker_id = $workerId
+  AND lease_id = $leaseId                      -- must match the current lease
+  AND lease_expires_at > clock_timestamp()     -- lease not already expired
 RETURNING *;
 ```
 
-**Why Renew at Half Duration?**
+- No row returned means the lease was lost (expired or taken over); the worker
+  interrupts the handler with reason `LEASE_LOST` and leaves the Redis entry
+  pending.
+- A renewal that returns `CANCEL_REQUESTED` is how a running worker first
+  observes a user cancellation (see `cancellation.md`).
+- **Renewal writes no `job_events` row.** A heartbeat is not a state
+  transition. Logging one per renewal made `job_events` grow with execution
+  time rather than with lifecycle changes. `event_sequence` therefore stays
+  contiguous over real transitions only.
 
-- Network delays won't cause expiration
-- Provides buffer for temporary issues
-- Standard lease pattern (similar to Chubby, etcd)
+**Why renew at one third of the duration?** Two consecutive renewals can fail
+(a slow query, a brief network blip) before the lease expires.
 
 ### 3. Lease Release
 
@@ -159,6 +163,23 @@ SET
   completed_at = NOW()
 WHERE id = $jobId;
 ```
+
+#### Release on shutdown
+
+When a worker is stopped while a handler is still running, the lease is handed
+back instead of being left to expire (`releaseJobDelivery`). In one fenced
+transaction the job returns to `QUEUED`, the in-flight attempt is **refunded**
+(`attempts - 1`), the open `job_attempts` row is removed, the job's outbox row
+is re-armed to `PENDING`, and a `lease_released` event is written. The worker
+acknowledges the Redis entry only after that commit.
+
+Why refund the attempt? Without it, a rolling deploy would burn one attempt per
+running job, and a job on its final attempt would be dead-lettered by a
+restart. The removed attempt row is not lost history: its start time and the
+reason are recorded in the `lease_released` event metadata.
+
+If the release fails or the lease is already gone, nothing is acknowledged and
+ordinary lease-expiry recovery (below) still applies.
 
 ### 4. Lease Expiration
 
@@ -260,14 +281,20 @@ async function detectStaleWorkers(thresholdMs = 30000) {
 
 ### 4. Worker Shutdown
 
-```typescript
-// Worker updates status when stopping
-await updateWorkerStatus(workerId, 'STOPPING');
+`Worker.stop()` runs in two phases within `shutdownTimeoutMs` (default 30 s):
 
-// Wait for active jobs to finish...
+1. **Drain.** Polling stops and the worker is marked `STOPPING`, but leases keep
+   renewing so in-flight handlers can finish and commit through the normal
+   path. The drain budget is `shutdownTimeoutMs` minus a release reserve of
+   `min(5 s, shutdownTimeoutMs / 2)`.
+2. **Interrupt and release.** Handlers still running are signalled through
+   their cancellation token, and each owned lease is handed back with
+   `releaseJobDelivery` (see "Release on shutdown").
 
-await updateWorkerStatus(workerId, 'STOPPED');
-```
+A JavaScript promise cannot be force-terminated. If a handler ignores the
+signal, its code may keep running after its job has been released; handlers
+must therefore make external effects idempotent. The worker reports
+`STOPPED_UNCLEAN` and leaves the durable status at `STOPPING` in that case.
 
 ## Failure Scenarios
 
@@ -405,7 +432,7 @@ class Worker {
 
     activeJob.leaseRenewalTimer = setInterval(
       renew,
-      this.config.leaseRenewalIntervalMs // leaseDurationMs / 2
+      this.config.leaseRenewalIntervalMs // leaseDurationMs / 3
     );
   }
 
@@ -441,7 +468,7 @@ class Worker {
 const defaultConfig = {
   // Lease settings
   leaseDurationMs: 30000, // 30 seconds
-  leaseRenewalIntervalMs: 15000, // 15 seconds (half of duration)
+  leaseRenewalIntervalMs: 10000, // lease duration / 3
 
   // Heartbeat settings
   heartbeatIntervalMs: 10000, // 10 seconds
@@ -537,7 +564,7 @@ job_processing_duration_seconds{queue, job_type}   // Actual processing time
    - Add buffer for network delays
    - Consider P99 latency, not average
 
-2. **Renew at half duration**
+2. **Renew at one third of the duration**
    - Standard pattern (Chubby, etcd)
    - Provides safety margin
    - Handles temporary network issues
@@ -701,13 +728,13 @@ describe('Worker Heartbeats', () => {
 ## Production Checklist
 
 - [x] Lease acquisition with optimistic locking
-- [x] Automatic lease renewal (half duration)
+- [x] Automatic lease renewal (one third of duration)
 - [x] Lease expiration handling
 - [x] Worker registration
 - [x] Periodic heartbeats (10s)
 - [x] Worker failure detection
 - [x] Stale job recovery
-- [x] Graceful shutdown (stop renewals)
+- [x] Graceful shutdown (drain, then release leases without consuming an attempt)
 - [ ] Monitoring dashboards
 - [ ] Alerting rules
 - [ ] Load testing with failures

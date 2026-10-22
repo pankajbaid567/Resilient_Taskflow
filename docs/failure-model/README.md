@@ -318,75 +318,7 @@ it('handles PostgreSQL crash gracefully', async () => {
 
 ---
 
-### 5. Kafka/Redpanda Crash
-
-**Scenario:** Kafka instance crashes or becomes unavailable
-
-**Detection:**
-
-- Producer send failures
-- Consumer connection errors
-- Prometheus alert: `kafka_up == 0`
-
-**Impact:**
-
-- Events cannot be published
-- Event consumers cannot read
-- **Job processing continues** (Kafka is event propagation, not critical path)
-
-**Recovery:**
-
-- **Graceful Degradation**:
-  - Queue event publications in memory buffer
-  - If buffer fills, log to file or drop events
-  - Workers continue processing jobs
-
-- **After Kafka Recovers**:
-  - Flush buffered events
-  - Event consumers catch up
-
-**Consistency Implications:**
-
-- Job processing unaffected
-- Event consumers see gaps or delays
-- Acceptable for analytics/audit use case
-
-**Data Loss:**
-
-- Possible event loss (not critical for job execution)
-- Job data remains intact in PostgreSQL
-
-**Testing:**
-
-```typescript
-it('continues processing jobs when Kafka is down', async () => {
-  // Kill Kafka
-  await kafka.kill();
-
-  // Should still be able to create and process jobs
-  const job = await createJob({ type: 'test' });
-  await startWorker();
-  await waitUntil(() => getJob(job.id).status === 'SUCCEEDED');
-
-  // Events might be buffered or dropped
-  const events = await getKafkaEvents();
-  expect(events).toHaveLength(0); // Kafka was down
-
-  // Restart Kafka
-  await kafka.start();
-
-  // Future events should work
-  const job2 = await createJob({ type: 'test2' });
-  await waitUntil(() => getJob(job2.id).status === 'SUCCEEDED');
-
-  const events2 = await getKafkaEvents();
-  expect(events2.length).toBeGreaterThan(0);
-});
-```
-
----
-
-### 6. Network Partition
+### 5. Network Partition
 
 **Scenario:** Network split isolates components
 
@@ -452,7 +384,7 @@ it('handles network partition between worker and Redis', async () => {
 
 ---
 
-### 7. Duplicate Message Delivery
+### 6. Duplicate Message Delivery
 
 **Scenario:** Job delivered to multiple workers
 
@@ -518,7 +450,7 @@ it('prevents duplicate processing via lease', async () => {
 
 ---
 
-### 8. Delayed Message Delivery
+### 7. Delayed Message Delivery
 
 **Scenario:** Message takes longer than expected to reach worker
 
@@ -548,7 +480,7 @@ it('prevents duplicate processing via lease', async () => {
 
 ---
 
-### 9. Message Acknowledgement Failure
+### 8. Message Acknowledgement Failure
 
 **Scenario:** Worker fails to ACK message after processing job
 
@@ -616,7 +548,7 @@ it('redelivers message if ACK fails', async () => {
 
 ---
 
-### 10. Job Timeout
+### 9. Job Timeout
 
 **Scenario:** Job takes longer than timeout_ms to execute
 
@@ -680,7 +612,7 @@ it('times out long-running job', async () => {
 
 ---
 
-### 11. Job Handler Failure
+### 10. Job Handler Failure
 
 **Scenario:** Handler throws exception
 
@@ -725,7 +657,7 @@ function isRetriableError(error: Error): boolean {
 
 ---
 
-### 12. Malformed Payload
+### 11. Malformed Payload
 
 **Scenario:** Job payload doesn't match expected schema
 
@@ -772,7 +704,7 @@ async function sendEmailHandler(payload: unknown) {
 
 ---
 
-### 13. Poison Job
+### 12. Poison Job
 
 **Scenario:** Job consistently crashes worker process
 
@@ -832,7 +764,7 @@ it('blacklists poison job', async () => {
 
 ---
 
-### 14. Retry Storm
+### 13. Retry Storm
 
 **Scenario:** Many jobs fail and retry simultaneously, overwhelming system
 
@@ -900,7 +832,7 @@ it('prevents retry storm with jitter', async () => {
 
 ---
 
-### 15. Database Transaction Failure
+### 14. Database Transaction Failure
 
 **Scenario:** Transaction fails midway (deadlock, constraint violation, timeout)
 
@@ -954,7 +886,7 @@ async function updateJobWithRetry(jobId: string, updates: Partial<Job>) {
 
 ---
 
-### 16. Partial System Failure
+### 15. Partial System Failure
 
 **Scenario:** Some components healthy, others failing
 
@@ -972,21 +904,17 @@ async function updateJobWithRetry(jobId: string, updates: Partial<Job>) {
   app.get('/health', async (req, res) => {
     const postgres = await checkPostgreSQL();
     const redis = await checkRedis();
-    const kafka = await checkKafka();
 
     const healthy = postgres && redis;
-    const degraded = !kafka;
 
     res.status(healthy ? 200 : 503).json({
       status: healthy ? 'healthy' : 'unhealthy',
-      degraded,
-      checks: { postgres, redis, kafka },
+      checks: { postgres, redis },
     });
   });
   ```
 
 - Graceful degradation:
-  - If Kafka down: Continue job processing, buffer events
   - If Redis down: Return 503 for new jobs, wait for recovery
   - If PostgreSQL down: Return 503, halt all operations
 
@@ -1000,7 +928,6 @@ async function updateJobWithRetry(jobId: string, updates: Partial<Job>) {
 | Worker Crash      | Heartbeat, 30s    | 30-60s (lease expiry)          | None (idempotent)   | Minimal (others continue)     |
 | Redis Crash       | Connection error  | Minutes (sweeper recovery)     | Ephemeral data only | Complete (temporary)          |
 | PostgreSQL Crash  | Connection error  | Minutes (restart + WAL replay) | None (committed)    | Complete                      |
-| Kafka Crash       | Producer error    | N/A (events buffered/dropped)  | Events only         | Job processing unaffected     |
 | Network Partition | Timeout           | Depends on partition           | None                | Partial (isolated components) |
 
 ## Testing Strategy
@@ -1034,12 +961,8 @@ async function updateJobWithRetry(jobId: string, updates: Partial<Job>) {
 - Many concurrent workers
 - Large job payloads
 
-## Operational Runbook
+## Related
 
-See [Incident Response Runbook](./incident-response.md) for detailed procedures.
-
-## Next Steps
-
-- [Retry Strategy](../architecture/retry-strategy.md)
-- [Monitoring & Alerting](../reliability/monitoring.md)
-- [Incident Response](./incident-response.md)
+- [Leases and heartbeats](../leases-and-heartbeats.md)
+- [System overview](../architecture/system-overview.md)
+- [Chaos testing](../chaos-testing.md)
