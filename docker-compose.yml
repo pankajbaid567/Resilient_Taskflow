@@ -36,46 +36,15 @@ services:
     networks:
       - taskflow
 
-  # Redpanda (Kafka-compatible)
-  redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:v23.3.3
-    container_name: taskflow-redpanda
-    command:
-      - redpanda
-      - start
-      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
-      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
-      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
-      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
-      - --rpc-addr redpanda:33145
-      - --advertise-rpc-addr redpanda:33145
-      - --mode dev-container
-      - --smp 1
-      - --default-log-level=info
-    ports:
-      - '18081:18081'
-      - '18082:18082'
-      - '19092:19092'
-      - '19644:9644'
-    volumes:
-      - redpanda_data:/var/lib/redpanda/data
-    healthcheck:
-      test: ['CMD-SHELL', 'rpk cluster health | grep healthy']
-      interval: 15s
-      timeout: 10s
-      retries: 5
-    networks:
-      - taskflow
-
   # Prometheus
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.15.0
     container_name: taskflow-prometheus
     ports:
       - '9091:9090'
     volumes:
       - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./infrastructure/prometheus/secrets:/etc/prometheus/secrets:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -87,7 +56,7 @@ services:
 
   # Grafana
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.2.4
     container_name: taskflow-grafana
     ports:
       - '3002:3000'
@@ -105,7 +74,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  redpanda_data:
   prometheus_data:
   grafana_data:
 

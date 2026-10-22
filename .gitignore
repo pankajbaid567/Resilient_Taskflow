@@ -13,6 +13,9 @@ build
 .env.local
 .env.*.local
 
+# Secrets read from files by local services (never commit)
+infrastructure/prometheus/secrets/
+
 # Testing
 coverage
 .vitest

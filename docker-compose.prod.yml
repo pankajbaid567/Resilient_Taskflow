@@ -1,66 +1,62 @@
-version: '3.8'
+# Production-style stack: Postgres, Redis, one-shot migrations, API (xN),
+# workers (xN), dashboard (nginx), Prometheus and Grafana.
+#
+#   cp .env.production.example .env.prod.local     # then fill in the secrets
+#   docker compose -p taskflow-prod --env-file .env.prod.local \
+#     -f docker-compose.prod.yml up -d --build
+#
+# Only the dashboard (which proxies /api and /health to the API), Prometheus
+# and Grafana publish host ports. Postgres, Redis, the API and the workers
+# stay on the internal network. Host-port defaults avoid the development
+# stack in docker-compose.yml, so both can run at once (use a different -p).
 
-# Production Docker Compose Configuration
-# This configuration includes resource limits, security hardening, and production best practices
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://${POSTGRES_USER:-taskflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-taskflow}
+  REDIS_URL: redis://redis:6379
+  JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (32+ chars)}
+  API_KEY_HASH_SALT: ${API_KEY_HASH_SALT:?API_KEY_HASH_SALT must be set (16+ chars)}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
 
 services:
-  # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
-    container_name: taskflow-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-taskflow}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: ${POSTGRES_DB:-taskflow}
-      # Performance tuning
-      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
-    ports:
-      - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-taskflow}']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-taskflow} -d ${POSTGRES_DB:-taskflow}']
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
-    networks:
-      - taskflow
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-    # Security options
+    networks: [taskflow]
     security_opt:
       - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /var/run/postgresql
+    logging: *default-logging
 
-  # Redis
+  # Redis Streams carry the jobs, so Redis must never evict keys under memory
+  # pressure (allkeys-lru would silently drop queued work). With noeviction a
+  # full Redis rejects writes instead, which the API surfaces as an error.
   redis:
     image: redis:7-alpine
-    container_name: taskflow-redis
     restart: unless-stopped
     command: >
       redis-server
       --appendonly yes
       --appendfsync everysec
       --maxmemory 1gb
-      --maxmemory-policy allkeys-lru
-      --save 900 1
-      --save 300 10
-      --save 60 10000
-    ports:
-      - '${REDIS_PORT:-6379}:6379'
+      --maxmemory-policy noeviction
     volumes:
       - redis_data:/data
     healthcheck:
@@ -69,342 +65,195 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
-    networks:
-      - taskflow
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-    # Security options
+    networks: [taskflow]
     security_opt:
       - no-new-privileges:true
+    logging: *default-logging
 
-  # Redpanda (Kafka-compatible)
-  redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:v23.3.3
-    container_name: taskflow-redpanda
-    restart: unless-stopped
+  # One-shot: applies pending SQL migrations (advisory-locked, so safe to
+  # re-run), seeds the default queues and exits. API and workers start only after it succeeds.
+  migrate:
+    # Same image as the worker (built by the worker service; building it twice
+    # in one `up` races on the image tag).
+    image: taskflow-worker:${VERSION:-latest}
+    pull_policy: never
+    restart: 'no'
+    environment: *app-env
+    # Seeding only inserts the default queues that are missing (ON CONFLICT DO
+    # NOTHING); it never changes existing rows.
     command:
-      - redpanda
-      - start
-      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
-      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
-      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
-      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
-      - --rpc-addr redpanda:33145
-      - --advertise-rpc-addr redpanda:33145
-      - --mode dev-container
-      - --smp 2
-      - --memory 1G
-      - --default-log-level=info
-    ports:
-      - '18081:18081'
-      - '18082:18082'
-      - '19092:19092'
-      - '19644:9644'
-    volumes:
-      - redpanda_data:/var/lib/redpanda/data
-    healthcheck:
-      test: ['CMD-SHELL', 'rpk cluster health | grep healthy']
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    networks:
-      - taskflow
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 1536M
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-    # Security options
-    security_opt:
-      - no-new-privileges:true
+      - sh
+      - -c
+      - node node_modules/@taskflow/database/dist/migrate.js && node node_modules/@taskflow/database/dist/seed.js
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [taskflow]
+    logging: *default-logging
 
-  # API Server
   api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-      cache_from:
-        - ghcr.io/${GITHUB_REPOSITORY_OWNER:-taskflow}/taskflow-api:latest
     image: taskflow-api:${VERSION:-latest}
-    container_name: taskflow-api
     restart: unless-stopped
     environment:
-      NODE_ENV: production
-      PORT: 3000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-taskflow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-taskflow}
-      REDIS_URL: redis://redis:6379
-      KAFKA_BROKERS: redpanda:9092
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
-      API_KEY: ${API_KEY:?API_KEY must be set}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      SHUTDOWN_TIMEOUT: 30000
-    ports:
-      - '${API_PORT:-3000}:3000'
+      <<: *app-env
+      API_HOST: 0.0.0.0
+      API_PORT: 3000
+      API_SHUTDOWN_TIMEOUT_MS: 30000
+      # Requests arrive through the dashboard's nginx on this network.
+      API_TRUSTED_PROXIES: 172.28.0.0/16
+      RATE_LIMIT_JOB_SUBMISSION_PER_MIN: ${RATE_LIMIT_JOB_SUBMISSION_PER_MIN:-50}
+      RATE_LIMIT_MUTATION_PER_MIN: ${RATE_LIMIT_MUTATION_PER_MIN:-50}
+      RATE_LIMIT_READ_PER_MIN: ${RATE_LIMIT_READ_PER_MIN:-200}
+      RATE_LIMIT_METRICS_PER_MIN: ${RATE_LIMIT_METRICS_PER_MIN:-1000}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
-      redpanda:
-        condition: service_healthy
-    healthcheck:
-      test: ['CMD', 'node', '-e', "require('http').get('http://localhost:3000/api/v1/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => { process.exit(1); });"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    networks:
-      - taskflow
-    # Resource limits
+    networks: [taskflow]
+    stop_grace_period: 40s
     deploy:
-      replicas: ${API_REPLICAS:-2}
+      replicas: ${API_REPLICAS:-1}
       resources:
         limits:
           cpus: '1.0'
           memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-    # Security options
     security_opt:
       - no-new-privileges:true
     read_only: true
     tmpfs:
       - /tmp
-    # Logging
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
 
-  # Worker Pool
   worker:
     build:
       context: .
       dockerfile: apps/worker/Dockerfile
-      cache_from:
-        - ghcr.io/${GITHUB_REPOSITORY_OWNER:-taskflow}/taskflow-worker:latest
     image: taskflow-worker:${VERSION:-latest}
     restart: unless-stopped
     environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-taskflow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-taskflow}
-      REDIS_URL: redis://redis:6379
-      KAFKA_BROKERS: redpanda:9092
-      LOG_LEVEL: ${LOG_LEVEL:-info}
+      <<: *app-env
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
-      WORKER_QUEUES: ${WORKER_QUEUES:-default,high-priority,low-priority}
-      SHUTDOWN_TIMEOUT: 60000
+      WORKER_QUEUES: ${WORKER_QUEUES:-default,email,critical,low}
+      # /metrics has no authentication: it listens on all interfaces of the
+      # internal network only, and the port is not published.
+      WORKER_METRICS_PORT: 9464
+      WORKER_METRICS_HOST: 0.0.0.0
+      DISPATCH_MAX_IN_FLIGHT_PER_QUEUE: ${DISPATCH_MAX_IN_FLIGHT_PER_QUEUE:-200}
+      RETENTION_ENABLED: ${RETENTION_ENABLED:-true}
+      RETENTION_INTERVAL_MS: ${RETENTION_INTERVAL_MS:-3600000}
+      RETENTION_BATCH_SIZE: ${RETENTION_BATCH_SIZE:-500}
+      RETENTION_JOBS_DAYS: ${RETENTION_JOBS_DAYS:-30}
+      RETENTION_EVENTS_DAYS: ${RETENTION_EVENTS_DAYS:-14}
+      RETENTION_ATTEMPTS_DAYS: ${RETENTION_ATTEMPTS_DAYS:-14}
+      RETENTION_DEAD_LETTERS_DAYS: ${RETENTION_DEAD_LETTERS_DAYS:-30}
+      RETENTION_DELIVERIES_DAYS: ${RETENTION_DELIVERIES_DAYS:-7}
+      RETENTION_WORKERS_DAYS: ${RETENTION_WORKERS_DAYS:-7}
+      RETENTION_IDEMPOTENCY_KEYS_HOURS: ${RETENTION_IDEMPOTENCY_KEYS_HOURS:-24}
+      RETENTION_AUDIT_LOGS_DAYS: ${RETENTION_AUDIT_LOGS_DAYS:-90}
+      RETENTION_REDIS_STREAM_MAX_LEN: ${RETENTION_REDIS_STREAM_MAX_LEN:-100000}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
-      redpanda:
-        condition: service_healthy
-      api:
-        condition: service_healthy
-    healthcheck:
-      test: ['CMD', 'pgrep', '-f', 'node.*worker']
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    networks:
-      - taskflow
-    # Resource limits
+    networks: [taskflow]
+    # Lets in-flight jobs drain, then leases are released (see the shutdown ADR).
+    stop_grace_period: 70s
     deploy:
-      replicas: ${WORKER_REPLICAS:-3}
+      replicas: ${WORKER_REPLICAS:-2}
       resources:
         limits:
           cpus: '2.0'
           memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-    # Security options
     security_opt:
       - no-new-privileges:true
     read_only: true
     tmpfs:
       - /tmp
-    # Logging
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
 
-  # Dashboard
   dashboard:
     build:
       context: .
       dockerfile: apps/dashboard/Dockerfile
-      cache_from:
-        - ghcr.io/${GITHUB_REPOSITORY_OWNER:-taskflow}/taskflow-dashboard:latest
+      args:
+        # Empty: the SPA calls /api/v1 on its own origin and nginx proxies it.
+        VITE_API_URL: ${VITE_API_URL:-}
     image: taskflow-dashboard:${VERSION:-latest}
-    container_name: taskflow-dashboard
     restart: unless-stopped
-    environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:3000/api/v1}
     ports:
-      - '${DASHBOARD_PORT:-3001}:80'
+      - '${DASHBOARD_PORT:-8080}:8080'
     depends_on:
       api:
         condition: service_healthy
-    healthcheck:
-      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:80/health']
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-    networks:
-      - taskflow
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256M
-        reservations:
-          cpus: '0.1'
-          memory: 64M
-    # Security options
+    networks: [taskflow]
     security_opt:
       - no-new-privileges:true
     read_only: true
     tmpfs:
-      - /var/cache/nginx
-      - /var/run
-    # Logging
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - /tmp
+    logging: *default-logging
 
-  # Prometheus (Monitoring)
   prometheus:
-    image: prom/prometheus:latest
-    container_name: taskflow-prometheus
+    image: prom/prometheus:v3.15.0
     restart: unless-stopped
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=30d'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
       - '--web.enable-lifecycle'
     ports:
-      - '${PROMETHEUS_PORT:-9091}:9090'
+      - '${PROMETHEUS_PORT:-9092}:9090'
     volumes:
-      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infrastructure/prometheus/prometheus.stack.yml:/etc/prometheus/prometheus.yml:ro
+      # Holds stack_api_key: an admin API key for this stack's database (see
+      # docs/observability.md). GET /metrics on the API is admin-only.
+      - ./infrastructure/prometheus/secrets:/etc/prometheus/secrets:ro
       - prometheus_data:/prometheus
     healthcheck:
-      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:9090/-/healthy']
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://127.0.0.1:9090/-/healthy']
       interval: 30s
       timeout: 5s
       retries: 3
-    networks:
-      - taskflow
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-    # Security options
+    networks: [taskflow]
     security_opt:
       - no-new-privileges:true
-    # Logging
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
 
-  # Grafana (Dashboards)
   grafana:
-    image: grafana/grafana:latest
-    container_name: taskflow-grafana
+    image: grafana/grafana:13.2.4
     restart: unless-stopped
     ports:
-      - '${GRAFANA_PORT:-3002}:3000'
+      - '${GRAFANA_PORT:-3003}:3000'
     environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
       GF_USERS_ALLOW_SIGN_UP: 'false'
-      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3002}
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_INSTALL_PLUGINS: ${GRAFANA_PLUGINS:-}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3003}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
     healthcheck:
-      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:3000/api/health']
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://127.0.0.1:3000/api/health']
       interval: 30s
       timeout: 5s
       retries: 3
-    networks:
-      - taskflow
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.1'
-          memory: 128M
-    # Security options
+    networks: [taskflow]
     security_opt:
       - no-new-privileges:true
-    # Logging
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
 
 volumes:
   postgres_data:
-    driver: local
   redis_data:
-    driver: local
-  redpanda_data:
-    driver: local
   prometheus_data:
-    driver: local
   grafana_data:
-    driver: local
 
 networks:
   taskflow:

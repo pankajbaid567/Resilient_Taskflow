@@ -1,28 +1,21 @@
 {
-  "annotations": {
-    "list": [
-      {
-        "builtIn": 1,
-        "datasource": {
-          "type": "grafana",
-          "uid": "-- Grafana --"
-        },
-        "enable": true,
-        "hide": true,
-        "iconColor": "rgba(0, 211, 255, 1)",
-        "name": "Annotations & Alerts",
-        "type": "dashboard"
-      }
-    ]
-  },
+  "uid": "taskflow-overview",
+  "title": "TaskFlow - System Overview",
+  "tags": ["taskflow"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
   "editable": true,
-  "fiscalYearStartMonth": 0,
-  "graphTooltip": 1,
-  "id": null,
-  "links": [],
-  "liveNow": false,
+  "refresh": "10s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
   "panels": [
     {
+      "id": 1,
+      "type": "row",
+      "title": "Overview",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -30,34 +23,16 @@
         "x": 0,
         "y": 0
       },
-      "id": 1,
-      "panels": [],
-      "title": "System Overview",
-      "type": "row"
+      "panels": []
     },
     {
+      "id": 2,
+      "type": "stat",
+      "title": "Live workers",
+      "description": "Workers that are ACTIVE and heartbeating (each counted once).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
       },
       "gridPos": {
         "h": 4,
@@ -65,60 +40,60 @@
         "x": 0,
         "y": 1
       },
-      "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "expr": "sum(taskflow_jobs_current)",
-          "refId": "A"
-        }
-      ],
-      "title": "Total Jobs",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
       "fieldConfig": {
         "defaults": {
+          "unit": "short",
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
-              },
-              {
                 "color": "red",
-                "value": 0
+                "value": null
               },
               {
                 "color": "green",
                 "value": 1
               }
             ]
-          },
-          "unit": "short"
+          }
         },
         "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(taskflow_workers_live{job=\"taskflow-api\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Queued",
+      "description": "Jobs waiting for a worker.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       },
       "gridPos": {
         "h": 4,
@@ -126,60 +101,56 @@
         "x": 4,
         "y": 1
       },
-      "id": 3,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "expr": "sum(taskflow_workers_active)",
-          "refId": "A"
-        }
-      ],
-      "title": "Active Workers",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
       "fieldConfig": {
         "defaults": {
+          "unit": "short",
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 100
-              },
-              {
-                "color": "red",
-                "value": 1000
               }
             ]
-          },
-          "unit": "short"
+          }
         },
         "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(avg without (instance, job) (taskflow_jobs_current{status=\"QUEUED\",job=\"taskflow-api\"}))",
+          "legendFormat": "",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Processing",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       },
       "gridPos": {
         "h": 4,
@@ -187,70 +158,195 @@
         "x": 8,
         "y": 1
       },
-      "id": 4,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
         "reduceOptions": {
           "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
+        "colorMode": "value",
+        "graphMode": "area",
         "textMode": "auto"
       },
-      "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "sum(taskflow_queue_depth)",
-          "refId": "A"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(avg without (instance, job) (taskflow_jobs_current{status=\"PROCESSING\",job=\"taskflow-api\"}))",
+          "legendFormat": "",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
         }
-      ],
-      "title": "Queue Depth",
-      "type": "stat"
+      ]
     },
     {
+      "id": 5,
+      "type": "stat",
+      "title": "Dead-lettered",
+      "description": "Jobs that ran out of attempts or failed permanently and need attention.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
       "fieldConfig": {
         "defaults": {
+          "unit": "short",
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
           },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
           },
-          "mappings": [],
+          "expr": "sum(avg without (instance, job) (taskflow_dlq_depth{job=\"taskflow-api\"}))",
+          "legendFormat": "",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Oldest waiting job",
+      "description": "Age of the oldest QUEUED job. Rising means workers cannot keep up.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(taskflow_queue_lag_seconds{job=\"taskflow-api\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Attempt success rate (5m)",
+      "description": "Succeeded attempts / (succeeded + failed attempts). A retry counts as a failed attempt.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -260,41 +356,38 @@
               }
             ]
           },
-          "unit": "percent"
+          "decimals": 1
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 4,
-        "w": 12,
-        "x": 12,
-        "y": 1
-      },
-      "id": 5,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
       },
-      "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "rate(taskflow_jobs_completed_total[5m]) / (rate(taskflow_jobs_completed_total[5m]) + rate(taskflow_jobs_failed_total[5m])) * 100",
-          "legendFormat": "Success Rate",
-          "refId": "A"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(taskflow_jobs_completed_total[5m])) / (sum(rate(taskflow_jobs_completed_total[5m])) + sum(rate(taskflow_jobs_failed_total[5m])))",
+          "legendFormat": "",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
         }
-      ],
-      "title": "Job Success Rate",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 8,
+      "type": "row",
+      "title": "Throughput",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -302,64 +395,16 @@
         "x": 0,
         "y": 5
       },
-      "id": 10,
-      "panels": [],
-      "title": "Job Throughput",
-      "type": "row"
+      "panels": []
     },
     {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Jobs submitted vs finished (per second)",
+      "description": "Submitted above finished for long means a growing backlog.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "jobs/sec",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -367,93 +412,71 @@
         "x": 0,
         "y": 6
       },
-      "id": 11,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
       "options": {
         "legend": {
-          "calcs": ["mean", "lastNotNull"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
           "sort": "desc"
         }
       },
-      "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "rate(taskflow_jobs_submitted_total[5m])",
-          "legendFormat": "Submitted - {{queue}}",
-          "refId": "A"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(taskflow_jobs_submitted_total[1m]))",
+          "legendFormat": "submitted",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
         },
         {
-          "expr": "rate(taskflow_jobs_completed_total[5m])",
-          "legendFormat": "Completed - {{queue}}",
-          "refId": "B"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(taskflow_jobs_completed_total[1m]))",
+          "legendFormat": "succeeded",
+          "refId": "B",
+          "editorMode": "code",
+          "range": true
         },
         {
-          "expr": "rate(taskflow_jobs_failed_total[5m])",
-          "legendFormat": "Failed - {{queue}}",
-          "refId": "C"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(taskflow_jobs_failed_total[1m]))",
+          "legendFormat": "failed attempts",
+          "refId": "C",
+          "editorMode": "code",
+          "range": true
         }
-      ],
-      "title": "Job Throughput by Queue",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Jobs by status",
+      "description": "Retained jobs per status (retention removes old terminal jobs).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "normal"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -461,861 +484,855 @@
         "x": 12,
         "y": 6
       },
-      "id": 12,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
       "options": {
         "legend": {
-          "calcs": ["mean", "lastNotNull"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
           "sort": "desc"
         }
       },
-      "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "taskflow_jobs_current{status=\"queued\"}",
-          "legendFormat": "Queued - {{queue}}",
-          "refId": "A"
-        },
-        {
-          "expr": "taskflow_jobs_current{status=\"running\"}",
-          "legendFormat": "Running - {{queue}}",
-          "refId": "B"
-        },
-        {
-          "expr": "taskflow_jobs_current{status=\"failed\"}",
-          "legendFormat": "Failed - {{queue}}",
-          "refId": "C"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (status) (avg without (instance, job) (taskflow_jobs_current{job=\"taskflow-api\"}) > 0)",
+          "legendFormat": "{{status}}",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
         }
-      ],
-      "title": "Current Jobs by Status",
-      "type": "timeseries"
+      ]
     },
     {
-      "collapsed": false,
+      "id": 11,
+      "type": "timeseries",
+      "title": "Dispatcher: published vs window-limited (per second)",
+      "description": "'Window full' means the queue's Redis window was full, so the backlog stayed in PostgreSQL ordered by priority.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "gridPos": {
-        "h": 1,
-        "w": 24,
+        "h": 8,
+        "w": 12,
         "x": 0,
         "y": 14
       },
-      "id": 20,
-      "panels": [],
-      "title": "Latency & Performance",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
+          "unit": "ops",
           "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "seconds",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "s"
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 15
-      },
-      "id": 21,
       "options": {
         "legend": {
-          "calcs": ["mean", "lastNotNull"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
           "sort": "desc"
         }
       },
-      "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, rate(taskflow_job_duration_seconds_bucket[5m]))",
-          "legendFormat": "P50",
-          "refId": "A"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (queue) (rate(taskflow_dispatcher_published_total[1m]))",
+          "legendFormat": "published {{queue}}",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
         },
         {
-          "expr": "histogram_quantile(0.95, rate(taskflow_job_duration_seconds_bucket[5m]))",
-          "legendFormat": "P95",
-          "refId": "B"
-        },
-        {
-          "expr": "histogram_quantile(0.99, rate(taskflow_job_duration_seconds_bucket[5m]))",
-          "legendFormat": "P99",
-          "refId": "C"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (queue) (rate(taskflow_dispatcher_window_limited_total[1m]))",
+          "legendFormat": "window full {{queue}}",
+          "refId": "B",
+          "editorMode": "code",
+          "range": true
         }
-      ],
-      "title": "Job Duration Percentiles",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Failures by cause",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "seconds",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 15
+        "y": 14
       },
-      "id": 22,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
       "options": {
         "legend": {
-          "calcs": ["mean", "lastNotNull"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
           "sort": "desc"
         }
       },
-      "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, rate(taskflow_job_wait_duration_seconds_bucket[5m]))",
-          "legendFormat": "P50 Wait Time",
-          "refId": "A"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (error_type) (rate(taskflow_jobs_failed_total[5m]))",
+          "legendFormat": "failed: {{error_type}}",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
         },
         {
-          "expr": "histogram_quantile(0.95, rate(taskflow_job_wait_duration_seconds_bucket[5m]))",
-          "legendFormat": "P95 Wait Time",
-          "refId": "B"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(taskflow_jobs_retried_total[5m]))",
+          "legendFormat": "retried",
+          "refId": "B",
+          "editorMode": "code",
+          "range": true
         },
         {
-          "expr": "histogram_quantile(0.99, rate(taskflow_job_wait_duration_seconds_bucket[5m]))",
-          "legendFormat": "P99 Wait Time",
-          "refId": "C"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (rate(taskflow_jobs_dead_lettered_total[5m]))",
+          "legendFormat": "dead-lettered: {{reason}}",
+          "refId": "C",
+          "editorMode": "code",
+          "range": true
         }
-      ],
-      "title": "Job Wait Time Percentiles",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 13,
+      "type": "row",
+      "title": "Latency",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "panels": []
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Job run time",
+      "description": "Handler time for succeeded jobs, per worker-reported duration.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
         "x": 0,
         "y": 23
       },
-      "id": 30,
-      "panels": [],
-      "title": "Queue Health",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
+          "unit": "s",
           "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "jobs",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 100
-              },
-              {
-                "color": "red",
-                "value": 1000
-              }
-            ]
-          },
-          "unit": "short"
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 24
-      },
-      "id": 31,
       "options": {
         "legend": {
-          "calcs": ["mean", "max"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
           "sort": "desc"
         }
       },
-      "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "taskflow_queue_depth{priority=\"CRITICAL\"}",
-          "legendFormat": "Critical - {{queue}}",
-          "refId": "A"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(taskflow_job_duration_seconds_bucket{status=\"SUCCEEDED\"}[5m])))",
+          "legendFormat": "p50",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
         },
         {
-          "expr": "taskflow_queue_depth{priority=\"HIGH\"}",
-          "legendFormat": "High - {{queue}}",
-          "refId": "B"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(taskflow_job_duration_seconds_bucket{status=\"SUCCEEDED\"}[5m])))",
+          "legendFormat": "p95",
+          "refId": "B",
+          "editorMode": "code",
+          "range": true
         },
         {
-          "expr": "taskflow_queue_depth{priority=\"NORMAL\"}",
-          "legendFormat": "Normal - {{queue}}",
-          "refId": "C"
-        },
-        {
-          "expr": "taskflow_queue_depth{priority=\"LOW\"}",
-          "legendFormat": "Low - {{queue}}",
-          "refId": "D"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(taskflow_job_duration_seconds_bucket{status=\"SUCCEEDED\"}[5m])))",
+          "legendFormat": "p99",
+          "refId": "C",
+          "editorMode": "code",
+          "range": true
         }
-      ],
-      "title": "Queue Depth by Priority",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Wait time by priority (p95)",
+      "description": "From a job becoming due to a worker starting it. With priority working, CRITICAL waits less than LOW under load.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "seconds",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 30
-              },
-              {
-                "color": "red",
-                "value": 60
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 23
       },
-      "id": 32,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
       "options": {
         "legend": {
-          "calcs": ["mean", "max"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
           "sort": "desc"
         }
       },
-      "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "taskflow_queue_lag_seconds",
-          "legendFormat": "Queue Lag - {{queue}}",
-          "refId": "A"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, priority) (rate(taskflow_job_wait_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{priority}}",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
         }
-      ],
-      "title": "Queue Lag (Age of Oldest Job)",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 16,
+      "type": "row",
+      "title": "Queues",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "panels": []
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Backlog by priority",
+      "description": "QUEUED jobs per priority.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
         "x": 0,
         "y": 32
       },
-      "id": 40,
-      "panels": [],
-      "title": "Worker Health",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
+          "unit": "short",
           "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "workers",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
+            "lineWidth": 2,
+            "fillOpacity": 15,
             "showPoints": "never",
-            "spanNulls": false,
             "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
+              "mode": "normal",
+              "group": "A"
             }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "short"
+          }
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 33
-      },
-      "id": 41,
       "options": {
         "legend": {
-          "calcs": ["mean", "lastNotNull"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
           "sort": "desc"
         }
       },
-      "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "taskflow_workers_active",
-          "legendFormat": "Active Workers - {{queue}}",
-          "refId": "A"
-        },
-        {
-          "expr": "sum(taskflow_worker_jobs_concurrent)",
-          "legendFormat": "Total Jobs Processing",
-          "refId": "B"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (priority) (avg without (instance, job) (taskflow_queue_depth{job=\"taskflow-api\"}))",
+          "legendFormat": "{{priority}}",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
         }
-      ],
-      "title": "Worker Activity",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Oldest waiting job per queue",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "failures/sec",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 33
+        "y": 32
       },
-      "id": 42,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
       "options": {
         "legend": {
-          "calcs": ["mean", "max"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
           "sort": "desc"
         }
       },
-      "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "rate(taskflow_worker_failures_total[5m])",
-          "legendFormat": "Worker Failures - {{worker_id}}",
-          "refId": "A"
-        },
-        {
-          "expr": "rate(taskflow_worker_lease_acquisition_failures_total[5m])",
-          "legendFormat": "Lease Failures - {{worker_id}}",
-          "refId": "B"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "avg without (instance, job) (taskflow_queue_lag_seconds{job=\"taskflow-api\"})",
+          "legendFormat": "{{queue}}",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
         }
-      ],
-      "title": "Worker Failures",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 19,
+      "type": "row",
+      "title": "Workers",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 40
       },
-      "id": 50,
-      "panels": [],
-      "title": "API Performance",
-      "type": "row"
+      "panels": []
     },
     {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Running jobs",
+      "description": "Jobs executing across all workers.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "req/sec",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 42
+        "y": 41
       },
-      "id": 51,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
       "options": {
         "legend": {
-          "calcs": ["mean", "lastNotNull"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
           "sort": "desc"
         }
       },
-      "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "rate(taskflow_http_requests_total{status=~\"2..\"}[5m])",
-          "legendFormat": "2xx - {{method}} {{path}}",
-          "refId": "A"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(taskflow_worker_jobs_concurrent)",
+          "legendFormat": "running",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
         },
         {
-          "expr": "rate(taskflow_http_requests_total{status=~\"4..\"}[5m])",
-          "legendFormat": "4xx - {{method}} {{path}}",
-          "refId": "B"
-        },
-        {
-          "expr": "rate(taskflow_http_requests_total{status=~\"5..\"}[5m])",
-          "legendFormat": "5xx - {{method}} {{path}}",
-          "refId": "C"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(taskflow_workers_live{job=\"taskflow-api\"})",
+          "legendFormat": "live workers",
+          "refId": "B",
+          "editorMode": "code",
+          "range": true
         }
-      ],
-      "title": "API Request Rate",
-      "type": "timeseries"
+      ]
     },
     {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Lease renewals and contention (per second)",
+      "description": "'Not acquired' is contention (another worker holds it, or it is not due), not an error.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "seconds",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 42
+        "y": 41
       },
-      "id": 52,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
       "options": {
         "legend": {
-          "calcs": ["mean", "lastNotNull"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
           "sort": "desc"
         }
       },
-      "pluginVersion": "10.0.0",
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, rate(taskflow_http_request_duration_seconds_bucket[5m]))",
-          "legendFormat": "P50",
-          "refId": "A"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(taskflow_worker_lease_renewals_total[1m]))",
+          "legendFormat": "renewals",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
         },
         {
-          "expr": "histogram_quantile(0.95, rate(taskflow_http_request_duration_seconds_bucket[5m]))",
-          "legendFormat": "P95",
-          "refId": "B"
-        },
-        {
-          "expr": "histogram_quantile(0.99, rate(taskflow_http_request_duration_seconds_bucket[5m]))",
-          "legendFormat": "P99",
-          "refId": "C"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (rate(taskflow_worker_lease_acquisition_failures_total[1m]))",
+          "legendFormat": "not acquired: {{reason}}",
+          "refId": "B",
+          "editorMode": "code",
+          "range": true
         }
-      ],
-      "title": "API Latency Percentiles",
-      "type": "timeseries"
+      ]
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Process memory (RSS)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "process_resident_memory_bytes{job=~\"taskflow-.*\"}",
+          "legendFormat": "{{job}} {{instance}}",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Event loop lag (p99)",
+      "description": "A busy handler blocking the event loop shows up here.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "nodejs_eventloop_lag_p99_seconds{job=~\"taskflow-.*\"}",
+          "legendFormat": "{{job}} {{instance}}",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "row",
+      "title": "API",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 57
+      },
+      "panels": []
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Request rate by status",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 58
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (status) (rate(taskflow_http_requests_total[1m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Request latency",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 58
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(taskflow_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(taskflow_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "B",
+          "editorMode": "code",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(taskflow_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99",
+          "refId": "C",
+          "editorMode": "code",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "Requests by route",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 66
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (method, path) (rate(taskflow_http_requests_total[1m]))",
+          "legendFormat": "{{method}} {{path}}",
+          "refId": "A",
+          "editorMode": "code",
+          "range": true
+        }
+      ]
     }
   ],
-  "refresh": "10s",
-  "schemaVersion": 38,
-  "style": "dark",
-  "tags": ["taskflow", "job-queue", "distributed-systems"],
   "templating": {
     "list": []
   },
-  "time": {
-    "from": "now-1h",
-    "to": "now"
-  },
-  "timepicker": {},
-  "timezone": "",
-  "title": "TaskFlow - System Overview",
-  "uid": "taskflow-overview",
-  "version": 1,
-  "weekStart": ""
+  "annotations": {
+    "list": []
+  }
 }

@@ -1,4 +1,8 @@
 name: Deploy
+# PLACEHOLDER: this workflow targets AWS ECS/ECR and has never been run. The
+# project currently runs locally (see docker-compose.prod.yml); the ECS
+# services, task definitions, ECR repositories and secrets referenced below do
+# not exist yet. Do not treat it as a working deployment pipeline.
 
 on:
   workflow_dispatch:
@@ -48,7 +52,7 @@ jobs:
           aws ecs describe-task-definition \
             --task-definition taskflow-api-${{ inputs.environment }} \
             --query taskDefinition > api-task-def.json
-          
+
           aws ecs describe-task-definition \
             --task-definition taskflow-worker-${{ inputs.environment }} \
             --query taskDefinition > worker-task-def.json
@@ -89,12 +93,12 @@ jobs:
         run: |
           # Download dashboard build
           aws s3 sync s3://taskflow-dashboard-builds/${{ inputs.version }} ./dashboard-build
-          
+
           # Upload to S3
           aws s3 sync ./dashboard-build s3://taskflow-dashboard-${{ inputs.environment }} \
             --delete \
             --cache-control "public, max-age=31536000, immutable"
-          
+
           # Invalidate CloudFront
           aws cloudfront create-invalidation \
             --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
@@ -115,7 +119,7 @@ jobs:
           API_URL="${{ secrets.API_URL }}"
           MAX_RETRIES=30
           RETRY_INTERVAL=10
-          
+
           for i in $(seq 1 $MAX_RETRIES); do
             echo "Health check attempt $i/$MAX_RETRIES"
             if curl -f "$API_URL/health" > /dev/null 2>&1; then
@@ -125,27 +129,27 @@ jobs:
             fi
             sleep $RETRY_INTERVAL
           done
-          
+
           echo "Health check failed after $MAX_RETRIES attempts"
           exit 1
 
       - name: Smoke tests
         run: |
           API_URL="${{ secrets.API_URL }}"
-          
+
           # Test job submission
           RESPONSE=$(curl -s -X POST "$API_URL/jobs" \
             -H "X-API-Key: ${{ secrets.API_KEY }}" \
             -H "Content-Type: application/json" \
             -d '{"type":"test","payload":{"test":true}}')
-          
+
           JOB_ID=$(echo $RESPONSE | jq -r '.id')
           echo "Created test job: $JOB_ID"
-          
+
           # Test job retrieval
           curl -f "$API_URL/jobs/$JOB_ID" \
             -H "X-API-Key: ${{ secrets.API_KEY }}" || exit 1
-          
+
           echo "Smoke tests passed"
 
       - name: Notify deployment success
@@ -211,13 +215,13 @@ jobs:
             --services taskflow-api-${{ inputs.environment }} \
             --query 'services[0].deployments[1].taskDefinition' \
             --output text)
-          
+
           PREVIOUS_WORKER_REVISION=$(aws ecs describe-services \
             --cluster taskflow-${{ inputs.environment }} \
             --services taskflow-worker-${{ inputs.environment }} \
             --query 'services[0].deployments[1].taskDefinition' \
             --output text)
-          
+
           # Rollback to previous revisions
           if [ -n "$PREVIOUS_API_REVISION" ]; then
             aws ecs update-service \
@@ -225,7 +229,7 @@ jobs:
               --service taskflow-api-${{ inputs.environment }} \
               --task-definition $PREVIOUS_API_REVISION
           fi
-          
+
           if [ -n "$PREVIOUS_WORKER_REVISION" ]; then
             aws ecs update-service \
               --cluster taskflow-${{ inputs.environment }} \

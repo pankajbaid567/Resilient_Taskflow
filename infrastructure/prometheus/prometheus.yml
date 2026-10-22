@@ -1,3 +1,10 @@
+# Prometheus scrape configuration for LOCAL DEVELOPMENT (docker-compose.yml).
+# The prod-like stack uses prometheus.stack.yml, which scrapes service names on
+# the compose network instead of the host.
+#
+# Prometheus runs in Docker; the API and worker run on the host, so they are
+# reached through host.docker.internal.
+
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -10,20 +17,27 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
+  # GET /metrics is admin-only, so the scrape sends an admin API key. The key is
+  # read from a file at scrape time and never appears in this config:
+  #
+  #   pnpm db:create-api-key -- --role admin --name prometheus \
+  #     --out infrastructure/prometheus/secrets/api_key
+  #
+  # The directory is git-ignored. Requires Prometheus >= 2.55 (http_headers).
   - job_name: 'taskflow-api'
+    metrics_path: /metrics
+    http_headers:
+      X-API-Key:
+        files:
+          - /etc/prometheus/secrets/api_key
     static_configs:
-      - targets: ['host.docker.internal:9090']
-    metrics_path: '/metrics'
+      - targets: ['host.docker.internal:3000']
 
+  # The worker's /metrics endpoint has no authentication. For this to work the
+  # worker must listen on a non-loopback address, e.g. WORKER_METRICS_HOST=0.0.0.0
+  # (loopback is unreachable from the container). That exposes the port on every
+  # interface of this machine, so use it only on a trusted network.
   - job_name: 'taskflow-worker'
+    metrics_path: /metrics
     static_configs:
-      - targets: ['host.docker.internal:9091']
-    metrics_path: '/metrics'
-
-  - job_name: 'redis'
-    static_configs:
-      - targets: ['redis:6379']
-
-  - job_name: 'postgres'
-    static_configs:
-      - targets: ['postgres:5432']
+      - targets: ['host.docker.internal:9464']

@@ -1,0 +1,41 @@
+# Prometheus scrape configuration for the production-style stack
+# (docker-compose.prod.yml). Everything runs on one compose network, so targets
+# are service names. DNS service discovery returns one target per replica.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'taskflow'
+    environment: 'production'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # GET /metrics is admin-only. The key is read from a file at scrape time:
+  #
+  #   docker compose -p taskflow-prod --env-file .env.prod.local \
+  #     -f docker-compose.prod.yml run --rm --no-deps migrate \
+  #     node node_modules/@taskflow/database/dist/create-api-key.js \
+  #     --role admin --name prometheus
+  #
+  # Save the printed key to infrastructure/prometheus/secrets/stack_api_key
+  # (git-ignored, mode 0644 so the Prometheus user can read it).
+  - job_name: 'taskflow-api'
+    metrics_path: /metrics
+    http_headers:
+      X-API-Key:
+        files:
+          - /etc/prometheus/secrets/stack_api_key
+    dns_sd_configs:
+      - names: ['api']
+        type: A
+        port: 3000
+
+  - job_name: 'taskflow-worker'
+    metrics_path: /metrics
+    dns_sd_configs:
+      - names: ['worker']
+        type: A
+        port: 9464
