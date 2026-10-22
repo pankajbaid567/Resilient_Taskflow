@@ -51,14 +51,14 @@ export const metrics = {
 
 export const commonThresholds = {
   // HTTP request thresholds
-  'http_req_duration': ['p(95)<500', 'p(99)<1000'], // 95th percentile < 500ms, 99th < 1s
-  'http_req_failed': ['rate<0.01'], // Error rate < 1%
-  'http_reqs': ['rate>10'], // At least 10 req/s
+  http_req_duration: ['p(95)<500', 'p(99)<1000'], // 95th percentile < 500ms, 99th < 1s
+  http_req_failed: ['rate<0.01'], // Error rate < 1%
+  http_reqs: ['rate>10'], // At least 10 req/s
 
   // Custom metric thresholds
-  'job_submission_duration': ['p(95)<200', 'p(99)<500'], // Job submission fast
-  'job_completion_duration': ['p(95)<5000', 'p(99)<10000'], // Job completion under 10s
-  'queue_depth': ['value<1000'], // Queue not backing up
+  job_submission_duration: ['p(95)<200', 'p(99)<500'], // Job submission fast
+  job_completion_duration: ['p(95)<5000', 'p(99)<10000'], // Job completion under 10s
+  queue_depth: ['value<1000'], // Queue not backing up
 };
 
 // =============================================================================
@@ -71,7 +71,7 @@ export class TaskFlowClient {
     this.apiKey = apiKey;
     this.headers = {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
     };
   }
 
@@ -221,7 +221,13 @@ export class TaskFlowClient {
  * Generate a random job type
  */
 export function randomJobType() {
-  const types = ['email-send', 'image-resize', 'data-export', 'report-generate', 'notification-send'];
+  const types = [
+    'email-send',
+    'image-resize',
+    'data-export',
+    'report-generate',
+    'notification-send',
+  ];
   return types[Math.floor(Math.random() * types.length)];
 }
 
@@ -290,14 +296,24 @@ export function generateUUID() {
 /**
  * Wait for job completion with polling
  */
-export function waitForJobCompletion(client, jobId, maxWaitMs = 30000, pollIntervalMs = 500) {
+export function waitForJobCompletion(
+  client,
+  jobId,
+  maxWaitMs = 30000,
+  pollIntervalMs = 500
+) {
   const startTime = Date.now();
   let job = null;
 
   while (Date.now() - startTime < maxWaitMs) {
     job = client.getJob(jobId);
 
-    if (job && (job.status === 'COMPLETED' || job.status === 'FAILED' || job.status === 'CANCELLED')) {
+    if (
+      job &&
+      (job.status === 'COMPLETED' ||
+        job.status === 'FAILED' ||
+        job.status === 'CANCELLED')
+    ) {
       const duration = Date.now() - startTime;
       if (job.status === 'COMPLETED') {
         metrics.jobCompletionSuccess.add(1);
@@ -333,8 +349,13 @@ export function collectSystemMetrics(client) {
     // Worker stats
     const workerStats = client.getWorkerStats();
     if (workerStats && workerStats.workers) {
-      const activeCount = workerStats.workers.filter((w) => w.status === 'ACTIVE').length;
-      const processingCount = workerStats.workers.reduce((sum, w) => sum + (w.jobsProcessing || 0), 0);
+      const activeCount = workerStats.workers.filter(
+        (w) => w.status === 'ACTIVE'
+      ).length;
+      const processingCount = workerStats.workers.reduce(
+        (sum, w) => sum + (w.jobsProcessing || 0),
+        0
+      );
       metrics.activeWorkers.add(activeCount);
       metrics.jobsProcessingCurrent.add(processingCount);
     }
@@ -379,7 +400,11 @@ export function createRampingScenario(stages, options = {}) {
 /**
  * Create constant arrival rate scenario
  */
-export function createConstantArrivalRateScenario(rate, duration, options = {}) {
+export function createConstantArrivalRateScenario(
+  rate,
+  duration,
+  options = {}
+) {
   return {
     executor: 'constant-arrival-rate',
     rate: rate,

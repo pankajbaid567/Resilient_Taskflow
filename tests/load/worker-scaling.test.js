@@ -1,17 +1,17 @@
 /**
  * Worker Scaling Test
- * 
+ *
  * Purpose: Validate system scales linearly with worker count
  * Duration: 10 minutes
  * Pattern: Constant load with dynamic worker scaling
- * 
+ *
  * This test validates:
  * - Job throughput increases with worker count
  * - Queue depth decreases as workers are added
  * - System gracefully handles worker removal
  * - No job loss during worker scaling
  * - Leases properly transfer between workers
- * 
+ *
  * NOTE: This test requires manual worker scaling or a companion script
  * to add/remove workers at specific intervals. See README for details.
  */
@@ -49,10 +49,10 @@ export const options = {
   thresholds: {
     ...commonThresholds,
     // Worker scaling specific thresholds
-    'http_req_duration': ['p(95)<800', 'p(99)<1500'],
-    'http_req_failed': ['rate<0.02'], // 2% error rate acceptable during scaling
-    'job_submission_duration': ['p(95)<300'],
-    'queue_depth': ['value<1500'], // Queue may grow initially with 1 worker
+    http_req_duration: ['p(95)<800', 'p(99)<1500'],
+    http_req_failed: ['rate<0.02'], // 2% error rate acceptable during scaling
+    job_submission_duration: ['p(95)<300'],
+    queue_depth: ['value<1500'], // Queue may grow initially with 1 worker
   },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
 };
@@ -97,40 +97,43 @@ Alternatively, use the automated scaling script:
 
 export function setup() {
   const client = new TaskFlowClient();
-  
+
   console.log('='.repeat(80));
   console.log('WORKER SCALING TEST - SETUP');
   console.log('='.repeat(80));
   console.log(SCALING_SCHEDULE);
   console.log('='.repeat(80));
-  
+
   // Health check
   console.log('Performing health check...');
   const health = client.healthCheck();
   console.log(`Health status: ${JSON.stringify(health)}`);
-  
+
   if (!health || health.status !== 'healthy') {
     throw new Error('System is not healthy. Aborting test.');
   }
-  
+
   // Get initial system state
   console.log('Collecting initial system state...');
   const queueStats = client.getQueueStats();
   const workerStats = client.getWorkerStats();
-  
-  const initialWorkerCount = workerStats?.workers?.filter(w => w.status === 'ACTIVE').length || 0;
-  
+
+  const initialWorkerCount =
+    workerStats?.workers?.filter((w) => w.status === 'ACTIVE').length || 0;
+
   console.log(`Initial queue depth: ${queueStats?.total || 0}`);
   console.log(`Active workers: ${initialWorkerCount}`);
-  
+
   if (initialWorkerCount === 0) {
-    console.warn('⚠️  WARNING: No active workers detected. Please start at least 1 worker before running test.');
+    console.warn(
+      '⚠️  WARNING: No active workers detected. Please start at least 1 worker before running test.'
+    );
   }
-  
+
   console.log('Setup complete. Starting constant load...');
   console.log('⏰ Remember to scale workers according to schedule!');
   console.log('='.repeat(80));
-  
+
   return {
     startTime: Date.now(),
     initialQueueDepth: queueStats?.total || 0,
@@ -145,7 +148,7 @@ export function setup() {
 
 export default function (data) {
   const client = new TaskFlowClient();
-  
+
   try {
     // Submit job at constant rate
     const job = client.submitJob({
@@ -154,34 +157,35 @@ export default function (data) {
       payload: randomPayload('small'),
       maxRetries: 3,
     });
-    
+
     if (!job) {
       console.error('Failed to submit job');
       return;
     }
-    
+
     // Minimal think time for constant load
     thinkTime(0.1, 0.3);
-    
+
     // Collect metrics frequently to track scaling impact
     if (__ITER % 5 === 0) {
       collectSystemMetrics(client);
-      
+
       // Take periodic snapshots for analysis
       if (__ITER % 50 === 0) {
         const elapsed = Math.floor((Date.now() - data.startTime) / 1000);
         const queueStats = client.getQueueStats();
         const workerStats = client.getWorkerStats();
-        const activeWorkers = workerStats?.workers?.filter(w => w.status === 'ACTIVE').length || 0;
-        
+        const activeWorkers =
+          workerStats?.workers?.filter((w) => w.status === 'ACTIVE').length ||
+          0;
+
         console.log(
           `[${elapsed}s] Workers: ${activeWorkers}, ` +
-          `Queue: ${queueStats?.total || 0}, ` +
-          `Jobs/s: ${(metrics.jobsPerSecond.value || 0).toFixed(2)}`
+            `Queue: ${queueStats?.total || 0}, ` +
+            `Jobs/s: ${(metrics.jobsPerSecond.value || 0).toFixed(2)}`
         );
       }
     }
-    
   } catch (error) {
     handleError(error, 'worker scaling test');
   }
@@ -193,37 +197,46 @@ export default function (data) {
 
 export function teardown(data) {
   const client = new TaskFlowClient();
-  
+
   console.log('='.repeat(80));
   console.log('WORKER SCALING TEST - TEARDOWN');
   console.log('='.repeat(80));
-  
+
   // Collect final system state
   console.log('Collecting final system state...');
   const queueStats = client.getQueueStats();
   const workerStats = client.getWorkerStats();
-  
-  const finalWorkerCount = workerStats?.workers?.filter(w => w.status === 'ACTIVE').length || 0;
+
+  const finalWorkerCount =
+    workerStats?.workers?.filter((w) => w.status === 'ACTIVE').length || 0;
   const finalQueueDepth = queueStats?.total || 0;
-  
+
   console.log(`Final queue depth: ${finalQueueDepth}`);
   console.log(`Active workers: ${finalWorkerCount}`);
-  
+
   const testDuration = (Date.now() - data.startTime) / 1000;
-  console.log(`Test duration: ${testDuration.toFixed(2)}s (${(testDuration / 60).toFixed(1)} minutes)`);
-  
+  console.log(
+    `Test duration: ${testDuration.toFixed(2)}s (${(testDuration / 60).toFixed(1)} minutes)`
+  );
+
   // Analysis
   const queueGrowth = finalQueueDepth - data.initialQueueDepth;
   console.log(`Queue growth: ${queueGrowth} jobs`);
-  
+
   if (queueGrowth > 1000) {
-    console.warn(`⚠️  Queue backed up significantly. Workers couldn't keep up with 50 jobs/s.`);
+    console.warn(
+      `⚠️  Queue backed up significantly. Workers couldn't keep up with 50 jobs/s.`
+    );
   } else if (queueGrowth > 200) {
-    console.log(`⚠️  Queue grew moderately. System is processing but not at full capacity.`);
+    console.log(
+      `⚠️  Queue grew moderately. System is processing but not at full capacity.`
+    );
   } else {
-    console.log(`✅ Queue remained manageable. Workers handled the load effectively.`);
+    console.log(
+      `✅ Queue remained manageable. Workers handled the load effectively.`
+    );
   }
-  
+
   console.log('Teardown complete.');
   console.log('='.repeat(80));
 }
@@ -234,20 +247,29 @@ export function teardown(data) {
 
 export function handleSummary(data) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  
+
   // Calculate metrics
-  const successRate = ((1 - (data.metrics.http_req_failed?.values?.rate || 0)) * 100).toFixed(2);
-  const avgLatency = (data.metrics.http_req_duration?.values?.avg || 0).toFixed(2);
-  const p95Latency = (data.metrics.http_req_duration?.values['p(95)'] || 0).toFixed(2);
-  const p99Latency = (data.metrics.http_req_duration?.values['p(99)'] || 0).toFixed(2);
+  const successRate = (
+    (1 - (data.metrics.http_req_failed?.values?.rate || 0)) *
+    100
+  ).toFixed(2);
+  const avgLatency = (data.metrics.http_req_duration?.values?.avg || 0).toFixed(
+    2
+  );
+  const p95Latency = (
+    data.metrics.http_req_duration?.values['p(95)'] || 0
+  ).toFixed(2);
+  const p99Latency = (
+    data.metrics.http_req_duration?.values['p(99)'] || 0
+  ).toFixed(2);
   const requestRate = (data.metrics.http_reqs?.values?.rate || 0).toFixed(2);
   const totalRequests = data.metrics.http_reqs?.values?.count || 0;
   const totalJobs = data.metrics.job_submission_success?.values?.count || 0;
-  
+
   // Calculate job throughput
   const testDurationMinutes = 10;
   const avgJobsPerSecond = (totalJobs / (testDurationMinutes * 60)).toFixed(2);
-  
+
   const customSummary = `
 ${'='.repeat(80)}
 WORKER SCALING TEST RESULTS
@@ -275,11 +297,13 @@ Performance Metrics:
   ✓ P99 Latency:         ${p99Latency}ms
 
 Thresholds:
-  ${data.metrics.http_req_duration?.thresholds ? 
-    Object.entries(data.metrics.http_req_duration.thresholds)
-      .map(([key, val]) => `  ${val.ok ? '✓' : '✗'} ${key}`)
-      .join('\n') 
-    : 'No thresholds defined'}
+  ${
+    data.metrics.http_req_duration?.thresholds
+      ? Object.entries(data.metrics.http_req_duration.thresholds)
+          .map(([key, val]) => `  ${val.ok ? '✓' : '✗'} ${key}`)
+          .join('\n')
+      : 'No thresholds defined'
+  }
 
 Job Metrics:
   Successful Submissions: ${data.metrics.job_submission_success?.values?.count || 0}
@@ -318,7 +342,8 @@ ${'='.repeat(80)}
 `;
 
   return {
-    'stdout': textSummary(data, { indent: ' ', enableColors: true }) + customSummary,
+    stdout:
+      textSummary(data, { indent: ' ', enableColors: true }) + customSummary,
     [`results/worker-scaling-${timestamp}.html`]: htmlReport(data),
     [`results/worker-scaling-${timestamp}.json`]: JSON.stringify(data, null, 2),
   };

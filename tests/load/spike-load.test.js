@@ -1,10 +1,10 @@
 /**
  * Spike Load Test
- * 
+ *
  * Purpose: Test system recovery from sudden traffic spikes
  * Duration: 3 minutes
  * Pattern: Baseline → Sudden spike → Recovery
- * 
+ *
  * This test validates:
  * - System handles sudden 10x traffic increase
  * - Error rate remains acceptable during spike
@@ -38,23 +38,23 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '30s', target: 10 },   // Baseline: 10 VUs
-        { duration: '30s', target: 10 },   // Sustain baseline
-        { duration: '10s', target: 100 },  // SPIKE: 10x increase to 100 VUs
-        { duration: '1m', target: 100 },   // Sustain spike for 1 minute
-        { duration: '10s', target: 10 },   // Drop back to baseline
-        { duration: '30s', target: 10 },   // Recovery period
-        { duration: '30s', target: 0 },    // Ramp down
+        { duration: '30s', target: 10 }, // Baseline: 10 VUs
+        { duration: '30s', target: 10 }, // Sustain baseline
+        { duration: '10s', target: 100 }, // SPIKE: 10x increase to 100 VUs
+        { duration: '1m', target: 100 }, // Sustain spike for 1 minute
+        { duration: '10s', target: 10 }, // Drop back to baseline
+        { duration: '30s', target: 10 }, // Recovery period
+        { duration: '30s', target: 0 }, // Ramp down
       ],
       gracefulRampDown: '15s',
     },
   },
   thresholds: {
     // More relaxed thresholds during spike - some degradation is expected
-    'http_req_duration': ['p(95)<1000', 'p(99)<2000'], // 2x normal
-    'http_req_failed': ['rate<0.05'], // Up to 5% error rate acceptable during spike
-    'job_submission_duration': ['p(95)<500', 'p(99)<1000'],
-    'queue_depth': ['value<2000'], // Queue can back up during spike
+    http_req_duration: ['p(95)<1000', 'p(99)<2000'], // 2x normal
+    http_req_failed: ['rate<0.05'], // Up to 5% error rate acceptable during spike
+    job_submission_duration: ['p(95)<500', 'p(99)<1000'],
+    queue_depth: ['value<2000'], // Queue can back up during spike
   },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
 };
@@ -65,31 +65,33 @@ export const options = {
 
 export function setup() {
   const client = new TaskFlowClient();
-  
+
   console.log('='.repeat(80));
   console.log('SPIKE LOAD TEST - SETUP');
   console.log('='.repeat(80));
-  
+
   // Health check
   console.log('Performing health check...');
   const health = client.healthCheck();
   console.log(`Health status: ${JSON.stringify(health)}`);
-  
+
   if (!health || health.status !== 'healthy') {
     throw new Error('System is not healthy. Aborting test.');
   }
-  
+
   // Get initial system state
   console.log('Collecting initial system state...');
   const queueStats = client.getQueueStats();
   const workerStats = client.getWorkerStats();
-  
+
   console.log(`Initial queue depth: ${queueStats?.total || 0}`);
-  console.log(`Active workers: ${workerStats?.workers?.filter(w => w.status === 'ACTIVE').length || 0}`);
-  
+  console.log(
+    `Active workers: ${workerStats?.workers?.filter((w) => w.status === 'ACTIVE').length || 0}`
+  );
+
   console.log('Setup complete. Prepare for spike...');
   console.log('='.repeat(80));
-  
+
   return {
     startTime: Date.now(),
     initialQueueDepth: queueStats?.total || 0,
@@ -103,11 +105,11 @@ export function setup() {
 
 export default function (data) {
   const client = new TaskFlowClient();
-  
+
   try {
     // During spike, submit jobs more aggressively
     const isSpike = __VU > 50; // More than 50 VUs = spike period
-    
+
     // Submit a job
     const job = client.submitJob({
       type: randomJobType(),
@@ -115,30 +117,29 @@ export default function (data) {
       payload: randomPayload(isSpike ? 'medium' : 'small'),
       maxRetries: 3,
     });
-    
+
     if (!job) {
       console.error('Failed to submit job');
       return;
     }
-    
+
     // Less think time during spike (more aggressive)
     if (isSpike) {
       thinkTime(0.1, 0.5);
     } else {
       thinkTime(0.5, 2);
     }
-    
+
     // Check status occasionally
     if (Math.random() < 0.1) {
       client.getJob(job.id);
     }
-    
+
     // Collect system metrics more frequently during spike
     const metricsInterval = isSpike ? 5 : 10;
     if (__ITER % metricsInterval === 0) {
       collectSystemMetrics(client);
     }
-    
   } catch (error) {
     handleError(error, 'spike test function');
   }
@@ -150,32 +151,40 @@ export default function (data) {
 
 export function teardown(data) {
   const client = new TaskFlowClient();
-  
+
   console.log('='.repeat(80));
   console.log('SPIKE LOAD TEST - TEARDOWN');
   console.log('='.repeat(80));
-  
+
   // Collect final system state
   console.log('Collecting final system state...');
   const queueStats = client.getQueueStats();
   const workerStats = client.getWorkerStats();
-  
+
   console.log(`Final queue depth: ${queueStats?.total || 0}`);
-  console.log(`Active workers: ${workerStats?.workers?.filter(w => w.status === 'ACTIVE').length || 0}`);
-  
+  console.log(
+    `Active workers: ${workerStats?.workers?.filter((w) => w.status === 'ACTIVE').length || 0}`
+  );
+
   const testDuration = (Date.now() - data.startTime) / 1000;
   console.log(`Test duration: ${testDuration.toFixed(2)}s`);
-  
+
   // Check recovery
   const queueGrowth = (queueStats?.total || 0) - data.initialQueueDepth;
   if (queueGrowth > 500) {
-    console.warn(`⚠️  Queue backed up by ${queueGrowth} jobs. May need more workers or longer recovery time.`);
+    console.warn(
+      `⚠️  Queue backed up by ${queueGrowth} jobs. May need more workers or longer recovery time.`
+    );
   } else if (queueGrowth > 100) {
-    console.log(`⚠️  Queue grew by ${queueGrowth} jobs but system is recovering.`);
+    console.log(
+      `⚠️  Queue grew by ${queueGrowth} jobs but system is recovering.`
+    );
   } else {
-    console.log(`✅ System recovered successfully (queue growth: ${queueGrowth} jobs)`);
+    console.log(
+      `✅ System recovered successfully (queue growth: ${queueGrowth} jobs)`
+    );
   }
-  
+
   console.log('Teardown complete.');
   console.log('='.repeat(80));
 }
@@ -186,16 +195,27 @@ export function teardown(data) {
 
 export function handleSummary(data) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  
+
   // Calculate metrics
-  const successRate = ((1 - (data.metrics.http_req_failed?.values?.rate || 0)) * 100).toFixed(2);
-  const avgLatency = (data.metrics.http_req_duration?.values?.avg || 0).toFixed(2);
-  const p95Latency = (data.metrics.http_req_duration?.values['p(95)'] || 0).toFixed(2);
-  const p99Latency = (data.metrics.http_req_duration?.values['p(99)'] || 0).toFixed(2);
-  const maxLatency = (data.metrics.http_req_duration?.values?.max || 0).toFixed(2);
+  const successRate = (
+    (1 - (data.metrics.http_req_failed?.values?.rate || 0)) *
+    100
+  ).toFixed(2);
+  const avgLatency = (data.metrics.http_req_duration?.values?.avg || 0).toFixed(
+    2
+  );
+  const p95Latency = (
+    data.metrics.http_req_duration?.values['p(95)'] || 0
+  ).toFixed(2);
+  const p99Latency = (
+    data.metrics.http_req_duration?.values['p(99)'] || 0
+  ).toFixed(2);
+  const maxLatency = (data.metrics.http_req_duration?.values?.max || 0).toFixed(
+    2
+  );
   const requestRate = (data.metrics.http_reqs?.values?.rate || 0).toFixed(2);
   const totalRequests = data.metrics.http_reqs?.values?.count || 0;
-  
+
   const customSummary = `
 ${'='.repeat(80)}
 SPIKE LOAD TEST RESULTS
@@ -217,11 +237,13 @@ Performance During Spike:
   ✓ Max Latency:         ${maxLatency}ms
 
 Thresholds:
-  ${data.metrics.http_req_duration?.thresholds ? 
-    Object.entries(data.metrics.http_req_duration.thresholds)
-      .map(([key, val]) => `  ${val.ok ? '✓' : '✗'} ${key}`)
-      .join('\n') 
-    : 'No thresholds defined'}
+  ${
+    data.metrics.http_req_duration?.thresholds
+      ? Object.entries(data.metrics.http_req_duration.thresholds)
+          .map(([key, val]) => `  ${val.ok ? '✓' : '✗'} ${key}`)
+          .join('\n')
+      : 'No thresholds defined'
+  }
 
 Job Metrics:
   Job Submissions:       ${data.metrics.job_submission_success?.values?.count || 0}
@@ -246,7 +268,8 @@ ${'='.repeat(80)}
 `;
 
   return {
-    'stdout': textSummary(data, { indent: ' ', enableColors: true }) + customSummary,
+    stdout:
+      textSummary(data, { indent: ' ', enableColors: true }) + customSummary,
     [`results/spike-load-${timestamp}.html`]: htmlReport(data),
     [`results/spike-load-${timestamp}.json`]: JSON.stringify(data, null, 2),
   };
