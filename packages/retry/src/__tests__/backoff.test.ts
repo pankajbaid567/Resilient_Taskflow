@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 
 import {
   calculateBackoff,
@@ -8,6 +8,9 @@ import {
 } from '../backoff';
 
 describe('Backoff', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   describe('calculateBackoff', () => {
     it('should calculate exponential backoff', () => {
       const config = {
@@ -91,11 +94,28 @@ describe('Backoff', () => {
 
       // All delays should be within jitter range (±10% of 4000)
       for (const delay of delays) {
-        expect(delay).toBeGreaterThan(3600); // 4000 - 400
-        expect(delay).toBeLessThan(4400); // 4000 + 400
+        // Bounds are inclusive: jitter is uniform over [3600, 4400) and the
+        // result is floored, so exactly 3600 is a valid outcome.
+        expect(delay).toBeGreaterThanOrEqual(3600); // 4000 - 400
+        expect(delay).toBeLessThanOrEqual(4400); // 4000 + 400
       }
     });
 
+    it('keeps jitter inside the inclusive lower bound and below the upper bound', () => {
+      // Deterministic edges of the random range (the random test above can
+      // only hit them by luck).
+      const config = {
+        strategy: 'exponential' as const,
+        baseDelayMs: 1000,
+        enableJitter: true,
+        jitterFactor: 0.1,
+      };
+      const random = vi.spyOn(Math, 'random');
+      random.mockReturnValue(0);
+      expect(calculateBackoff(2, config)).toBe(3600);
+      random.mockReturnValue(0.999999);
+      expect(calculateBackoff(2, config)).toBeLessThan(4400);
+    });
     it('should cap delay at maxDelayMs', () => {
       const config = {
         strategy: 'exponential' as const,

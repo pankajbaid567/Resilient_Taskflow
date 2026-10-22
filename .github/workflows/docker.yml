@@ -48,7 +48,9 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=sha,prefix={{branch}}-
+            # `{{branch}}` is empty on pull_request events, which produced the
+            # invalid tag "-<sha>"; a fixed prefix is always valid.
+            type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
