@@ -48,7 +48,9 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=sha,prefix={{branch}}-
+            # `{{branch}}` is empty on pull_request events, which produced the
+            # invalid tag "-<sha>"; a fixed prefix is always valid.
+            type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
@@ -167,10 +169,12 @@ jobs:
     needs: [build-and-push, scan, docker-compose-test]
     if: always()
     steps:
+      # `scan` is skipped on pull requests by design, so skipped is accepted for
+      # it only. A skipped build or compose test still counts as a failure.
       - name: Check pipeline status
         run: |
           if [ "${{ needs.build-and-push.result }}" != "success" ] || \
-             [ "${{ needs.scan.result }}" != "success" ] || \
+             { [ "${{ needs.scan.result }}" != "success" ] && [ "${{ needs.scan.result }}" != "skipped" ]; } || \
              [ "${{ needs.docker-compose-test.result }}" != "success" ]; then
             echo "Docker pipeline failed"
             exit 1

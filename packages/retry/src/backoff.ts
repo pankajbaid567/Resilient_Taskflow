@@ -114,7 +114,8 @@ export function calculateRetryTime(
  * Add jitter to delay
  *
  * Jitter prevents thundering herd problem when many jobs fail simultaneously.
- * Uses full jitter algorithm: random value between 0 and calculated delay.
+ * The result is uniform over [delay - delay * jitterFactor,
+ * delay + delay * jitterFactor); it is not "full jitter" (0 to delay).
  */
 function addJitter(delay: number, jitterFactor: number): number {
   const jitterAmount = delay * jitterFactor;

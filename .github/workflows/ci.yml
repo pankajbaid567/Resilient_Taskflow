@@ -150,6 +150,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # tsx loads workspace packages through their compiled `main` (dist), so
+      # they must be built before the migration runner can start.
+      - name: Build workspace packages used by migrations
+        run: pnpm --filter "@taskflow/database..." build
       - name: Run database migrations
         run: pnpm db:migrate
 
