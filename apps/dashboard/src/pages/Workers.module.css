@@ -84,7 +84,9 @@
   border-radius: 8px;
   padding: 20px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
 }
 
 .workerCard:hover {
@@ -318,4 +320,78 @@
   .workersGrid {
     grid-template-columns: 1fr;
   }
+}
+
+.statusStopping {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.statusStopping .statusDot {
+  background-color: #f59e0b;
+}
+
+.statusFailed {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.statusFailed .statusDot {
+  background-color: #ef4444;
+}
+
+.filterRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.filterLabel {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-700);
+}
+
+.filterSelect {
+  padding: 8px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: 6px;
+  background: white;
+  font: inherit;
+}
+
+.filterSelect:focus-visible,
+.stopButton:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.cardActions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.stopButton {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 14px;
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.stopButton:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+.stopButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.workerFooter {
+  flex-wrap: wrap;
+  gap: 4px 16px;
 }

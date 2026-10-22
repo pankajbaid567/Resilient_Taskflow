@@ -24,7 +24,11 @@ export default function MetricCard({
     <div className={`${styles.card} ${styles[color]}`}>
       <div className={styles.header}>
         <h3 className={styles.title}>{title}</h3>
-        {icon && <span className={styles.icon}>{icon}</span>}
+        {icon && (
+          <span className={styles.icon} aria-hidden="true">
+            {icon}
+          </span>
+        )}
       </div>
       <div className={styles.value}>{value}</div>
       {subtitle && <div className={styles.subtitle}>{subtitle}</div>}

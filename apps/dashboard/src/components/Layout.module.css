@@ -96,3 +96,23 @@
     padding: 16px;
   }
 }
+
+.signOut {
+  margin: 0 24px;
+  padding: 10px 16px;
+  border: 1px solid var(--gray-600);
+  border-radius: 6px;
+  color: var(--gray-300);
+  font-size: 14px;
+}
+
+.signOut:hover,
+.signOut:focus-visible {
+  background-color: var(--gray-800);
+  color: white;
+}
+
+.nav a:focus-visible {
+  outline: 2px solid white;
+  outline-offset: -2px;
+}

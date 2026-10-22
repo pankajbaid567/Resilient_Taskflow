@@ -1,0 +1,84 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background-color: var(--gray-900);
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  background: white;
+  border-radius: 12px;
+  padding: 32px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+}
+
+.title {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.subtitle {
+  color: var(--gray-600);
+  margin-bottom: 24px;
+}
+
+.label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-700);
+  margin-bottom: 6px;
+}
+
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.error {
+  margin-top: 8px;
+  color: #991b1b;
+  font-size: 14px;
+}
+
+.submit {
+  width: 100%;
+  margin-top: 20px;
+  padding: 12px;
+  border-radius: 6px;
+  background-color: var(--primary);
+  color: white;
+  font-weight: 600;
+}
+
+.submit:hover:not(:disabled) {
+  background-color: var(--primary-dark);
+}
+
+.submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.hint {
+  margin-top: 20px;
+  font-size: 13px;
+  color: var(--gray-500);
+}

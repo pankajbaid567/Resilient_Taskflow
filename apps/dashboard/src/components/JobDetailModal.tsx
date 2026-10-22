@@ -2,9 +2,15 @@ import { useState } from 'react';
 import Modal from './Modal';
 import StatusBadge from './StatusBadge';
 import LoadingSpinner from './LoadingSpinner';
+import Notice from './Notice';
 import { useJob } from '@/hooks/useAPI';
 import { apiClient } from '@/lib/api-client';
-import { formatDate, formatRelativeTime } from '@/lib/utils';
+import {
+  formatDate,
+  formatRelativeTime,
+  MUTABLE_STATUSES,
+  summarizeError,
+} from '@/lib/utils';
 import styles from './JobDetailModal.module.css';
 
 interface JobDetailModalProps {
@@ -13,6 +19,8 @@ interface JobDetailModalProps {
   jobId: string;
   onJobUpdated?: () => void;
 }
+
+type Action = 'cancel' | 'retry';
 
 export default function JobDetailModal({
   isOpen,
@@ -25,58 +33,50 @@ export default function JobDetailModal({
     loading,
     error,
     refetch,
-  } = useJob(jobId, { skip: !isOpen });
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  } = useJob(jobId, { skip: !isOpen, pollingInterval: 3_000 });
+  const [pending, setPending] = useState<Action | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [replacementId, setReplacementId] = useState<string | null>(null);
 
-  const handleCancel = async () => {
+  const run = async (action: Action): Promise<void> => {
     if (!job) return;
-
-    setActionLoading('cancel');
+    setPending(action);
     setActionError(null);
+    setReplacementId(null);
 
     try {
-      await apiClient.cancelJob(job.id);
+      if (action === 'cancel') {
+        await apiClient.cancelJob(job.id);
+      } else {
+        // Retrying creates a NEW job; the dead-lettered original is kept.
+        const replacement = await apiClient.retryJob(job.id);
+        setReplacementId(replacement.id);
+      }
       await refetch();
       onJobUpdated?.();
     } catch (err) {
       setActionError(
-        err instanceof Error ? err.message : 'Failed to cancel job'
+        err instanceof Error ? err.message : `Failed to ${action} job`
       );
     } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleRetry = async () => {
-    if (!job) return;
-
-    setActionLoading('retry');
-    setActionError(null);
-
-    try {
-      await apiClient.retryJob(job.id);
-      await refetch();
-      onJobUpdated?.();
-    } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : 'Failed to retry job'
-      );
-    } finally {
-      setActionLoading(null);
+      setPending(null);
     }
   };
 
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Job Details" size="large">
-      {loading && <LoadingSpinner text="Loading job details..." />}
+    <Modal isOpen={isOpen} onClose={onClose} title="Job details" size="large">
+      {loading && <LoadingSpinner text="Loading job details…" />}
 
-      {error && (
-        <div className={styles.error}>
+      {error && !job && (
+        <div className={styles.error} role="alert">
           <p>Error: {error}</p>
-          <button onClick={() => refetch()} className={styles.retryButton}>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className={styles.retryButton}
+          >
             Retry
           </button>
         </div>
@@ -84,39 +84,52 @@ export default function JobDetailModal({
 
       {job && (
         <div className={styles.container}>
-          {/* Header */}
           <div className={styles.header}>
             <div className={styles.headerLeft}>
               <h3 className={styles.jobId}>{job.id}</h3>
               <StatusBadge status={job.status} />
             </div>
             <div className={styles.actions}>
-              {job.status === 'queued' || job.status === 'processing' ? (
+              {MUTABLE_STATUSES.has(job.status) && (
                 <button
+                  type="button"
                   className={styles.cancelButton}
-                  onClick={handleCancel}
-                  disabled={actionLoading === 'cancel'}
+                  onClick={() => void run('cancel')}
+                  disabled={pending !== null}
                 >
-                  {actionLoading === 'cancel' ? 'Cancelling...' : 'Cancel Job'}
+                  {pending === 'cancel' ? 'Cancelling…' : 'Cancel job'}
                 </button>
-              ) : null}
-              {job.status === 'failed' && (
+              )}
+              {job.status === 'DEAD_LETTERED' && (
                 <button
+                  type="button"
                   className={styles.retryButton}
-                  onClick={handleRetry}
-                  disabled={actionLoading === 'retry'}
+                  onClick={() => void run('retry')}
+                  disabled={pending !== null}
                 >
-                  {actionLoading === 'retry' ? 'Retrying...' : 'Retry Job'}
+                  {pending === 'retry' ? 'Retrying…' : 'Retry as new job'}
                 </button>
               )}
             </div>
           </div>
 
+          {job.status === 'CANCEL_REQUESTED' && (
+            <Notice tone="success">
+              Cancellation requested. The worker stops the job at its next lease
+              renewal (within a few seconds).
+            </Notice>
+          )}
+          {replacementId && (
+            <Notice tone="success">
+              Replacement job <code>{replacementId}</code> was created.
+            </Notice>
+          )}
           {actionError && (
-            <div className={styles.actionError}>{actionError}</div>
+            <Notice onDismiss={() => setActionError(null)}>
+              {actionError}
+            </Notice>
           )}
 
-          {/* Info Grid */}
           <div className={styles.infoGrid}>
             <InfoItem label="Type" value={job.type} />
             <InfoItem label="Queue" value={job.queue} />
@@ -125,49 +138,30 @@ export default function JobDetailModal({
               label="Attempts"
               value={`${job.attempts} / ${job.maxAttempts}`}
             />
-            <InfoItem label="Timeout" value={`${job.timeout}ms`} />
-            {job.workerId && (
-              <InfoItem label="Worker ID" value={job.workerId} />
-            )}
           </div>
 
-          {/* Timestamps */}
           <div className={styles.section}>
             <h4 className={styles.sectionTitle}>Timeline</h4>
             <div className={styles.timeline}>
               <TimelineItem label="Created" date={job.createdAt} icon="📝" />
-              {job.scheduledAt && (
-                <TimelineItem
-                  label="Scheduled"
-                  date={job.scheduledAt}
-                  icon="⏰"
-                />
-              )}
+              <TimelineItem
+                label="Scheduled"
+                date={job.scheduledAt}
+                icon="⏰"
+              />
               {job.startedAt && (
                 <TimelineItem label="Started" date={job.startedAt} icon="▶️" />
               )}
               {job.completedAt && (
                 <TimelineItem
-                  label="Completed"
+                  label="Finished"
                   date={job.completedAt}
-                  icon="✅"
+                  icon="🏁"
                 />
-              )}
-              {job.failedAt && (
-                <TimelineItem label="Failed" date={job.failedAt} icon="❌" />
               )}
             </div>
           </div>
 
-          {/* Payload */}
-          <div className={styles.section}>
-            <h4 className={styles.sectionTitle}>Payload</h4>
-            <pre className={styles.codeBlock}>
-              {JSON.stringify(job.payload, null, 2)}
-            </pre>
-          </div>
-
-          {/* Result */}
           {job.result && (
             <div className={styles.section}>
               <h4 className={styles.sectionTitle}>Result</h4>
@@ -177,11 +171,16 @@ export default function JobDetailModal({
             </div>
           )}
 
-          {/* Error */}
           {job.error && (
             <div className={styles.section}>
               <h4 className={styles.sectionTitle}>Error</h4>
-              <div className={styles.errorBox}>{job.error}</div>
+              <div className={styles.errorBox}>{summarizeError(job.error)}</div>
+              <details>
+                <summary>Full error record</summary>
+                <pre className={styles.codeBlock}>
+                  {JSON.stringify(job.error, null, 2)}
+                </pre>
+              </details>
             </div>
           )}
         </div>
@@ -210,7 +209,9 @@ function TimelineItem({
 }) {
   return (
     <div className={styles.timelineItem}>
-      <span className={styles.timelineIcon}>{icon}</span>
+      <span className={styles.timelineIcon} aria-hidden="true">
+        {icon}
+      </span>
       <div className={styles.timelineContent}>
         <div className={styles.timelineLabel}>{label}</div>
         <div className={styles.timelineDate}>

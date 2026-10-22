@@ -262,3 +262,13 @@
     flex-direction: column;
   }
 }
+
+.idButton {
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.idButton:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}

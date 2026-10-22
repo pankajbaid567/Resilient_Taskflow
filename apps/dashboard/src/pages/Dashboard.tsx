@@ -1,216 +1,184 @@
-import { useDashboardMetrics, useHealth } from '@/hooks/useAPI';
+import { useEffect, useRef, useState } from 'react';
+import { useDashboardSnapshot, useReadiness } from '@/hooks/useAPI';
 import MetricCard from '@/components/MetricCard';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import ErrorMessage from '@/components/ErrorMessage';
+import Notice from '@/components/Notice';
+import { formatLatency, formatNumber } from '@/lib/utils';
 import styles from './Dashboard.module.css';
+
+/**
+ * Jobs finished per second between the two most recent refreshes. The API has
+ * no throughput endpoint, so this is a measured delta of the succeeded count:
+ * `null` until two samples exist, or if the count fell (for example after a
+ * retention purge), rather than a guess.
+ */
+function useThroughput(
+  succeeded: number | undefined,
+  takenAt: number | undefined
+): number | null {
+  const previous = useRef<{ succeeded: number; at: number } | null>(null);
+  const [rate, setRate] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (succeeded === undefined || takenAt === undefined) return;
+    const before = previous.current;
+    previous.current = { succeeded, at: takenAt };
+
+    if (before && succeeded >= before.succeeded && takenAt > before.at) {
+      setRate((succeeded - before.succeeded) / ((takenAt - before.at) / 1000));
+    } else {
+      setRate(null);
+    }
+  }, [succeeded, takenAt]);
+
+  return rate;
+}
 
 export default function Dashboard() {
   const {
-    data: metrics,
-    loading: metricsLoading,
-    error: metricsError,
-    refetch: refetchMetrics,
-  } = useDashboardMetrics({ pollingInterval: 5000 }); // Poll every 5 seconds
+    data: snapshot,
+    loading,
+    error,
+    refetch,
+  } = useDashboardSnapshot({ pollingInterval: 5_000 });
+  const { data: readiness, error: readinessError } = useReadiness({
+    pollingInterval: 10_000,
+  });
+  const throughput = useThroughput(
+    snapshot?.totals.succeeded,
+    snapshot?.takenAt
+  );
 
-  const {
-    data: health,
-    loading: healthLoading,
-    error: healthError,
-  } = useHealth({ pollingInterval: 10000 }); // Poll every 10 seconds
-
-  if (metricsLoading || healthLoading) {
-    return <LoadingSpinner text="Loading dashboard..." />;
+  if (loading) return <LoadingSpinner text="Loading dashboard…" />;
+  if (error && !snapshot) {
+    return <ErrorMessage message={error} onRetry={() => void refetch()} />;
   }
+  if (!snapshot) return <ErrorMessage message="No data available" />;
 
-  if (metricsError) {
-    return <ErrorMessage message={metricsError} onRetry={refetchMetrics} />;
-  }
-
-  if (!metrics) {
-    return <ErrorMessage message="No metrics data available" />;
-  }
-
-  const formatNumber = (num: number): string => {
-    if (num >= 1000000) {
-      return `${(num / 1000000).toFixed(1)}M`;
-    }
-    if (num >= 1000) {
-      return `${(num / 1000).toFixed(1)}K`;
-    }
-    return num.toLocaleString();
-  };
-
-  const formatLatency = (ms: number): string => {
-    if (ms < 1) {
-      return `${(ms * 1000).toFixed(0)}μs`;
-    }
-    if (ms < 1000) {
-      return `${ms.toFixed(0)}ms`;
-    }
-    return `${(ms / 1000).toFixed(2)}s`;
-  };
+  const { totals } = snapshot;
+  const ready = readiness?.status === 'ready';
+  const readinessLabel = readinessError
+    ? 'API unreachable'
+    : readiness
+      ? ready
+        ? 'System ready'
+        : 'System not ready'
+      : 'Checking…';
 
   return (
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>Dashboard</h1>
-          <p className={styles.subtitle}>Real-time system overview</p>
+          <p className={styles.subtitle}>Live overview, refreshed every 5s</p>
         </div>
-        {health && (
-          <div className={styles.healthBadge}>
-            <span
-              className={`${styles.statusDot} ${
-                health.status === 'healthy' ? styles.healthy : styles.unhealthy
-              }`}
-            />
-            System {health.status}
-          </div>
-        )}
+        <div className={styles.healthBadge} role="status">
+          <span
+            className={`${styles.statusDot} ${
+              ready ? styles.healthy : styles.unhealthy
+            }`}
+            aria-hidden="true"
+          />
+          {readinessLabel}
+        </div>
       </div>
 
-      {/* Key Metrics */}
+      {error && <Notice>Refresh failed: {error}</Notice>}
+
       <div className={styles.metricsGrid}>
         <MetricCard
           title="Active Workers"
-          value={metrics.activeWorkers}
+          value={snapshot.activeWorkers}
           icon="👷"
-          subtitle="Currently processing jobs"
+          subtitle="Heartbeating now"
           color="primary"
         />
         <MetricCard
           title="Queued Jobs"
-          value={formatNumber(metrics.queuedJobs)}
+          value={formatNumber(totals.queued)}
           icon="📋"
-          subtitle="Waiting for processing"
+          subtitle="Waiting for a worker"
           color="warning"
         />
         <MetricCard
           title="Processing"
-          value={formatNumber(metrics.processingJobs)}
+          value={formatNumber(totals.processing)}
           icon="⚙️"
-          subtitle="Jobs in progress"
+          subtitle="Running now"
           color="primary"
         />
         <MetricCard
           title="Success Rate"
-          value={`${metrics.successRate.toFixed(1)}%`}
+          value={
+            snapshot.successRate === null
+              ? '—'
+              : `${snapshot.successRate.toFixed(1)}%`
+          }
           icon="✅"
-          subtitle={`${formatNumber(metrics.completedJobs)} completed`}
+          subtitle={`${formatNumber(totals.succeeded)} succeeded`}
           color="success"
         />
       </div>
 
-      {/* Performance Metrics */}
       <div className={styles.section}>
         <h2 className={styles.sectionTitle}>Performance</h2>
         <div className={styles.metricsGrid}>
           <MetricCard
-            title="Avg Latency"
-            value={formatLatency(metrics.avgLatency)}
+            title="Avg Run Time"
+            value={
+              snapshot.avgDurationMs === null
+                ? '—'
+                : formatLatency(snapshot.avgDurationMs)
+            }
             icon="⏱️"
-            subtitle="Average processing time"
-            color="primary"
-          />
-          <MetricCard
-            title="P95 Latency"
-            value={formatLatency(metrics.p95Latency)}
-            icon="📊"
-            subtitle="95th percentile"
+            subtitle="Succeeded jobs, started to finished"
             color="primary"
           />
           <MetricCard
             title="Throughput"
-            value={metrics.jobsPerSecond.toFixed(1)}
+            value={throughput === null ? '—' : throughput.toFixed(1)}
             icon="🚀"
-            subtitle="Jobs per second"
+            subtitle="Jobs/s since last refresh"
             color="success"
           />
           <MetricCard
+            title="Redis Stream Entries"
+            value={formatNumber(totals.redisDepth)}
+            icon="📦"
+            subtitle="Includes acknowledged entries until trimmed"
+            color="primary"
+          />
+          <MetricCard
             title="Failed Jobs"
-            value={formatNumber(metrics.failedJobs)}
+            value={formatNumber(totals.failed)}
             icon="❌"
-            subtitle="Total failures"
+            subtitle="Failed or dead-lettered"
             color="danger"
           />
         </div>
       </div>
 
-      {/* System Health */}
-      {health && (
-        <div className={styles.section}>
-          <h2 className={styles.sectionTitle}>System Health</h2>
-          <div className={styles.healthGrid}>
-            <div className={styles.healthCard}>
-              <div className={styles.healthHeader}>
-                <span className={styles.serviceName}>Database</span>
-                <span
-                  className={`${styles.statusBadge} ${
-                    health.services.database.status === 'up'
-                      ? styles.up
-                      : styles.down
-                  }`}
-                >
-                  {health.services.database.status}
-                </span>
-              </div>
-              {health.services.database.responseTime && (
-                <div className={styles.responseTime}>
-                  Response: {health.services.database.responseTime}ms
-                </div>
-              )}
+      <div className={styles.section}>
+        <h2 className={styles.sectionTitle}>System health</h2>
+        <div className={styles.healthGrid}>
+          <div className={styles.healthCard}>
+            <div className={styles.healthHeader}>
+              <span className={styles.serviceName}>API readiness</span>
+              <span
+                className={`${styles.statusBadge} ${
+                  ready ? styles.up : styles.down
+                }`}
+              >
+                {readinessError ? 'unreachable' : ready ? 'up' : 'down'}
+              </span>
             </div>
-
-            <div className={styles.healthCard}>
-              <div className={styles.healthHeader}>
-                <span className={styles.serviceName}>Redis</span>
-                <span
-                  className={`${styles.statusBadge} ${
-                    health.services.redis.status === 'up'
-                      ? styles.up
-                      : styles.down
-                  }`}
-                >
-                  {health.services.redis.status}
-                </span>
-              </div>
-              {health.services.redis.responseTime && (
-                <div className={styles.responseTime}>
-                  Response: {health.services.redis.responseTime}ms
-                </div>
-              )}
+            <div className={styles.responseTime}>
+              PostgreSQL and Redis connectivity
             </div>
-
-            {health.services.kafka && (
-              <div className={styles.healthCard}>
-                <div className={styles.healthHeader}>
-                  <span className={styles.serviceName}>Kafka</span>
-                  <span
-                    className={`${styles.statusBadge} ${
-                      health.services.kafka.status === 'up'
-                        ? styles.up
-                        : styles.down
-                    }`}
-                  >
-                    {health.services.kafka.status}
-                  </span>
-                </div>
-                {health.services.kafka.responseTime && (
-                  <div className={styles.responseTime}>
-                    Response: {health.services.kafka.responseTime}ms
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
-      )}
-
-      {healthError && (
-        <div className={styles.healthError}>
-          ⚠️ Unable to fetch health status: {healthError}
-        </div>
-      )}
+      </div>
     </div>
   );
 }

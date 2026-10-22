@@ -1,13 +1,29 @@
+import { isHeartbeatFresh } from '@/lib/utils';
 import type {
-  Job,
-  Worker,
-  QueueStats,
-  HealthResponse,
+  DashboardSnapshot,
   ErrorResponse,
-  DashboardMetrics,
+  Job,
+  JobPriority,
+  JobStatus,
+  Page,
+  Queue,
+  QueueOverview,
+  QueueStats,
+  Readiness,
+  Worker,
+  WorkerStatus,
 } from '@/types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
+/**
+ * Base URL of the versioned API. In development this is the Vite proxy path;
+ * set VITE_API_URL at build time to point somewhere else.
+ */
+const API_BASE_URL: string = import.meta.env.VITE_API_URL ?? '/api/v1';
+
+/** Probe endpoints live beside `/api/v1`, not under it. */
+const SERVICE_ROOT_URL = API_BASE_URL.replace(/\/api\/v1\/?$/, '');
+
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 class APIError extends Error {
   constructor(
@@ -24,241 +40,259 @@ interface RequestOptions extends RequestInit {
   timeout?: number;
 }
 
-class APIClient {
-  private baseURL: string;
-  private apiKey?: string;
-  private token?: string;
+export interface ListJobsParams {
+  status?: JobStatus;
+  limit?: number;
+  offset?: number;
+}
 
-  constructor(baseURL: string = API_BASE_URL) {
-    this.baseURL = baseURL;
+export interface SubmitJobInput {
+  type: string;
+  payload: Record<string, unknown>;
+  queue?: string;
+  priority?: JobPriority;
+  maxAttempts?: number;
+  timeoutMs?: number;
+  scheduledAt?: string;
+  idempotencyKey?: string;
+}
+
+function toQuery(params: Record<string, string | number | undefined>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) query.set(key, String(value));
   }
+  const text = query.toString();
+  return text ? `?${text}` : '';
+}
 
-  setAPIKey(apiKey: string) {
+class APIClient {
+  private apiKey?: string;
+  private onUnauthorized?: () => void;
+
+  constructor(private readonly baseURL: string = API_BASE_URL) {}
+
+  setAPIKey(apiKey: string | undefined): void {
     this.apiKey = apiKey;
   }
 
-  setToken(token: string) {
-    this.token = token;
+  /** Called once whenever the server rejects the current credentials. */
+  setUnauthorizedHandler(handler: (() => void) | undefined): void {
+    this.onUnauthorized = handler;
+  }
+
+  private async fetchWithTimeout(
+    url: string,
+    options: RequestOptions
+  ): Promise<Response> {
+    const { timeout = DEFAULT_TIMEOUT_MS, ...fetchOptions } = options;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    try {
+      return await fetch(url, { ...fetchOptions, signal: controller.signal });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new APIError(408, 'RequestTimeout', 'Request timed out');
+      }
+      throw new APIError(
+        0,
+        'NetworkError',
+        error instanceof Error ? error.message : 'Network request failed'
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   private async request<T>(
     endpoint: string,
     options: RequestOptions = {}
   ): Promise<T> {
-    const { timeout = 30000, ...fetchOptions } = options;
-
-    const headers = new Headers(fetchOptions.headers);
-    if (!headers.has('Content-Type')) {
+    const headers = new Headers(options.headers);
+    if (options.body !== undefined && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');
     }
+    if (this.apiKey) headers.set('X-API-Key', this.apiKey);
 
-    if (this.apiKey) {
-      headers.set('X-API-Key', this.apiKey);
+    const response = await this.fetchWithTimeout(`${this.baseURL}${endpoint}`, {
+      ...options,
+      headers,
+    });
+
+    if (!response.ok) {
+      // Error bodies are JSON from the API but can be anything from a proxy.
+      const body = (await response.json().catch(() => ({}))) as ErrorResponse;
+      if (response.status === 401) this.onUnauthorized?.();
+      throw new APIError(
+        response.status,
+        body.error ?? 'UnknownError',
+        body.message ?? (response.statusText || 'Request failed')
+      );
     }
 
-    if (this.token) {
-      headers.set('Authorization', `Bearer ${this.token}`);
-    }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-    try {
-      const response = await fetch(`${this.baseURL}${endpoint}`, {
-        ...fetchOptions,
-        headers,
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorData = (await response.json()) as ErrorResponse;
-        throw new APIError(
-          response.status,
-          errorData.error || 'UnknownError',
-          errorData.message || 'An unknown error occurred'
-        );
-      }
-
-      return await response.json();
-    } catch (error) {
-      clearTimeout(timeoutId);
-
-      if (error instanceof APIError) {
-        throw error;
-      }
-
-      if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          throw new APIError(408, 'RequestTimeout', 'Request timed out');
-        }
-        throw new APIError(0, 'NetworkError', error.message);
-      }
-
-      throw new APIError(0, 'UnknownError', 'An unknown error occurred');
-    }
+    return (await response.json()) as T;
   }
 
-  // Job endpoints
-  async submitJob(data: {
-    type: string;
-    payload: Record<string, unknown>;
-    priority?: number;
-    queue?: string;
-    scheduledAt?: string;
-    timeout?: number;
-    maxAttempts?: number;
-    idempotencyKey?: string;
-  }): Promise<Job> {
-    return this.request<Job>('/jobs', {
+  // ---- Jobs ----
+
+  listJobs(params: ListJobsParams = {}): Promise<Page<Job>> {
+    return this.request(`/jobs${toQuery({ ...params })}`);
+  }
+
+  getJob(id: string): Promise<Job> {
+    return this.request(`/jobs/${encodeURIComponent(id)}`);
+  }
+
+  submitJob(input: SubmitJobInput): Promise<Job> {
+    const { idempotencyKey, ...body } = input;
+    return this.request('/jobs', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify(body),
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
     });
   }
 
-  async getJob(id: string): Promise<Job> {
-    return this.request<Job>(`/jobs/${id}`);
-  }
-
-  async listJobs(params?: {
-    status?: string;
-    queue?: string;
-    type?: string;
-    priority?: number;
-    limit?: number;
-    offset?: number;
-  }): Promise<{ jobs: Job[]; total: number; limit: number; offset: number }> {
-    const queryParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          queryParams.append(key, String(value));
-        }
-      });
-    }
-
-    const query = queryParams.toString();
-    return this.request<{
-      jobs: Job[];
-      total: number;
-      limit: number;
-      offset: number;
-    }>(`/jobs${query ? `?${query}` : ''}`);
-  }
-
-  async cancelJob(id: string): Promise<{ message: string }> {
-    return this.request<{ message: string }>(`/jobs/${id}`, {
+  /** Immediate for waiting jobs; a request the worker honours when running. */
+  cancelJob(id: string): Promise<Job> {
+    return this.request(`/jobs/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
   }
 
-  async retryJob(id: string): Promise<Job> {
-    return this.request<Job>(`/jobs/${id}/retry`, {
+  /** Creates a replacement for a dead-lettered job and returns it. */
+  retryJob(id: string): Promise<Job> {
+    return this.request(`/jobs/${encodeURIComponent(id)}/retry`, {
       method: 'POST',
     });
   }
 
-  // Queue endpoints
-  async listQueues(): Promise<QueueStats[]> {
-    return this.request<QueueStats[]>('/queues');
+  // ---- Queues ----
+
+  listQueues(): Promise<Page<Queue>> {
+    return this.request(`/queues${toQuery({ limit: 100 })}`);
   }
 
-  async getQueueStats(name: string): Promise<QueueStats> {
-    return this.request<QueueStats>(`/queues/${name}/stats`);
+  getQueueStats(name: string): Promise<QueueStats> {
+    return this.request(`/queues/${encodeURIComponent(name)}/stats`);
   }
 
-  // Worker endpoints
-  async listWorkers(): Promise<Worker[]> {
-    return this.request<Worker[]>('/workers');
-  }
-
-  async getWorker(id: string): Promise<Worker> {
-    return this.request<Worker>(`/workers/${id}`);
-  }
-
-  // Dead Letter Queue endpoints
-  async listDLQ(params?: {
-    limit?: number;
-    offset?: number;
-  }): Promise<{ jobs: Job[]; total: number; limit: number; offset: number }> {
-    const queryParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          queryParams.append(key, String(value));
-        }
-      });
-    }
-
-    const query = queryParams.toString();
-    return this.request<{
-      jobs: Job[];
-      total: number;
-      limit: number;
-      offset: number;
-    }>(`/dlq${query ? `?${query}` : ''}`);
-  }
-
-  async requeueFromDLQ(id: string): Promise<Job> {
-    return this.request<Job>(`/dlq/${id}/requeue`, {
+  /** Admin only. */
+  pauseQueue(name: string): Promise<Queue> {
+    return this.request(`/queues/${encodeURIComponent(name)}/pause`, {
       method: 'POST',
     });
   }
 
-  // Health and metrics
-  async health(): Promise<HealthResponse> {
-    return this.request<HealthResponse>('/health');
+  /** Admin only. */
+  resumeQueue(name: string): Promise<Queue> {
+    return this.request(`/queues/${encodeURIComponent(name)}/resume`, {
+      method: 'POST',
+    });
   }
 
-  async getDashboardMetrics(): Promise<DashboardMetrics> {
-    // This endpoint doesn't exist yet in the backend, but we'll create it
-    // For now, we'll aggregate data from multiple endpoints
-    const [, workers, queues] = await Promise.all([
-      this.listJobs({ limit: 1 }),
-      this.listWorkers(),
-      this.listQueues(),
+  // ---- Workers ----
+
+  listWorkers(
+    params: { status?: WorkerStatus; limit?: number; offset?: number } = {}
+  ): Promise<Page<Worker>> {
+    return this.request(`/workers${toQuery({ limit: 100, ...params })}`);
+  }
+
+  /** Admin only. Asks the worker process to shut down gracefully. */
+  stopWorker(id: string): Promise<Worker> {
+    return this.request(`/workers/${encodeURIComponent(id)}/stop`, {
+      method: 'POST',
+    });
+  }
+
+  // ---- Health ----
+
+  /**
+   * Readiness is public and reports 503 with a JSON body when a dependency is
+   * down; that is a normal answer here, not an error.
+   */
+  async readiness(): Promise<Readiness> {
+    const response = await this.fetchWithTimeout(
+      `${SERVICE_ROOT_URL}/health/ready`,
+      { timeout: 5_000 }
+    );
+    const body = (await response.json().catch(() => null)) as {
+      status?: string;
+    } | null;
+    return { status: body?.status === 'ready' ? 'ready' : 'not_ready' };
+  }
+
+  // ---- Aggregates ----
+
+  async getQueueOverview(): Promise<QueueOverview[]> {
+    const queues = await this.listQueues();
+    return Promise.all(
+      queues.data.map(async (queue) => ({
+        queue,
+        stats: await this.getQueueStats(queue.name),
+      }))
+    );
+  }
+
+  /**
+   * Everything on the overview page, assembled from real endpoints. Nothing
+   * here is estimated: values the API cannot provide (percentile latency,
+   * throughput) are simply not reported.
+   */
+  async getDashboardSnapshot(): Promise<DashboardSnapshot> {
+    const [queues, activeWorkers] = await Promise.all([
+      this.getQueueOverview(),
+      this.listWorkers({ status: 'ACTIVE' }),
     ]);
 
-    const activeWorkers = workers.filter((w) => w.status === 'active').length;
+    const totals = queues.reduce(
+      (sum, { stats }) => ({
+        queued: sum.queued + stats.jobs.queued,
+        processing: sum.processing + stats.jobs.processing,
+        succeeded: sum.succeeded + stats.jobs.succeeded,
+        failed: sum.failed + stats.jobs.failed,
+        redisDepth: sum.redisDepth + stats.redis.depth,
+      }),
+      { queued: 0, processing: 0, succeeded: 0, failed: 0, redisDepth: 0 }
+    );
 
-    const queuedJobs = queues.reduce((sum, q) => sum + (q.queued || 0), 0);
-    const processingJobs = queues.reduce(
-      (sum, q) => sum + (q.processing || 0),
+    const finished = totals.succeeded + totals.failed;
+
+    const timed = queues.filter(
+      ({ stats }) =>
+        stats.jobs.succeeded > 0 &&
+        Number.isFinite(stats.performance.avgDurationMs)
+    );
+    const timedJobs = timed.reduce(
+      (n, { stats }) => n + stats.jobs.succeeded,
       0
     );
-    const completedJobs = queues.reduce(
-      (sum, q) => sum + (q.completed || 0),
-      0
-    );
-    const failedJobs = queues.reduce((sum, q) => sum + (q.failed || 0), 0);
-
-    const totalProcessed = completedJobs + failedJobs;
-    const successRate =
-      totalProcessed > 0 ? (completedJobs / totalProcessed) * 100 : 100;
-
-    // Calculate average latency from queues
-    const avgLatency =
-      queues
-        .filter((q) => q.avgProcessingTime)
-        .reduce((sum, q) => sum + (q.avgProcessingTime || 0), 0) /
-        (queues.filter((q) => q.avgProcessingTime).length || 1) || 0;
+    const avgDurationMs =
+      timedJobs > 0
+        ? timed.reduce(
+            (sum, { stats }) =>
+              sum + stats.performance.avgDurationMs * stats.jobs.succeeded,
+            0
+          ) / timedJobs
+        : null;
 
     return {
-      activeWorkers,
-      queuedJobs,
-      processingJobs,
-      completedJobs,
-      failedJobs,
-      successRate,
-      avgLatency,
-      p95Latency: avgLatency * 1.5, // Estimate P95 as 1.5x average
-      jobsPerSecond: 0, // Would need time-series data
+      takenAt: Date.now(),
+      queues,
+      // A crashed worker stays ACTIVE in the database, so count only those
+      // that are actually heartbeating.
+      activeWorkers: activeWorkers.data.filter((worker) =>
+        isHeartbeatFresh(worker.lastHeartbeat)
+      ).length,
+      totals,
+      successRate: finished > 0 ? (totals.succeeded / finished) * 100 : null,
+      avgDurationMs,
     };
   }
 }
 
-// Create singleton instance
+// Singleton shared by the hooks and the auth provider.
 const apiClient = new APIClient();
 
 export { apiClient, APIClient, APIError };

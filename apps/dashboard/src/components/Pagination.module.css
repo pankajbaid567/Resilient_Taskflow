@@ -1,0 +1,32 @@
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+  font-size: 14px;
+  color: var(--gray-600);
+}
+
+.buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.button {
+  padding: 8px 16px;
+  border: 1px solid var(--gray-300);
+  border-radius: 6px;
+  background-color: white;
+  color: var(--gray-700);
+  font-weight: 500;
+}
+
+.button:hover:not(:disabled) {
+  background-color: var(--gray-100);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

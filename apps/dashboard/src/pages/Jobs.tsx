@@ -1,59 +1,45 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useJobs } from '@/hooks/useAPI';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import ErrorMessage from '@/components/ErrorMessage';
+import Notice from '@/components/Notice';
+import Pagination from '@/components/Pagination';
 import StatusBadge from '@/components/StatusBadge';
 import JobDetailModal from '@/components/JobDetailModal';
-import { formatRelativeTime } from '@/lib/utils';
-import type { JobStatus } from '@/types';
+import { formatRelativeTime, humanizeStatus } from '@/lib/utils';
+import { JOB_STATUSES, type JobStatus } from '@/types';
 import styles from './Jobs.module.css';
 
-const STATUS_OPTIONS: { value: JobStatus | 'all'; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'queued', label: 'Queued' },
-  { value: 'processing', label: 'Processing' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'failed', label: 'Failed' },
-  { value: 'cancelled', label: 'Cancelled' },
-];
+const PAGE_SIZE = 25;
 
 export default function Jobs() {
-  const [statusFilter, setStatusFilter] = useState<JobStatus | 'all'>('all');
-  const [queueFilter, setQueueFilter] = useState<string>('');
+  const statusId = useId();
+  const [statusFilter, setStatusFilter] = useState<JobStatus | 'ALL'>('ALL');
+  const [offset, setOffset] = useState(0);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
-  const params = {
-    ...(statusFilter !== 'all' && { status: statusFilter }),
-    ...(queueFilter && { queue: queueFilter }),
-    limit: 50,
+  const { data, loading, error, refetch } = useJobs(
+    {
+      ...(statusFilter !== 'ALL' && { status: statusFilter }),
+      limit: PAGE_SIZE,
+      offset,
+    },
+    { pollingInterval: 5_000 }
+  );
+
+  const changeStatus = (value: JobStatus | 'ALL'): void => {
+    setStatusFilter(value);
+    setOffset(0);
   };
 
-  const { data, loading, error, refetch } = useJobs(params, {
-    pollingInterval: 5000,
-  });
-
-  const handleJobClick = (jobId: string) => {
-    setSelectedJobId(jobId);
-  };
-
-  const handleCloseModal = () => {
-    setSelectedJobId(null);
-  };
-
-  const handleJobUpdated = () => {
-    refetch();
-  };
-
-  if (loading && !data) {
-    return <LoadingSpinner text="Loading jobs..." />;
+  if (loading) return <LoadingSpinner text="Loading jobs…" />;
+  if (error && !data) {
+    return <ErrorMessage message={error} onRetry={() => void refetch()} />;
   }
 
-  if (error) {
-    return <ErrorMessage message={error} onRetry={refetch} />;
-  }
-
-  const jobs = data?.jobs || [];
-  const total = data?.total || 0;
+  const jobs = data?.data ?? [];
+  const pagination = data?.pagination;
+  const total = pagination?.total ?? 0;
 
   return (
     <div className={styles.container}>
@@ -61,69 +47,67 @@ export default function Jobs() {
         <div>
           <h1 className={styles.title}>Jobs</h1>
           <p className={styles.subtitle}>
-            {total} {total === 1 ? 'job' : 'jobs'} total
+            {total} {total === 1 ? 'job' : 'jobs'}
+            {statusFilter !== 'ALL' && ` — ${humanizeStatus(statusFilter)}`}
           </p>
         </div>
-        <button className={styles.refreshButton} onClick={refetch}>
-          🔄 Refresh
+        <button
+          type="button"
+          className={styles.refreshButton}
+          onClick={() => void refetch()}
+        >
+          Refresh
         </button>
       </div>
 
-      {/* Filters */}
+      {error && <Notice>Refresh failed: {error}</Notice>}
+
       <div className={styles.filters}>
         <div className={styles.filterGroup}>
-          <label className={styles.filterLabel}>Status</label>
+          <label className={styles.filterLabel} htmlFor={statusId}>
+            Status
+          </label>
           <select
+            id={statusId}
             className={styles.filterSelect}
             value={statusFilter}
-            onChange={(e) =>
-              setStatusFilter(e.target.value as JobStatus | 'all')
-            }
+            onChange={(e) => changeStatus(e.target.value as JobStatus | 'ALL')}
           >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
+            <option value="ALL">All</option>
+            {JOB_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {humanizeStatus(status)}
               </option>
             ))}
           </select>
         </div>
-
-        <div className={styles.filterGroup}>
-          <label className={styles.filterLabel}>Queue</label>
-          <input
-            type="text"
-            className={styles.filterInput}
-            placeholder="Filter by queue..."
-            value={queueFilter}
-            onChange={(e) => setQueueFilter(e.target.value)}
-          />
-        </div>
       </div>
 
-      {/* Jobs Table */}
       {jobs.length === 0 ? (
         <div className={styles.emptyState}>
-          <div className={styles.emptyIcon}>📋</div>
+          <div className={styles.emptyIcon} aria-hidden="true">
+            📋
+          </div>
           <h3 className={styles.emptyTitle}>No jobs found</h3>
           <p className={styles.emptyMessage}>
-            {statusFilter !== 'all' || queueFilter
-              ? 'Try adjusting your filters'
-              : 'Jobs will appear here when they are created'}
+            {statusFilter !== 'ALL'
+              ? 'Try a different status filter'
+              : 'Jobs you submit will appear here'}
           </p>
         </div>
       ) : (
         <div className={styles.tableContainer}>
           <table className={styles.table}>
+            <caption className={styles.srOnly}>Jobs</caption>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Type</th>
-                <th>Queue</th>
-                <th>Status</th>
-                <th>Priority</th>
-                <th>Attempts</th>
-                <th>Created</th>
-                <th>Worker</th>
+                <th scope="col">ID</th>
+                <th scope="col">Type</th>
+                <th scope="col">Queue</th>
+                <th scope="col">Status</th>
+                <th scope="col">Priority</th>
+                <th scope="col">Attempts</th>
+                <th scope="col">Created</th>
               </tr>
             </thead>
             <tbody>
@@ -131,10 +115,20 @@ export default function Jobs() {
                 <tr
                   key={job.id}
                   className={styles.row}
-                  onClick={() => handleJobClick(job.id)}
+                  onClick={() => setSelectedJobId(job.id)}
                 >
                   <td className={styles.idCell}>
-                    <code>{job.id.substring(0, 8)}...</code>
+                    <button
+                      type="button"
+                      className={styles.idButton}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedJobId(job.id);
+                      }}
+                      aria-label={`Open job ${job.id}`}
+                    >
+                      <code>{job.id.substring(0, 8)}…</code>
+                    </button>
                   </td>
                   <td>{job.type}</td>
                   <td>
@@ -146,7 +140,7 @@ export default function Jobs() {
                   <td>
                     <span
                       className={`${styles.priority} ${
-                        styles[`priority${job.priority}`]
+                        styles[`priority${job.priority}`] ?? ''
                       }`}
                     >
                       {job.priority}
@@ -158,13 +152,6 @@ export default function Jobs() {
                   <td className={styles.dateCell}>
                     {formatRelativeTime(job.createdAt)}
                   </td>
-                  <td className={styles.workerCell}>
-                    {job.workerId ? (
-                      <code>{job.workerId.substring(0, 8)}...</code>
-                    ) : (
-                      <span className={styles.noWorker}>—</span>
-                    )}
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -172,13 +159,16 @@ export default function Jobs() {
         </div>
       )}
 
-      {/* Job Detail Modal */}
+      {pagination && (
+        <Pagination pagination={pagination} onChange={setOffset} />
+      )}
+
       {selectedJobId && (
         <JobDetailModal
-          isOpen={!!selectedJobId}
-          onClose={handleCloseModal}
+          isOpen
+          onClose={() => setSelectedJobId(null)}
           jobId={selectedJobId}
-          onJobUpdated={handleJobUpdated}
+          onJobUpdated={() => void refetch()}
         />
       )}
     </div>
